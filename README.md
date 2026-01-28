@@ -14,10 +14,44 @@
 This work aims to improve the knowledge editing performance under the multi-hop reasoning settings.
 ## 🔧Installation
 
+Install micromamba:
+```
+conda install conda-forge::micromamba
+```
+
+Note: You can use conda instead of micromamba. For our case, we have trouble in installing EasyEdit's requirements: `numpy==1.22.1` with conda.
+
+Note: You can use conda-forge's mirror by editing `~/.condarc`, removing `- conda-forge` and `- defaults` in the `channels` key. For our case, we have trouble in installing `pytorch==2.0.1`.
+```
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch
+show_channel_urls: true
+```
+
+Note: You can use PyPI's mirror. For our case, we have trouble in installing `zhipuai`:
+```
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
 Build the environement:
 ```
-conda create -n cake python=3.10
-pip install -r requirements.txt
+micromamba create -n multihop python=3.10
+
+micromamba activate multihop
+
+micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.5.1 nltk==3.6.5 numpy==1.22.1 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 scipy==1.7.3 sentence-transformers==3.2.1 tokenizers 
+```
+
+Note: You can change the pytorch-gpu version depending on your CUDA version.
+```
+micromamba install pytorch-gpu==2.0.0 pytorch-cuda==12.4
+```
+
+```
+micromamba install tqdm==4.62.3 transformers==4.44.2 openai==0.27.9 peft==0.7.1 timm==0.9.7 iopath==0.1.10 opencv==4.8.0 fairscale==0.4.13 sentencepiece
+
+pip install zhipuai
 ```
 
 ## 📚Analyze
