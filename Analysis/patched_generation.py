@@ -3,13 +3,23 @@ import functools
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 from baukit import Trace, TraceDict
+
+from beartype import beartype as typechecker
+from jaxtyping import Float, Int, jaxtyped
 
 from utils import get_prepend_space, get_layer_names, get_attention_modules, get_attention_layers_names, \
     get_norm_module, get_mlp_layers_names
 
 
-def find_tokens(tokenizer, string_tokens, substring, prepend_space, last=True):
+def find_tokens(tokenizer, string_tokens: Int[Tensor, "prompt_size"], substring: str, prepend_space: bool, last=True):
+    """
+    Example:
+    - string_tokens: tokenized "the head of state of the country of citizenship of Stephen Harper is"
+    - substring: "the country of citizenship of Stephen Harper" / "is"
+    - returns: end index of substring tokens in string_tokens i.e. "Harper" / "is" token position index
+    """
     if prepend_space:
         substring = " " + substring
     substring_tokens = tokenizer(substring, add_special_tokens=False, return_tensors="pt").input_ids[0]
@@ -23,11 +33,17 @@ def find_tokens(tokenizer, string_tokens, substring, prepend_space, last=True):
                 return start, end - 1
     return None
 
-
-def get_hidden_states(model, tokenizer, entity, prompt):
-    prompt_inputs = tokenizer(prompt, return_tensors="pt", padding=True)
+# @jaxtyped(typechecker=typechecker)
+def get_hidden_states(model, tokenizer, entities: list[str], prompts: list[str]) -> Float[Tensor, "num_prompts num_layers hidden_size"]:
+    """
+    Example:
+    - prompt: "the head of state of the country of citizenship of Stephen Harper is"
+    - entity: "the country of citizenship of Stephen Harper" / "is"
+    - returns: hidden states of "Harper" / "is" token at all layers, shape (num_prompts, num_layers, hidden_size)
+    """
+    prompt_inputs = tokenizer(prompts, return_tensors="pt", padding=True)
     prepend_space = get_prepend_space(model)
-    entity_idx = [find_tokens(tokenizer, q, e, prepend_space) for q, e in zip(prompt_inputs.input_ids, entity)]
+    entity_idx = [find_tokens(tokenizer, q, e, prepend_space) for q, e in zip(prompt_inputs.input_ids, entities)]
     entity_hidden_states = [None for _ in range(len(entity_idx))]
 
     layers = get_layer_names(model)
@@ -66,7 +82,17 @@ def get_hidden_states_with_patching(model, tokenizer, entity, prompt, hidden_sta
     return torch.stack(entity_hidden_states)
 
 
-def generate_patching_inputs(model, tokenizer, target_prompt, target_token_str):
+# @jaxtyped(typechecker=typechecker)
+def generate_patching_inputs(model, tokenizer, target_prompt: list[str], target_token_str: str):
+    """
+    Example:
+    - target_prompt: "Syria: Syria is a country in the Middle East, Leonardo DiCaprio: Leonardo DiCaprio is an American actor, Samsung: Samsung is a South Korean multinational corporation, x"
+    - target_token_str: "x"
+
+    Caveat: target_token_str can be in any position in target_prompt.
+
+    returns: tokenized target_prompt, position of target_token in target_prompt (shape: (batch_size, 2))
+    """
     if get_prepend_space(model):
         if type(target_token_str) is str:
             target_token_str = " " + target_token_str
@@ -79,7 +105,16 @@ def generate_patching_inputs(model, tokenizer, target_prompt, target_token_str):
     return inputs.to(model.device), (torch.LongTensor(range(target_position.shape[0])), target_position)
 
 
-def decode_generated(tokenizer, generated, target_prompt, sampled=False):
+# @jaxtyped(typechecker=typechecker)
+def decode_generated(tokenizer, generated: Int[Tensor, "batch_size sequence_size"], target_prompt: list[str], sampled=False):
+    """
+    Example:
+    - target_prompt: "Syria: Syria is a country in the Middle East, Leonardo DiCaprio: Leonardo DiCaprio is an American actor, Samsung: Samsung is a South Korean multinational corporation, x"
+    
+    Caveat: replace "\n" with " " in generated text.
+
+    returns: list of generated text after target_prompt
+    """
     text = tokenizer.batch_decode(generated, skip_special_tokens=True)
     batch_size = len(target_prompt)
     sample_size = len(text) // len(target_prompt)
@@ -91,8 +126,9 @@ def decode_generated(tokenizer, generated, target_prompt, sampled=False):
     return pred
 
 
-def generate_with_patching_layer(model, tokenizer, hidden_state, target_layer, target_prompt, target_token_str,
-                                 do_sample):
+# @jaxtyped(typechecker=typechecker)
+def generate_with_patching_layer(model, tokenizer, hidden_state: Float[Tensor, "batch_size hidden_size"], target_layer: str, target_prompt: list[str], target_token_str: str,
+                                 do_sample: bool):
     inputs, target_position = generate_patching_inputs(model, tokenizer, target_prompt, target_token_str)
 
     def replace_hidden_state_hook(output):
@@ -123,7 +159,15 @@ def generate_with_patching_same_layers(model, tokenizer, hidden_states, target_p
     return generations_by_layer
 
 
-def generate_with_patching_all_layers(model, tokenizer, hidden_states, target_prompt, target_token_str, do_sample):
+# @jaxtyped(typechecker=typechecker)
+def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Tensor, "batch_size num_layers hidden_size"], target_prompt: list[str], target_token_str: str, do_sample: bool):
+    """
+    The goal is to replace the hidden representation of "x" with :math:`v` at a specific target layer with the hidden representation taken from a specific source layer.
+
+    Example:
+    - target_prompt: "Syria: Syria is a country in the Middle East, Leonardo DiCaprio: Leonardo DiCaprio is an American actor, Samsung: Samsung is a South Korean multinational corporation, x"
+    - target_token_str: "x"
+    """
     layer_names = get_layer_names(model)
     layer_count = len(get_layer_names(model))
     generations = np.ndarray((layer_count, layer_count), dtype=object)

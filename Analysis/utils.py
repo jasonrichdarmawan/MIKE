@@ -114,14 +114,14 @@ def check_answer_in_pred(pred, answers):
     return any([a.lower() in pred for a in answers])
 
 
-def generate_and_test_answers(model, tokenizer, prompts, answers):
+def generate_and_test_answers(model, tokenizer, task, prompts, ids, answers):
     inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
     with torch.no_grad():
         generated = model.generate(**inputs, do_sample=False, temperature=1, top_p=1, num_beams=1,
                                    pad_token_id=tokenizer.eos_token_id, max_new_tokens=10)
     predictions = decode_generated(tokenizer, generated, prompts)
-    for prompt, pred, a in zip(prompts, predictions, answers):
-        print(f"Prompt: {prompt}\nPrediction: {pred}\nAnswers: {a}\nResults: {check_answer_in_pred(pred, a)}")
+    for prompt, id, pred, a in zip(prompts, ids, predictions, answers):
+        print(f"Task: {task}\nId: {id}\nPrompt: {prompt}\nPrediction: {pred}\nAnswers: {a}\nResults: {check_answer_in_pred(pred, a)}")
         print("-----------------------------------")
     return [check_answer_in_pred(p, a) for p, a in zip(predictions, answers)]
 

@@ -51,14 +51,16 @@ micromamba install pytorch-gpu==2.0.0 pytorch-cuda==12.4
 ```
 micromamba install tqdm==4.62.3 transformers==4.44.2 openai==0.27.9 peft==0.7.1 timm==0.9.7 iopath==0.1.10 opencv==4.8.0 fairscale==0.4.13 sentencepiece
 
+micromamba install beartype jaxtyping
+
 pip install zhipuai
 ```
 
 ## 📚Analyze
-Down load the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `Analysis/datasets`.
+Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
 
-- Run `evaluate_dataset.py` to filter the data.
-- Run `generate_entity_description.py` to get the entity patch and relation patch.
+- Run `Analysis/evaluate_dataset.py` to filter the data.
+- Run `Analysis/generate_entity_description.py` to get the entity patch and relation patch.
 - Run `patch_activations.py` to do back-patching and cross-patching.
 - Run `analysis.ipynb`
 
