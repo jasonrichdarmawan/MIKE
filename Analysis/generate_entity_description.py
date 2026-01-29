@@ -102,9 +102,9 @@ def main(args):
         batch_size=args.batch_size,
         remove_columns=dataset.column_names
     )
-    breakpoint()
+
     generations = generations.to_pandas()
-    breakpoint()
+
     generations = generations.sort_values(["id", "source_layer", "target_layer"])
     generations = generations.reset_index(drop=True)
     if not args.output_path:
