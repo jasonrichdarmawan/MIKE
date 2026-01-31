@@ -86,13 +86,15 @@ def get_hidden_states_with_patching(model, tokenizer, entity, prompt, hidden_sta
 
 def generate_patching_inputs(model, tokenizer, target_prompt: list[str], target_token_str: str):
     """
+    The goal is to tokenize the target_prompt and find the position of target_token_str in target_prompt.
+
     Example:
     - target_prompt: "Syria: Syria is a country in the Middle East, Leonardo DiCaprio: Leonardo DiCaprio is an American actor, Samsung: Samsung is a South Korean multinational corporation, x"
     - target_token_str: "x"
 
     Caveat: target_token_str can be in any position in target_prompt.
 
-    returns: tokenized target_prompt, position of target_token in target_prompt (shape: (batch_size, 2))
+    returns: tokenized target_prompt, position of target_token in target_prompt. shape: tuple[row_indices, col_indices], length: batch_size
     """
     if get_prepend_space(model):
         if type(target_token_str) is str:
@@ -100,15 +102,15 @@ def generate_patching_inputs(model, tokenizer, target_prompt: list[str], target_
         else:
             target_token_str = [" " + t for t in target_token_str]
     target_token = tokenizer(target_token_str, return_tensors="pt", add_special_tokens=False,
-                             padding=True).input_ids[..., -1]
+                             padding=True).input_ids[..., -1] # shape: (batch_size,)
     inputs = tokenizer(target_prompt, return_tensors="pt", padding=True)
-    target_position = (inputs.input_ids == target_token.unsqueeze(1)).cumsum(dim=1).argmax(dim=1)
+    target_position = (inputs.input_ids == target_token.unsqueeze(1)).cumsum(dim=1).argmax(dim=1) # shape: (batch_size,)
     return inputs.to(model.device), (torch.LongTensor(range(target_position.shape[0])), target_position)
 
 
 # @jaxtyped(typechecker=typechecker)
 def decode_generated(tokenizer, generated: Int[Tensor, "batch_size sequence_size"], target_prompt: list[str], sampled=False):
-    """
+    r"""
     Example:
     - target_prompt: "Syria: Syria is a country in the Middle East, Leonardo DiCaprio: Leonardo DiCaprio is an American actor, Samsung: Samsung is a South Korean multinational corporation, x"
     
@@ -207,8 +209,14 @@ def get_token_ranks(projections: Float[Tensor, "num_layers vocab_size"], tokens:
     return ranks
 
 
-def generate_with_attention_knockout(model, tokenizer, layer_idx, prompt, source, target_token_str, default_decoding,
+def generate_with_attention_knockout(model, tokenizer, layer_idx: int, prompt: list[str], source: list[str], target_token_str: list[str], default_decoding: bool,
                                      k=0, return_probabilities=False):
+    """
+    Example:
+    - prompt: "the head of state of the country of citizenship of Stephen Harper is" / "the country of citizenship of Stephen Harper is" / "the head of state of Canada is"
+    - source: "Stephen Harper" / "citizenship"
+    - target_token_str: "the country of citizenship of Stephen Harper" / "the head of state of Canada" / "citizenship" / "state"
+    """
     inputs, target_position = generate_patching_inputs(model, tokenizer, prompt, target_token_str)
     if type(source) is not str:
         prepend_space = get_prepend_space(model)
@@ -218,6 +226,9 @@ def generate_with_attention_knockout(model, tokenizer, layer_idx, prompt, source
     def wrap_attention_forward(original_forward_func):
         @functools.wraps(original_forward_func)
         def knockout_attention_forward(*args, **kwargs):
+            """
+            The goal is to mask out attention weights from a source to a target position at a specific layer, causing these attention heads to contribute nothing to the model's prediction.
+            """
             new_args = []
             new_kwargs = {}
             for arg in args:
@@ -231,7 +242,7 @@ def generate_with_attention_knockout(model, tokenizer, layer_idx, prompt, source
                 hidden_states = args[0]
             batch_size = hidden_states.shape[0]
             num_tokens = hidden_states.shape[1]
-            attention_weight_size = (batch_size, model.config.num_attention_heads, num_tokens, num_tokens)
+            attention_weight_size = (batch_size, model.config.num_attention_heads, num_tokens, num_tokens) # shape: (batch_size, num_heads, query_len, key_len)
             prev_attention_mask = kwargs["attention_mask"]
             new_attention_mask = torch.zeros(attention_weight_size, dtype=prev_attention_mask.dtype).to(
                 prev_attention_mask.device) + prev_attention_mask
@@ -239,6 +250,9 @@ def generate_with_attention_knockout(model, tokenizer, layer_idx, prompt, source
                 new_attention_mask[target_position[0], :, :, target_position[1]] = torch.finfo(model.dtype).min
             elif source == "last":
                 if num_tokens != 1:
+                    # Index 2 is Query (Receiver), Index 3 is Key (Sender)
+                    # -1 refers to the LAST token in the sequence (the Query)
+                    # target_position[1] refers to the token index of target_token_str (the Key)
                     new_attention_mask[target_position[0], :, -1, target_position[1]] = torch.finfo(model.dtype).min
             else:
                 if num_tokens != 1:
@@ -277,8 +291,14 @@ def generate_with_attention_knockout(model, tokenizer, layer_idx, prompt, source
         return decode_generated(tokenizer, generated, prompt)
 
 
-def generate_with_attention_knockout_all_layers(model, tokenizer, prompt, source, target_token_str, default_decoding,
+def generate_with_attention_knockout_all_layers(model, tokenizer, prompt: list[str], source: list[str], target_token_str: list[str], default_decoding: bool,
                                                 k=0, return_probabilities=False):
+    """
+    Example:
+    - prompt: "the head of state of the country of citizenship of Stephen Harper is" / "the country of citizenship of Stephen Harper is" / "the head of state of Canada is"
+    - source: "Stephen Harper" / "citizenship"
+    - target_token_str: "the country of citizenship of Stephen Harper" / "the head of state of Canada" / "citizenship" / "state"
+    """
     generations_by_layer = {}
     for layer in range(-1, model.config.num_hidden_layers):
         generations_by_layer[layer] = generate_with_attention_knockout(model, tokenizer, layer, prompt, source,

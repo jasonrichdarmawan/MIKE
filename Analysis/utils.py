@@ -56,7 +56,10 @@ def get_mlp_layers_names(model):
         raise ValueError(f"Model type {type(model)} not supported")
 
 
-def get_attention_modules(model, layer, k=0):
+def get_attention_modules(model, layer: int, k=0):
+    """
+    Caveat: returns attention modules from layers [layer - k, layer + k]
+    """
     bot = max(0, layer - k)
     top = min(layer + k + 1, model.config.num_hidden_layers)
     if type(model) is GPT2LMHeadModel:
