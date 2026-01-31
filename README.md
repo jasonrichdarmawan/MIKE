@@ -61,7 +61,8 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 
 - Run `Analysis/evaluate_dataset.py` to filter the data.
 - Run `Analysis/generate_entity_description.py` to get the entity patch and relation patch.
-- Run `patch_activations.py` to do back-patching and cross-patching.
+- Run `Analysis/project_sublayer.py` to do sublayer projection.
+- Run `Analysis/patch_activations.py` to do back-patching and cross-patching.
 - Run `analysis.ipynb`
 
 ## 🧐Editing

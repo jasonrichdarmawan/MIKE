@@ -1,13 +1,13 @@
 import functools
 
 import numpy as np
+from numpy import ndarray
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 from baukit import Trace, TraceDict
 
-from beartype import beartype as typechecker
-from jaxtyping import Float, Int, jaxtyped
+from jaxtyping import Float, Int, Shaped
 
 from utils import get_prepend_space, get_layer_names, get_attention_modules, get_attention_layers_names, \
     get_norm_module, get_mlp_layers_names
@@ -33,7 +33,7 @@ def find_tokens(tokenizer, string_tokens: Int[Tensor, "prompt_size"], substring:
                 return start, end - 1
     return None
 
-# @jaxtyped(typechecker=typechecker)
+
 def get_hidden_states(model, tokenizer, entities: list[str], prompts: list[str]) -> Float[Tensor, "num_prompts num_layers hidden_size"]:
     """
     The goal is to extract the hidden representation at the entity's last token position in the prompt at all layers.
@@ -84,7 +84,6 @@ def get_hidden_states_with_patching(model, tokenizer, entity, prompt, hidden_sta
     return torch.stack(entity_hidden_states)
 
 
-# @jaxtyped(typechecker=typechecker)
 def generate_patching_inputs(model, tokenizer, target_prompt: list[str], target_token_str: str):
     """
     Example:
@@ -128,7 +127,6 @@ def decode_generated(tokenizer, generated: Int[Tensor, "batch_size sequence_size
     return pred
 
 
-# @jaxtyped(typechecker=typechecker)
 def generate_with_patching_layer(model, tokenizer, hidden_state: Float[Tensor, "batch_size hidden_size"], target_layer: str, target_prompt: list[str], target_token_str: str,
                                  do_sample: bool):
     inputs, target_position = generate_patching_inputs(model, tokenizer, target_prompt, target_token_str)
@@ -161,7 +159,6 @@ def generate_with_patching_same_layers(model, tokenizer, hidden_states, target_p
     return generations_by_layer
 
 
-# @jaxtyped(typechecker=typechecker)
 def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Tensor, "batch_size num_layers hidden_size"], target_prompt: list[str], target_token_str: str, do_sample: bool):
     """
     The goal is to replace the hidden representation of target_token_str in target_prompt with a hidden_state at a specific target layer with the hidden representation taken from a specific source layer.
@@ -186,20 +183,23 @@ def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Ten
     return generations
 
 
-def get_top_k_tokens(tokenizer, scores, k=10):
+def get_top_k_tokens(tokenizer, scores: Float[Tensor, "num_prompts num_layers vocab_size"], k=10) -> tuple[Shaped[ndarray, "num_prompts num_layers k"], Float[Tensor, "num_prompts num_layers k"]]:
     with torch.no_grad():
-        probabilities = F.softmax(scores, dim=-1)
-        top_k_probabilities, top_k_indices = torch.topk(probabilities, k, dim=-1)
+        probabilities = F.softmax(scores, dim=-1) # shape (num_prompts, num_layers, vocab_size)
+        top_k_probabilities, top_k_indices = torch.topk(probabilities, k, dim=-1) # shape (num_prompts, num_layers, k)
         top_k_words = np.empty_like(top_k_indices.cpu(), dtype=object)
-        for b, batch in enumerate(top_k_indices):
-            for l, layer in enumerate(batch):
-                top_k_words[b][l] = tokenizer.batch_decode(layer.unsqueeze(-1))
+        for b, layers in enumerate(top_k_indices):
+            for l, layer in enumerate(layers):
+                top_k_words[b][l] = tokenizer.batch_decode(layer.unsqueeze(-1)) # shape (k,)
         return top_k_words, top_k_probabilities
 
 
-def get_token_ranks(projections, tokens):
+def get_token_ranks(projections: Float[Tensor, "num_layers vocab_size"], tokens: list[int]) -> Shaped[ndarray, "num_layers num_tokens"]:
+    """
+    The goal is for each layer, to count how many vocabulary entries have a higher score than that token.
+    """
     projections = projections.float().cpu()
-    vals = projections[:, tokens]
+    vals = projections[:, tokens] # shape (num_layers, num_tokens)
     ranks = np.empty_like(vals, dtype=int)
     for layer in range(projections.shape[0]):
         for i, val in enumerate(vals[layer]):
@@ -287,11 +287,19 @@ def generate_with_attention_knockout_all_layers(model, tokenizer, prompt, source
     return generations_by_layer
 
 
-def get_entity_ranks(model, tokenizer, projections, entity):
-    entity = [ent + [e.lower() for e in ent] for ent in entity]
+def get_entity_ranks(model, tokenizer, projections: Float[Tensor, "num_prompts num_layers vocab_size"], entities: list[list[str]]) -> list[Shaped[ndarray, "num_layers num_entities"]]:
+    """
+    The goal is for each prompt, for each layer, to count how many vocabulary entries have a higher score than that token.
+
+    Example:
+    - entities: [["Charles III of the United Kingdom", ...], ...]
+
+    Caveat: rank based on the first token of each entity
+    """
+    entities = [ent + [e.lower() for e in ent] for ent in entities]
     if get_prepend_space(model):
-        entity = [ent + [" " + e for e in ent] for ent in entity]
-    tokenized_entity = [tokenizer(ent, add_special_tokens=False).input_ids for ent in entity]
+        entities = [ent + [" " + e for e in ent] for ent in entities]
+    tokenized_entity: list[list[list[int]]] = [tokenizer(ent, add_special_tokens=False).input_ids for ent in entities]
     ranks = []
     for proj, tokens in zip(projections, tokenized_entity):
         first_tokens = [t[0] for t in tokens]
@@ -299,14 +307,29 @@ def get_entity_ranks(model, tokenizer, projections, entity):
     return ranks
 
 
-def get_sublayer_projection(model, tokenizer, prompt, bridge_entities, answers, layers):
-    prompt_inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(model.device)
+def get_sublayer_projection(model, tokenizer, prompt: list[str], bridge_entities: list[list[str]], answers: list[list[str]], layers: list[str]
+                            ) -> tuple[Shaped[ndarray, "num_prompts num_layers k"], 
+                                       Float[Tensor, "num_prompts num_layers k"], 
+                                       list[Shaped[ndarray, "num_layers num_bridge_entities"]], 
+                                       list[Shaped[ndarray, "num_layers num_answers"]], 
+                                       list[Shaped[ndarray, "num_layers 1"]]]:
+    """
+    The goals are:
+    - to project the attention / mlp sublayer outputs to the vocabulary space and get the top k tokens.
+    - to rank the bridge entities and final answers based on the projections scores at each layer.
 
-    sublayer_values = []
+    Example:
+    - prompt: ["the head of state of the country of citizenship of Stephen Harper is", ...]
+    - bridge_entities: [["Canada", ...], ...]
+    - answers: [["Charles III of the United Kingdom", ...], ...]
+    """
+    prompt_inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(model.device) # shape (num_prompts, seq_len)
+
+    sublayer_values = [] # shape (num_prompts, num_layers, hidden_size)
     with torch.no_grad(), TraceDict(model, layers) as trace:
         logits = model(**prompt_inputs).logits
         for i in range(len(prompt)):
-            values = []
+            values = [] # shape (num_layers, hidden_size)
             for layer in layers:
                 if type(trace[layer].output) is tuple:
                     output = trace[layer].output[0]
@@ -314,20 +337,20 @@ def get_sublayer_projection(model, tokenizer, prompt, bridge_entities, answers, 
                     output = trace[layer].output
                 values.append(output[i][-1].cpu())
             sublayer_values.append(torch.stack(values))
-    sublayer_values = torch.stack(sublayer_values)
+    sublayer_values = torch.stack(sublayer_values) # shape (num_prompts, num_layers, hidden_size)
 
-    out_embeddings = model.get_output_embeddings()
+    out_embeddings = model.get_output_embeddings() # shape (hidden_size, vocab_size)
     norm = get_norm_module(model)
     norm_device = next(norm.parameters()).device
     with torch.no_grad():
-        projections = out_embeddings(norm(sublayer_values.to(norm_device)))
-    top_k_words, top_k_probabilities = get_top_k_tokens(tokenizer, projections)
+        projections = out_embeddings(norm(sublayer_values.to(norm_device))) # shape (num_prompts, num_layers, vocab_size)
+    top_k_words, top_k_probabilities = get_top_k_tokens(tokenizer, projections) # shape (num_prompts, num_layers, k), (num_prompts, num_layers, k)
 
-    answer_ranks = get_entity_ranks(model, tokenizer, projections, answers)
-    bridge_entity_ranks = get_entity_ranks(model, tokenizer, projections, bridge_entities)
+    answer_ranks = get_entity_ranks(model, tokenizer, projections, answers) # list of shape (num_layers, num_answers)
+    bridge_entity_ranks = get_entity_ranks(model, tokenizer, projections, bridge_entities) # list of shape (num_layers, num_bridge_entities)
 
-    prediction_ranks = []
-    predicted_tokens = logits[:, -1, :].max(dim=-1).indices
+    prediction_ranks = [] # list of shape (num_layers, 1)
+    predicted_tokens = logits[:, -1, :].max(dim=-1).indices # shape (num_prompts,)
     for proj, predicted_token in zip(projections, predicted_tokens):
         prediction_ranks.append(get_token_ranks(proj, [predicted_token]))
     prediction_ranks = [r.flatten().tolist() for r in prediction_ranks]
@@ -335,10 +358,16 @@ def get_sublayer_projection(model, tokenizer, prompt, bridge_entities, answers, 
     return top_k_words, top_k_probabilities, bridge_entity_ranks, answer_ranks, prediction_ranks
 
 
-def get_attention_projection(model, tokenizer, prompt, bridge_entities, answers):
+def get_attention_projection(model, tokenizer, prompt: list[str], bridge_entities: list[list[str]], answers: list[list[str]]):
+    """
+    Example:
+    - prompt: ["the head of state of the country of citizenship of Stephen Harper is", ...]
+    - bridge_entities: [["Canada", ...], ...]
+    - answers: [["Charles III of the United Kingdom", ...], ...]
+    """
     return get_sublayer_projection(model, tokenizer, prompt, bridge_entities, answers,
                                    get_attention_layers_names(model))
 
 
-def get_mlp_projection(model, tokenizer, prompt, bridge_entities, answers):
+def get_mlp_projection(model, tokenizer, prompt: list[str], bridge_entities: list[list[str]], answers: list[list[str]]):
     return get_sublayer_projection(model, tokenizer, prompt, bridge_entities, answers, get_mlp_layers_names(model))
