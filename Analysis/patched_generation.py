@@ -36,6 +36,8 @@ def find_tokens(tokenizer, string_tokens: Int[Tensor, "prompt_size"], substring:
 # @jaxtyped(typechecker=typechecker)
 def get_hidden_states(model, tokenizer, entities: list[str], prompts: list[str]) -> Float[Tensor, "num_prompts num_layers hidden_size"]:
     """
+    The goal is to extract the hidden representation at the entity's last token position in the prompt at all layers.
+
     Example:
     - prompt: "the head of state of the country of citizenship of Stephen Harper is"
     - entity: "the country of citizenship of Stephen Harper" / "is"
@@ -162,7 +164,7 @@ def generate_with_patching_same_layers(model, tokenizer, hidden_states, target_p
 # @jaxtyped(typechecker=typechecker)
 def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Tensor, "batch_size num_layers hidden_size"], target_prompt: list[str], target_token_str: str, do_sample: bool):
     """
-    The goal is to replace the hidden representation of "x" with :math:`v` at a specific target layer with the hidden representation taken from a specific source layer.
+    The goal is to replace the hidden representation of target_token_str in target_prompt with a hidden_state at a specific target layer with the hidden representation taken from a specific source layer.
 
     Example:
     - target_prompt: "Syria: Syria is a country in the Middle East, Leonardo DiCaprio: Leonardo DiCaprio is an American actor, Samsung: Samsung is a South Korean multinational corporation, x"

@@ -144,5 +144,5 @@ def rebalance_dataset(df, key="e2_type", size=100, secondary_key=None):
     return balanced
 
 
-def last_relation_word(relation):
+def last_relation_word(relation: str):
     return relation.split(" ")[-3]
