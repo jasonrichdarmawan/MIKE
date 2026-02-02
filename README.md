@@ -45,11 +45,11 @@ micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 
 
 Note: You can change the pytorch-gpu version depending on your CUDA version.
 ```
-micromamba install pytorch-gpu==2.0.0 pytorch-cuda==12.4
+micromamba install pytorch-gpu==2.0.0
 ```
 
 ```
-micromamba install tqdm==4.62.3 transformers==4.44.2 openai==0.27.9 peft==0.7.1 timm==0.9.7 iopath==0.1.10 opencv==4.8.0 fairscale==0.4.13 sentencepiece
+micromamba install tqdm==4.62.3 transformers==4.44.2 openai==0.27.9 peft==0.7.1 timm==0.9.7 iopath==0.1.10 opencv==4.8.0 fairscale==0.4.13 sentencepiece seaborn
 
 micromamba install beartype jaxtyping
 
