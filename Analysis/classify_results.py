@@ -215,12 +215,12 @@ def load_attention_knockouts(dataset_dir: str):
     return ret
 
 
-def load_activation_patching(dataset_dir: str):
+def load_activation_patching(dataset_dir: str, case_name: str | None=None):
     generations = defaultdict(dict)
     layers = defaultdict(dict)
     for source in ["e1", "r1", "r2", "last"]:
         for target in ["composition", "second-hop", "original", "last"]:
-            path = f"{dataset_dir}/activation_patching/{source}_{target}_activation_patching.csv"
+            path = f"{dataset_dir}/activation_patching/{source}_{target}_activation_patching{f'_{case_name}' if case_name else ''}.csv"
             if Path(path).exists():
                 generations[source][target] = classify_generations(path, classify_prediction_correct, prev_layers=True)
                 layers[source][target] = find_layers_by_classification(generations[source][target],

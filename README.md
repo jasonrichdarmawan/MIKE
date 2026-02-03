@@ -59,11 +59,19 @@ pip install zhipuai
 ## 📚Analyze
 Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
 
-- Run `Analysis/evaluate_dataset.py` to filter the data.
-- Run `Analysis/generate_entity_description.py` to get the entity patch and relation patch.
-- Run `Analysis/project_sublayer.py` to do sublayer projection.
-- Run `Analysis/patch_activations.py` to do back-patching and cross-patching.
-- Run `analysis.ipynb`
+- E. Biran et al. [1]:
+  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
+  - Run `analysis/generate_entity_description.py` to do Patchscopes entity description experiments.
+  - Run `analysis/project_sublayer.py` to do sublayer projection experiments.
+  - Run `analysis/patch_activations.py` to do back-patching experiments.
+  - Run `analysis/classify_results.py` to classify the experiments' results.
+  - Run `analysis/analyze_resutls.py` to generate figures.
+- Y. Yao et al. [2]:
+  - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/{correct/incorrect/inconsistent}.csv` files. Use it to do back-patching experiments.
+  - Run `analysis/analyze_subset.py` to compute the `backpatch_t1`, `backpatch_t2`, `t1_to_t2` success rate.
+
+[1] E. Biran et al., "Hopping Too Late: Exploring Limitations of Large Language models on Multi-Hop Queries," in EMNLP 2024
+[2] Y. Yao et al., "CaKe: Circuit-aware Editing Enables Generalizable Knowledge Learners," in EMNLP 2025
 
 ## 🧐Editing
 Just run the following commond:
