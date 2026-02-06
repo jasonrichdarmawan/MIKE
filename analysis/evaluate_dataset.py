@@ -48,7 +48,7 @@ def eval_second_hop(entries, model, tokenizer):
 
 def eval_entity_shortcut(entries, model, tokenizer):
     r"""
-    The goal is to filter out cases where no latent reasoing if performed. Specifically, where the model predicts due to a high correlation between :math:`e_1` and :math:`e_3`.
+    The goal is to filter out cases where no latent reasoing is performed. Specifically, where the model predicts due to a high correlation between :math:`e_1` and :math:`e_3`.
     
     Format: :math:`((e_1, "", e_2), (e_2, r_2, e_3))`
     
