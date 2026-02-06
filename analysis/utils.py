@@ -2,9 +2,11 @@ import ast
 
 import pandas as pd
 import torch
+from torch import Tensor
 from transformers import AutoTokenizer, AutoModelForCausalLM, GPT2LMHeadModel, \
     LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM
 
+from jaxtyping import Float
 
 HF_TOKEN = ""
 
@@ -54,7 +56,10 @@ def get_mlp_layers_names(model):
         raise ValueError(f"Model type {type(model)} not supported")
 
 
-def get_attention_modules(model, layer, k=0):
+def get_attention_modules(model, layer: int, k=0):
+    """
+    Caveat: returns attention modules from layers [layer - k, layer + k]
+    """
     bot = max(0, layer - k)
     top = min(layer + k + 1, model.config.num_hidden_layers)
     if type(model) is GPT2LMHeadModel:
@@ -94,13 +99,13 @@ def get_prepend_space(model):
         raise ValueError(f"Model type {type(model)} not supported")
 
 
-def decode_generated(tokenizer, generated, prompts):
-    text = tokenizer.batch_decode(generated, skip_special_tokens=True)
+def decode_generated(tokenizer, generated: Float[Tensor, "batch_size seq_len"], prompts: list[str]) -> list[str]:
+    text = tokenizer.batch_decode(generated, skip_special_tokens=True) # list of str, len=batch_size
     pred = [t[len(p):].strip().replace("\n", " ") for t, p in zip(text, prompts)]
     return pred
 
 
-def get_answers(entry, key):
+def get_answers(entry, key: str):
     aliases = ast.literal_eval(entry[f"{key}_aliases"])
     aliases = [a for a in aliases if len(a) > 1]
     entity = entry[f"{key}_label"]
@@ -109,19 +114,19 @@ def get_answers(entry, key):
     }
 
 
-def check_answer_in_pred(pred, answers):
+def check_answer_in_pred(pred: str, answers: list[str]):
     pred = pred.lower()
     return any([a.lower() in pred for a in answers])
 
 
-def generate_and_test_answers(model, tokenizer, prompts, answers):
+def generate_and_test_answers(model, tokenizer, task: str, prompts: list[str], ids: list[int], answers: list[list[str]]):
     inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
     with torch.no_grad():
         generated = model.generate(**inputs, do_sample=False, temperature=1, top_p=1, num_beams=1,
-                                   pad_token_id=tokenizer.eos_token_id, max_new_tokens=10)
-    predictions = decode_generated(tokenizer, generated, prompts)
-    for prompt, pred, a in zip(prompts, predictions, answers):
-        print(f"Prompt: {prompt}\nPrediction: {pred}\nAnswers: {a}\nResults: {check_answer_in_pred(pred, a)}")
+                                   pad_token_id=tokenizer.eos_token_id, max_new_tokens=10) # shape (batch_size, seq_len)
+    predictions = decode_generated(tokenizer, generated, prompts) # list of str, len=batch_size
+    for prompt, id, pred, a in zip(prompts, ids, predictions, answers):
+        print(f"Task: {task}\nId: {id}\nPrompt: {prompt}\nPrediction: {pred}\nAnswers: {a}\nResults: {check_answer_in_pred(pred, a)}")
         print("-----------------------------------")
     return [check_answer_in_pred(p, a) for p, a in zip(predictions, answers)]
 
@@ -144,5 +149,5 @@ def rebalance_dataset(df, key="e2_type", size=100, secondary_key=None):
     return balanced
 
 
-def last_relation_word(relation):
+def last_relation_word(relation: str):
     return relation.split(" ")[-3]

@@ -8,7 +8,38 @@ from patched_generation import get_hidden_states, generate_with_patching_all_lay
 from utils import get_layer_names, load_model, load_tokenizer, last_relation_word
 
 
-def activation_patching(entries, model, tokenizer, source, target, default_decoding):
+def activation_patching(entries, model, tokenizer, source: str, target: str, default_decoding: bool):
+    """
+    Example:
+    - source_prompt: "the head of state of the country of citizenship of Stephen Harper is"
+    - e1_label: "Stephen Harper"
+    - r1_template: "the country of citizenship of {}"
+    - r2_template: "the head of state of {}"
+    - if source == "e1":
+      - source_str: "the country of citizenship of Stephen Harper"
+      - if target == "composition":
+        - target_prompt: "the head of state of the country of citizenship of x is"
+        - target_token_str: "x"
+      - elif target == "second-hop":
+        - target_prompt: "the head of state of x is"
+        - target_token_str: "x"
+      - elif target == "original":
+        - target_prompt: "the head of state of the country of citizenship of Stephen Harper is"
+        - target_token_str: "Stephen Harper"
+      - elif target == "last":
+        - target_prompt: "the head of state of the country of citizenship of Stephen Harper is"
+        - target_token_str: "is"
+    - elif source == "r2":
+      - source_str: "state"
+      - if target == "composition":
+        - target_prompt: "the x of the country of citizenship of Stephen Harper is"
+        - target_token_str: "x"
+    - elif source == "last":
+      - source_str: "the country of citizenship of Stephen Harper is"
+      - if target == "original":
+        - target_prompt: "the head of state of the country of citizenship of Stephen Harper is"
+        - target_token_str: "is"
+    """
     target_token_str = "x"
     if source == "e1":
         source_str = [t.format(e) for t, e in zip(entries["r1_template"], entries["e1_label"])]
@@ -16,14 +47,16 @@ def activation_patching(entries, model, tokenizer, source, target, default_decod
             target_token_str = entries["e1_label"]
         elif target == "last":
             target_token_str = "is"
-    elif source == "r1":
-        source_str = [last_relation_word(r1) for r1 in entries["r1_template"]]
     elif source == "r2":
         source_str = [last_relation_word(r2) for r2 in entries["r2_template"]]
+        if target != "composition":
+            raise ValueError(f"Source {source} and target {target} combination not supported")
     elif source == "last":
         source_str = [f"{t.format(e)} is" for t, e in zip(entries["r1_template"], entries["e1_label"])]
         if target == "original":
             target_token_str = "is"
+        else:
+            raise ValueError(f"Source {source} and target {target} combination not supported")
     else:
         raise ValueError(f"Source {source} not supported")
 
@@ -53,7 +86,16 @@ def activation_patching(entries, model, tokenizer, source, target, default_decod
     return new_entries
 
 
-def create_target_prompt(dataset, source, target):
+def create_target_prompt(dataset: pd.DataFrame, source: str, target: str):
+    """
+    The goal is to replace activations in target task with activations in source task.
+
+    Example:
+    - source_prompt: "the head of state of the country of citizenship of Stephen Harper is"
+    - e1_label: "Stephen Harper"
+    - r1_template: "the country of citizenship of {}"
+    - r2_template: "the head of state of {}"
+    """
     if source == "e1":
         if target == "composition":
             return dataset.apply(lambda row: row["source_prompt"].replace(row["e1_label"], "x"), axis=1)
@@ -71,9 +113,20 @@ def create_target_prompt(dataset, source, target):
 
 
 def main(args):
+    """
+    Given a prompt, we first record a hidden representation :math:`v` from a source layer :math:`l_s`. Then, while rerunning the same prompt, we patch :math:`v` into the same position at a target layer :math:`l_t` such that :math:`l_t < l_s`.
+    
+    Experiments:
+    - source: e1, target: original
+    - source: last, target: original
+
+    The goal is to perform batch-patching experiment on the token :math:`t_1` and on the token `t_2`.
+
+    To quantify the potential of back-patching, we check whether one of the source-target pairs resulted in the generation of the correct answer.
+    """
     print(args)
     if not args.input_path:
-        args.input_path = f"datasets/{args.model_name}/correct.csv"
+        args.input_path = f"../datasets/{args.model_name}/two_hop.csv"
     dataset = pd.read_csv(args.input_path, index_col=0)
     dataset["target_prompt"] = create_target_prompt(dataset, args.source, args.target)
     dataset = Dataset.from_pandas(dataset, preserve_index=False)
@@ -94,7 +147,7 @@ def main(args):
     generations = generations.sort_values(["id", "source_layer", "target_layer"])
     generations = generations.reset_index(drop=True)
     if not args.output_path:
-        args.output_path = f"datasets/{args.model_name}/activation_patching/{args.source}_{args.target}_activation_patching_correct.csv"
+        args.output_path = f"../datasets/{args.model_name}/activation_patching/{args.source}_{args.target}_activation_patching.csv"
     output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     generations.to_csv(output_path, escapechar='\\')
