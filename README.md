@@ -51,7 +51,7 @@ micromamba install pytorch-gpu==2.0.0
 ```
 micromamba install tqdm==4.62.3 transformers==4.44.2 openai==0.27.9 peft==0.7.1 timm==0.9.7 iopath==0.1.10 opencv==4.8.0 fairscale==0.4.13 sentencepiece seaborn
 
-micromamba install beartype jaxtyping
+micromamba install beartype jaxtyping pytest
 
 pip install zhipuai
 ```
