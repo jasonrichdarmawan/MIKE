@@ -1,9 +1,7 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
-from functools import partial
+from typing import Callable, Optional
 import re
 
 # --- Standalone Utility Functions ---
@@ -384,13 +382,22 @@ class EAPGraph:
                 self.get_gradient_hook(f"blocks.{i}.hook_resid_post", type="resid_post")
             ))
 
-    def run_eap(self, input_ids, attention_mask, subject_indices, ans_ids, noise_scale=0.1):
+    def run_eap(
+        self,
+        input_ids,
+        attention_mask,
+        subject_indices,
+        ans_ids=None,
+        noise_scale=0.1,
+        metric_fn: Optional[Callable] = None,
+    ):
         """
         Core EAP execution using pre-processed tensors.
         input_ids: [Batch, Seq]
         attention_mask: [Batch, Seq]
         subject_indices: List of lists of indices for each batch item
-        ans_ids: [Batch] Target token IDs
+        ans_ids: [Batch] Target token IDs (used when metric_fn is None)
+        metric_fn: Callable that maps logits -> scalar metric/loss (optional)
         """
         # --- Clean Backward ---
         self.model.eval()
@@ -399,8 +406,13 @@ class EAPGraph:
         self.register_backward_hooks()
         
         logits = self.model(input_ids).logits
-        batch_indices = torch.arange(len(input_ids)).to(self.main_device)
-        loss = -logits[:, -1, :].log_softmax(dim=-1)[batch_indices, ans_ids].mean()
+        if metric_fn is not None:
+            loss = metric_fn(logits)
+        else:
+            if ans_ids is None:
+                raise ValueError("ans_ids must be provided when metric_fn is None")
+            batch_indices = torch.arange(len(input_ids)).to(self.main_device)
+            loss = -logits[:, -1, :].log_softmax(dim=-1)[batch_indices, ans_ids].mean()
         print(f"Clean Loss: {loss.item():.4f}")
         loss.backward()
         
