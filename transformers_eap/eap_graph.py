@@ -74,7 +74,7 @@ def print_top_edges(scores, n=30):
                 for s in range(n_srcs):
                     if s < len(source_names):
                         src_name = source_names[s]
-                        val = matrix[h, s].item()
+                        val = matrix[h, s].abs().item()
                         flat_scores[f"{src_name} -> {dest}.H{h}"] = val
                     
         # If 1D [Src]
@@ -83,7 +83,7 @@ def print_top_edges(scores, n=30):
             for s in range(n_srcs):
                 if s < len(source_names):
                     src_name = source_names[s]
-                    val = matrix[s].item()
+                    val = matrix[s].abs().item()
                     flat_scores[f"{src_name} -> {dest}"] = val
 
     # Sort by absolute value
@@ -452,76 +452,88 @@ class EAPGraph:
         self.reset_hooks()
         
         # --- Score Computation ---
-        scores = {} 
-        mask = attention_mask.unsqueeze(-1).float().cpu() # Work on CPU if ACTs are on CPU?
-        # Note: clean_acts are on CPU. corrupt_acts are on CPU. clean_grads are on CPU.
-        # We will move chunks to GPU during loop if main_device is GPU.
-        
+        scores = {}
+        mask = attention_mask.unsqueeze(-1).float().cpu()
+
         # Initial Source: blocks.0.hook_resid_pre
-        d0 = (clean_acts["blocks.0.hook_resid_pre"] - corrupt_acts["blocks.0.hook_resid_pre"]) * mask
-        source_tensors = [d0] 
-        source_names = ["blocks.0.hook_resid_pre"]
-        
+        d0 = (corrupt_acts["blocks.0.hook_resid_pre"] - clean_acts["blocks.0.hook_resid_pre"]) * mask
+
+        # Pre-allocate a single growing GPU source buffer.
+        # Max sources = 1 resid_pre + n_layers * n_heads (attn results) + n_layers (mlp_out)
+        bsz, seq_len, d_model = d0.shape
+        max_sources = 1 + (self.n_layers * self.n_heads) + self.n_layers
+        src_buffer = torch.empty(
+            (bsz, seq_len, max_sources, d_model),
+            device=self.main_device,
+            dtype=d0.dtype,
+        )
+        source_names = [None] * max_sources
+        n_src = 0
+
+        def append_source(src_tensor_cpu: torch.Tensor, name: str):
+            nonlocal n_src
+            src_buffer[:, :, n_src, :].copy_(src_tensor_cpu.to(self.main_device))
+            source_names[n_src] = name
+            n_src += 1
+
+        append_source(d0, "blocks.0.hook_resid_pre")
+
         for layer in tqdm(range(self.n_layers), desc="Scoring"):
-            # Move sources to GPU for einsum?
-            # src_stack shape: [B, S, N_src, D].
-            # If N_src gets large, memory might be issue.
-            # But we process 1 layer at a time.
-            
-            src_stack = torch.stack(source_tensors, dim=2).to(self.main_device)
-            
+            src_view = src_buffer[:, :, :n_src, :]
+
             head_dests = [
                 f"blocks.{layer}.hook_q_input",
                 f"blocks.{layer}.hook_k_input",
                 f"blocks.{layer}.hook_v_input",
             ]
-            
+
             for dest_name in head_dests:
                 if dest_name not in clean_grads: continue
-                
-                grad = clean_grads[dest_name].to(self.main_device) 
-                
+
+                grad = clean_grads[dest_name].to(self.main_device)
+
                 # Einsum: b s src d, b s head d -> src head
-                score_matrix = torch.einsum("bsid,bshd->ih", src_stack, grad)
+                score_matrix = torch.einsum("bsid,bshd->ih", src_view, grad)
                 scores[dest_name] = score_matrix.T.detach().cpu()
-            
+
             # 2. Update Sources (Add Attn Results)
             res_name = f"blocks.{layer}.attn.hook_result"
             if res_name in clean_acts:
-                res_diff = (clean_acts[res_name] - corrupt_acts[res_name]) * mask.unsqueeze(2) # CPU
-                heads = torch.unbind(res_diff, dim=2) # List of [B, S, D_model]
-                for h_idx, h_tensor in enumerate(heads):
-                    source_tensors.append(h_tensor)
-                    source_names.append(f"blocks.{layer}.attn.hook_result[{h_idx}]")
+                res_diff = (corrupt_acts[res_name] - clean_acts[res_name]) * mask.unsqueeze(2)  # [B,S,H,D] on CPU
+                n_new = res_diff.shape[2]
+                src_buffer[:, :, n_src:n_src + n_new, :].copy_(
+                    res_diff.to(self.main_device)
+                )
+                for h_idx in range(n_new):
+                    source_names[n_src + h_idx] = f"blocks.{layer}.attn.hook_result[{h_idx}]"
+                n_src += n_new
 
-            # 3. Score MLP
-            # Re-stack for MLP?
-            src_stack = torch.stack(source_tensors, dim=2).to(self.main_device) # [B, S, N_src, D]
-            
+            # 3. Score MLP with updated source view
+            src_view = src_buffer[:, :, :n_src, :]
+
             mlp_dest_name = f"blocks.{layer}.hook_mlp_in"
             if mlp_dest_name in clean_grads:
-                grad = clean_grads[mlp_dest_name].to(self.main_device) 
+                grad = clean_grads[mlp_dest_name].to(self.main_device)
                 # Einsum: b s src d, b s d -> src
-                score_vec = torch.einsum("bsid,bsd->i", src_stack, grad)
+                score_vec = torch.einsum("bsid,bsd->i", src_view, grad)
                 scores[mlp_dest_name] = score_vec.detach().cpu()
 
             # 4. Update Sources (Add MLP Out)
             mlp_out_name = f"blocks.{layer}.hook_mlp_out"
             if mlp_out_name in clean_acts:
-                 d = (clean_acts[mlp_out_name] - corrupt_acts[mlp_out_name]) * mask
-                 source_tensors.append(d)
-                 source_names.append(f"blocks.{layer}.hook_mlp_out")
+                d = (corrupt_acts[mlp_out_name] - clean_acts[mlp_out_name]) * mask
+                append_source(d, f"blocks.{layer}.hook_mlp_out")
 
             # 5. Score Resid Post (Last Layer Only)
             if layer == self.n_layers - 1:
                 resid_name = f"blocks.{layer}.hook_resid_post"
                 if resid_name in clean_grads:
-                    src_stack = torch.stack(source_tensors, dim=2).to(self.main_device)
+                    src_view = src_buffer[:, :, :n_src, :]
                     grad = clean_grads[resid_name].to(self.main_device)
-                    score_vec = torch.einsum("bsid,bsd->i", src_stack, grad)
+                    score_vec = torch.einsum("bsid,bsd->i", src_view, grad)
                     scores[resid_name] = score_vec.detach().cpu()
 
-        scores["source_names"] = source_names 
+        scores["source_names"] = source_names[:n_src]
         return scores
 
 if __name__ == "__main__":

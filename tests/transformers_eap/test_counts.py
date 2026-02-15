@@ -3,7 +3,7 @@ import unittest
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers_eap import EAPGraph, EAPTokenizer
 
-class TestMultiModel(unittest.TestCase):
+class TestSourceCounts(unittest.TestCase):
 
     def test_counts(self):
         tokenizer = AutoTokenizer.from_pretrained("gpt2")
