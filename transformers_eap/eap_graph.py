@@ -27,8 +27,8 @@ def find_peak_mlp_hubs(scores, n_layers=None):
     for i in range(n_layers):
         key = f"blocks.{i}.hook_mlp_in"
         if key in scores:
-            # Summing raw values across all sources
-            val = scores[key].sum().item()
+            # Sum absolute values across all sources (magnitude-based)
+            val = scores[key].abs().sum().item()
             mlp_sums.append(val)
         else:
             mlp_sums.append(0.0)
