@@ -13,7 +13,7 @@ class TestMultiModel(unittest.TestCase):
             tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
             model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
             eap = EAPGraph(model) 
-            eap_tokenizer = EAPTokenizer(tokenizer, device=eap.main_device)
+            eap_tokenizer = EAPTokenizer(tokenizer)
         except Exception as e:
             print(f"Skipping Qwen due to load error (network/disk): {e}")
             return

@@ -1,13 +1,12 @@
 import torch
 
 class EAPTokenizer:
-    def __init__(self, tokenizer, device="cpu"):
+    def __init__(self, tokenizer):
         """
         Wrapper for tokenizer to handle EAP-specific formatting (padding side)
         and subject identification.
         """
         self.tokenizer = tokenizer
-        self.device = device
         
         # Ensure pad token exists
         if self.tokenizer.pad_token is None:
@@ -22,7 +21,7 @@ class EAPTokenizer:
         old_padding_side = self.tokenizer.padding_side
         self.tokenizer.padding_side = "left"
         
-        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.device)
+        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True)
         
         self.tokenizer.padding_side = old_padding_side
         
@@ -34,7 +33,7 @@ class EAPTokenizer:
             p_ids = input_ids[i]
             # Naive subject search strategy
             s_ids = self.tokenizer(" " + s.strip(), add_special_tokens=False)["input_ids"]
-            s_ids_t = torch.tensor(s_ids).to(self.device)
+            s_ids_t = torch.tensor(s_ids)
             found = False
             for j in range(len(p_ids) - len(s_ids_t) + 1):
                 if torch.equal(p_ids[j:j+len(s_ids_t)], s_ids_t):

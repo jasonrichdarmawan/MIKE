@@ -19,7 +19,7 @@ class TestMultiGPU(unittest.TestCase):
             # balanced device_map ensures split across GPUs
             model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True, device_map="balanced")
             eap = EAPGraph(model) 
-            eap_tokenizer = EAPTokenizer(tokenizer, device=eap.main_device)
+            eap_tokenizer = EAPTokenizer(tokenizer)
         except Exception as e:
             print(f"Skipping Qwen due to load error (network/disk): {e}")
             return

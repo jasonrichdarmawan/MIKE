@@ -405,6 +405,9 @@ class EAPGraph:
         self.reset_hooks()
         self.register_backward_hooks()
         
+        input_ids = input_ids.to(self.main_device)
+        attention_mask = attention_mask.to(self.main_device)
+        
         logits = self.model(input_ids).logits
         if metric_fn is not None:
             loss = metric_fn(logits)
@@ -555,20 +558,22 @@ if __name__ == "__main__":
     model_id = "gpt2"
     print(f"Loading {model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="balanced")
     
     # EAP Wrapper
     eap = EAPGraph(model)
-    eap_tokenizer = EAPTokenizer(tokenizer, device=eap.main_device)
+    eap_tokenizer = EAPTokenizer(tokenizer)
     
     prompts = [
-        "The capital of Spain is",
-        "The capital of France is", 
-        "The capital of Italy is",
-        "The capital of Russia is"
+        "Suppose John lives in a houseboat, Ellie Kemper lives in an apartment, and Jane lives in a cabin. Therefore, the person who lives in an apartment is a citizen of",
+        "If Alex resides in a tent, Ellie Kemper resides in a condo, and Chris resides in a mansion, then the individual residing in a condo is a citizen of",
+        "Given that Sam occupies a treehouse, Ellie Kemper occupies a duplex, and Pat occupies a farmhouse, the person occupying the duplex is a citizen of",
+        "In a list of some countries, Brazil is ranked 5th, Croatia is ranked 3rd, and Japan is ranked 1st. The rank of the country that Ellie Kemper is a citizen of is",
+        "If in a global sports competition, France secures the 8th position, Croatia claims the 2nd, and Australia is at the 6th position, the position Ellie Kemper's home country holds is",
+        "During an international economic summit, Canada is placed 7th, Croatia is 4th, and South Korea is 10th in terms of economic growth. The placement of the country where Ellie Kemper resides as a citizen is"
     ]
-    subjects = ["Spain", "France", "Italy", "Russia"]
-    ans_tokens = [" Madrid", " Paris", " Rome", " Moscow"]
+    subjects = ["Ellie Kemper"] * len(prompts)
+    ans_tokens = [" Croatia", " Croatia", " Croatia", " 3rd", " 2nd", " 4th"]
     ans_ids = [tokenizer(a)["input_ids"][0] for a in ans_tokens]
     ans_ids = torch.tensor(ans_ids).to(eap.main_device)
     

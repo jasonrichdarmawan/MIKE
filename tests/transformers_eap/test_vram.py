@@ -15,7 +15,7 @@ class TestVRAMUsage(unittest.TestCase):
         return tokenizer, model
 
     def _build_inputs(self, tokenizer, device):
-        eap_tokenizer = EAPTokenizer(tokenizer, device=device)
+        eap_tokenizer = EAPTokenizer(tokenizer)
         prompts = [
             "Suppose John lives in a houseboat, Ellie Kemper lives in an apartment, and Jane lives in a cabin. Therefore, the person who lives in an apartment is a citizen of",
             "If Alex resides in a tent, Ellie Kemper resides in a condo, and Chris resides in a mansion, then the individual residing in a condo is a citizen of",

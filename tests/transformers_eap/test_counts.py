@@ -9,7 +9,7 @@ class TestSourceCounts(unittest.TestCase):
         tokenizer = AutoTokenizer.from_pretrained("gpt2")
         model = AutoModelForCausalLM.from_pretrained("gpt2")
         eap = EAPGraph(model)
-        eap_tokenizer = EAPTokenizer(tokenizer, device=eap.main_device)
+        eap_tokenizer = EAPTokenizer(tokenizer)
         
         # Dummy data
         prompts = ["Test subject"]
