@@ -5,6 +5,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from transformers_eap import EAPGraph, EAPTokenizer
+from transformers_eap.eap_graph import get_nll_metric
 
 
 class TestVRAMUsage(unittest.TestCase):
@@ -47,7 +48,17 @@ class TestVRAMUsage(unittest.TestCase):
         torch.cuda.reset_peak_memory_stats(device)
 
         input_ids, attention_mask, subject_indices, ans_ids = self._build_inputs(tokenizer, device)
-        results = eap.run_eap(input_ids, attention_mask, subject_indices, ans_ids, noise_scale=0.1)
+        
+        # Define Metric
+        nll_metric = get_nll_metric(ans_ids)
+
+        results = eap.run_eap(
+             input_ids, 
+             attention_mask, 
+             metric_fn=nll_metric,
+             subject_indices=subject_indices, 
+             noise_scale=0.1
+        )
 
         torch.cuda.synchronize(device)
         peak_alloc = torch.cuda.max_memory_allocated(device)
@@ -67,13 +78,22 @@ class TestVRAMUsage(unittest.TestCase):
         device = torch.device(eap.main_device)
         input_ids, attention_mask, subject_indices, ans_ids = self._build_inputs(tokenizer, device)
 
+        # Helper to define metric
+        nll_metric = get_nll_metric(ans_ids)
+
         def run_once_and_get_peak_bytes():
             torch.cuda.empty_cache()
             gc.collect()
             torch.cuda.synchronize(device)
             torch.cuda.reset_peak_memory_stats(device)
 
-            _ = eap.run_eap(input_ids, attention_mask, subject_indices, ans_ids, noise_scale=0.1)
+            _ = eap.run_eap(
+                 input_ids, 
+                 attention_mask, 
+                 metric_fn=nll_metric,
+                 subject_indices=subject_indices,
+                 noise_scale=0.1
+            )
 
             torch.cuda.synchronize(device)
             return torch.cuda.max_memory_allocated(device)

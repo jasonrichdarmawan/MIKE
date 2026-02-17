@@ -12,7 +12,7 @@ class EAPTokenizer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def tokenize_inputs(self, prompts, subjects):
+    def tokenize_inputs(self, prompts, subjects=None):
         """
         Tokenizes prompts and identify subject token indices.
         Returns: (input_ids, attention_mask, subject_indices)
@@ -28,6 +28,9 @@ class EAPTokenizer:
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
         
+        if subjects is None:
+            return input_ids, attention_mask, None
+
         subject_indices = []
         for i, (p, s) in enumerate(zip(prompts, subjects)):
             p_ids = input_ids[i]

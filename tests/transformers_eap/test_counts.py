@@ -2,6 +2,7 @@ import torch
 import unittest
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers_eap import EAPGraph, EAPTokenizer
+from transformers_eap.eap_graph import get_nll_metric
 
 class TestSourceCounts(unittest.TestCase):
 
@@ -20,7 +21,15 @@ class TestSourceCounts(unittest.TestCase):
         input_ids, attention_mask, subject_indices = eap_tokenizer.tokenize_inputs(prompts, subjects)
         
         # Run
-        results = eap.run_eap(input_ids, attention_mask, subject_indices, ans_ids)
+        # Define Metric
+        nll_metric = get_nll_metric(ans_ids)
+             
+        results = eap.run_eap(
+             input_ids, 
+             attention_mask, 
+             metric_fn=nll_metric,
+             subject_indices=subject_indices
+        )
         
         # Checks
         print("\n--- Verifying Logic ---")

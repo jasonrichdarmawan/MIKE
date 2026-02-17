@@ -281,6 +281,43 @@ COMPONENT_REGISTRY = {
     "gptj": get_gptj_components
 }
 
+
+# --- Metric Factories ---
+
+def get_nll_metric(ans_ids, batch_indices=None):
+    """
+    Returns a metric function that computes the Negative Log Likelihood (NLL) of the target tokens.
+    ans_ids: [Batch] Tensor of target token IDs.
+    batch_indices: [Batch] Tensor of batch indices (optional, inferred if None).
+    """
+    def nll_metric(logits):
+        # logits: [Batch, Seq, Vocab]
+        # We assume the target is at the last position
+        nonlocal batch_indices
+        if batch_indices is None:
+            batch_indices = torch.arange(logits.shape[0], device=logits.device)
+            
+        return -logits[:, -1, :].log_softmax(dim=-1)[batch_indices, ans_ids].mean()
+    return nll_metric
+
+def get_logit_diff_metric(ans_ids, foil_ids, batch_indices=None):
+    """
+    Returns a metric function that computes the Logit Difference (Target - Foil).
+    ans_ids: [Batch] Tensor of target token IDs.
+    foil_ids: [Batch] Tensor of foil token IDs.
+    batch_indices: [Batch] Tensor of batch indices (optional, inferred if None).
+    """
+    def logit_diff_metric(logits):
+        # logits: [Batch, Seq, Vocab]
+        nonlocal batch_indices
+        if batch_indices is None:
+            batch_indices = torch.arange(logits.shape[0], device=logits.device)
+            
+        target_logits = logits[:, -1, :][batch_indices, ans_ids]
+        foil_logits = logits[:, -1, :][batch_indices, foil_ids]
+        return (target_logits - foil_logits).mean()
+    return logit_diff_metric
+
 class EAPGraph:
     def __init__(self, model, graph_type=None):
         """
@@ -290,7 +327,13 @@ class EAPGraph:
         self.model = model
         
         if hasattr(self.model, "hf_device_map"):
-             self.main_device = list(self.model.hf_device_map.values())[0] 
+             # For sharded models, main_device is a bit murky, but we need *some* device for tensors
+             d = list(self.model.hf_device_map.values())[0]
+             # Handle string outputs like 'cpu' or 'cuda:0'
+             if isinstance(d, str):
+                  self.main_device = torch.device(d)
+             else:
+                  self.main_device = d
         else:
              self.main_device = self.model.device
         
@@ -577,92 +620,238 @@ class EAPGraph:
         self,
         input_ids,
         attention_mask,
-        subject_indices,
-        ans_ids=None,
+        metric_fn: Callable,
+        subject_indices=None,
         noise_scale=0.1,
-        metric_fn: Optional[Callable] = None,
+        integrated_gradients: Optional[int] = None,
+        corrupted_input_ids: Optional[torch.Tensor] = None,
     ):
         """
         Core EAP execution using pre-processed tensors.
         input_ids: [Batch, Seq]
         attention_mask: [Batch, Seq]
-        subject_indices: List of lists of indices for each batch item
-        ans_ids: [Batch] Target token IDs (used when metric_fn is None)
-        metric_fn: Callable that maps logits -> scalar metric/loss (optional)
+        metric_fn: Callable that maps logits -> scalar metric/loss (Required).
+                   E.g., get_nll_metric(ans_ids) or get_logit_diff_metric(ans_ids, foil_ids).
+        subject_indices: List of lists of indices for each batch item (Required if corrupted_input_ids is None)
+        integrated_gradients: Number of steps for integrated gradients approximation (optional)
+        corrupted_input_ids: [Batch, Seq] Optional alternate input to serve as baseline.
+                             If provided, subject_indices and noise_scale are ignored.
         """
-        # --- Clean Backward ---
         self.model.eval()
         self.model.zero_grad()
         self.reset_hooks()
-        
-        # We need activations for the manual backward pass (x_pre_ln), 
-        # so we must register forward hooks as well.
-        self.register_forward_hooks() 
-        self.register_backward_hooks()
-        
+
+        # --- Clean Activations (for difference) ---
         input_ids = input_ids.to(self.main_device)
         attention_mask = attention_mask.to(self.main_device)
         
-        logits = self.model(input_ids).logits
-        if metric_fn is not None:
-            loss = metric_fn(logits)
-        else:
-            if ans_ids is None:
-                raise ValueError("ans_ids must be provided when metric_fn is None")
-            batch_indices = torch.arange(len(input_ids)).to(self.main_device)
-            loss = -logits[:, -1, :].log_softmax(dim=-1)[batch_indices, ans_ids].mean()
-        print(f"Clean Loss: {loss.item():.4f}")
-        loss.backward()
-        
-        # Collect & CPU offload
-        clean_grads = {k: v.clone() for k, v in self.gradients.items()}
-        clean_acts = self.activations.copy()
-        # We use .copy() to decouple clean_acts from self.activations, which will be 
-        # overwritten in the next forward pass. Deep cloning (v.clone()) is not strictly 
-        # necessary as hooks create new tensor instances, so shallow copy saves memory/time.
+        self.register_forward_hooks()
+        with torch.no_grad():
+            self.model(input_ids)
+            clean_acts = self.activations.copy()
         self.reset_hooks()
-        self.model.zero_grad()
-            
-        # --- Noise Stats (from WTE) ---
+
+        input_ids = input_ids.to(self.main_device)
+        attention_mask = attention_mask.to(self.main_device)
+        
+        self.register_forward_hooks()
+        with torch.no_grad():
+            self.model(input_ids)
+            clean_acts = self.activations.copy()
+        self.reset_hooks()
+
+        # --- Embedding Capture ---
         _, embed = self._get_layer_components(0) 
         embed_acts = []
         def stat_hook(m, i, o): embed_acts.append(o.detach())
+        
+        # 1. Get Clean Embeddings
         h = embed.register_forward_hook(stat_hook)
         with torch.no_grad(): self.model(input_ids)
         h.remove()
         clean_wte = embed_acts[0]
+        
+        noise_cache = {} # Cache noise to reuse for IG steps
 
-        subj_vecs = []
-        for b, idxs in enumerate(subject_indices):
-            if idxs: subj_vecs.append(clean_wte[b, idxs, :])
-        if subj_vecs:
-            noise_std = noise_scale * torch.cat(subj_vecs, dim=0).std().item()
+        # --- Corrupted Forward & Noise Calculation ---
+        if corrupted_input_ids is not None:
+            # Case A: Explicit Corrupted Input
+            print(f"Using provided corrupted_input_ids as baseline.")
+            corrupted_input_ids = corrupted_input_ids.to(self.main_device)
+            
+            # 2. Get Corrupted Embeddings
+            embed_acts = [] # helper clear
+            h = embed.register_forward_hook(stat_hook) 
+            # We also need to capture activations for the corrupted pass
+            self.register_forward_hooks()
+            with torch.no_grad():
+                self.model(corrupted_input_ids)
+                corrupt_acts = self.activations.copy()
+            h.remove()
+            self.reset_hooks()
+            
+            corrupted_wte = embed_acts[0]
+            
+            # 3. Calculate Noise (Corrupt - Clean)
+            # Ensure shapes match (they should if batch/seq_len are same)
+            if corrupted_wte.shape != clean_wte.shape:
+                 raise ValueError(f"Shape mismatch: Clean {clean_wte.shape} vs Corrupt {corrupted_wte.shape}")
+            
+            noise_cache["noise"] = corrupted_wte - clean_wte
+            
         else:
-            noise_std = noise_scale * 0.1
-        print(f"Noise Std: {noise_std:.4f}")
+            # Case B: Gaussian Noise on Subjects
+            subj_vecs = []
+            if subject_indices is None:
+                print("No subjects provided. Using all tokens (with attention mask) for noise calculation.")
+                # Use all valid tokens 
+                # clean_wte is [B, S, D], attention_mask is [B, S]
+                # We need to flatten and filter by mask
+                valid_mask = attention_mask.bool()
+                all_valid = clean_wte[valid_mask] # [ValidTokens, D]
+                subj_vecs.append(all_valid)
+            else:
+                for b, idxs in enumerate(subject_indices):
+                    if idxs: subj_vecs.append(clean_wte[b, idxs, :])
 
-        # --- Corrupted Forward ---
-        def noise_hook(module, input, output):
-            noise = torch.randn_like(output) * noise_std
-            mask = torch.zeros_like(output, dtype=torch.bool)
-            for b, idxs in enumerate(subject_indices):
-                mask[b, idxs, :] = True
-            return output + (noise * mask)
+            if subj_vecs:
+                noise_std = noise_scale * torch.cat(subj_vecs, dim=0).std().item()
+            else:
+                noise_std = noise_scale * 0.1
+            print(f"Noise Std: {noise_std:.4f}")
 
-        h_noise = embed.register_forward_hook(noise_hook)
-        self.register_forward_hooks()
-        with torch.no_grad():
-            self.model(input_ids)
-            corrupt_acts = self.activations.copy()
-        h_noise.remove()
-        self.reset_hooks()
+            def noise_hook(module, input, output):
+                noise = torch.randn_like(output) * noise_std
+                if subject_indices is None:
+                     mask = attention_mask.bool().unsqueeze(-1).expand_as(output)
+                else:
+                    mask = torch.zeros_like(output, dtype=torch.bool)
+                    for b, idxs in enumerate(subject_indices):
+                        if idxs: mask[b, idxs, :] = True
+                
+                final_noise = noise * mask
+                noise_cache["noise"] = final_noise
+                return output + final_noise
+
+            h_noise = embed.register_forward_hook(noise_hook)
+            self.register_forward_hooks()
+            with torch.no_grad():
+                self.model(input_ids)
+                corrupt_acts = self.activations.copy()
+            h_noise.remove()
+            self.reset_hooks()
+        
+        # --- Gradient Computation ---
+        self.model.eval()
+        self.model.zero_grad()
+        
+        # Accumulator for gradients
+        avg_grads = {}
+        
+        if integrated_gradients is None:
+            # Standard EAP: Gradients at Clean Input
+            print("Running Standard EAP (Gradient at Clean)...")
+            steps = 1
+            # We treat clean as step 1/1
+        else:
+            print(f"Running EAP-IG with {integrated_gradients} steps...")
+            steps = integrated_gradients
+
+        # We now loop over steps.
+        # If IG=None, we just run once with k=1, m=1, and NO interpolation (clean input).
+        
+        # To handle both consistently:
+        # Standard: k=1, m=1. Input = Clean.
+        # IG: k=1..m. Input = Corrupt + (k/m)*(Clean-Corrupt)
+        # Note: Clean = Corrupt + 1*(Clean - Corrupt). So k=m corresponds to Clean.
+        
+        # If IG=None, we do NOT want to interpolate because we want exact Clean.
+        # If we use noise_cache["noise"], Clean = Corrupt - noise
+        # Corrupt = Clean + Noise.
+        # Clean - Corrupt = -Noise.
+        # Input = Corrupt + (k/m)*(-Noise) = Clean + Noise - (k/m)*Noise = Clean + (1-k/m)*Noise.
+        # When k=m, Input = Clean.
+        
+        corrupt_noise = noise_cache["noise"]
+        # Note: corrupt_noise is (Corrupt - Clean).
+        # We want to interpolate from Corrupt to Clean.
+        # Direction: Baseline -> Input.
+        # Baseline = Corrupt. Input = Clean.
+        # Diff = Clean - Corrupt = -corrupt_noise.
+        
+        for step in range(1, steps + 1):
+            self.reset_hooks()
+            self.model.zero_grad()
+            self.register_forward_hooks() # because we need the noisy activation for IG steps to compute the gradients at the correct points in the interpolation path
+            self.register_backward_hooks()
+            
+            # Hook logic for this step
+            alpha = step / steps
+            
+            # If IG is None, we just want Clean input.
+            # Which is equivalent to step=1, steps=1 in the interpolation formula?
+            # Interpolated = Corrupt + alpha * (Clean - Corrupt)
+            # If alpha=1, Interpolated = Clean.
+            # So yes, we can unify logic.
+            
+            def interpolation_hook(module, input, output):
+                # output is Clean WTE (because input_ids are Clean)
+                # We want to interpolate from Corrupt (Baseline) to Clean (Target)
+                # Path: Input_alpha = Corrupt + alpha * (Clean - Corrupt)
+                
+                # We know: Corrupt = Clean + Noise (where Noise = corrupt_noise)
+                # So: Clean - Corrupt = -Noise
+                
+                # Input_alpha = (Clean + Noise) + alpha * (-Noise)
+                #             = Clean + Noise - alpha * Noise
+                #             = Clean + Noise * (1 - alpha)
+                
+                # output is 'Clean'
+                # corrupt_noise is 'Noise'
+                return output + corrupt_noise * (1.0 - alpha)
+
+            h_interp = embed.register_forward_hook(interpolation_hook)
+            
+            # Forward & Backward
+            logits = self.model(input_ids).logits
+            loss = metric_fn(logits)
+            
+            if step == 1 and integrated_gradients is None:
+                 print(f"Clean Metric: {loss.item():.4f}")
+            
+            loss.backward()
+            h_interp.remove()
+            
+            # Accumulate
+            for name, grad in self.gradients.items():
+                if name not in avg_grads:
+                    avg_grads[name] = grad.clone()
+                else:
+                    avg_grads[name] += grad
+            
+            # Cleanup step
+            # self.reset_hooks() # handled at start of loop
+        
+        # Average
+        for name in avg_grads:
+            avg_grads[name] /= steps
+            
+        clean_grads = avg_grads
+        clean_acts = clean_acts # From initial pass
         
         # --- Score Computation ---
         scores = {}
+        # If corrupted_input_ids are provided, mask applies to clean only (standard assumption: same length)
         mask = attention_mask.unsqueeze(-1).float().cpu()
+
+        # Check shape compatibility
+        if corrupt_acts["blocks.0.hook_resid_pre"].shape != clean_acts["blocks.0.hook_resid_pre"].shape:
+             raise ValueError("Shape mismatch between Clean and Corrupt activations. Ensure corrupted_input_ids has same length as input_ids.")
 
         # Initial Source: blocks.0.hook_resid_pre
         d0 = (corrupt_acts["blocks.0.hook_resid_pre"] - clean_acts["blocks.0.hook_resid_pre"]) * mask
+
+
 
         # Pre-allocate a single growing GPU source buffer.
         # Max sources = 1 resid_pre + n_layers * n_heads (attn results) + n_layers (mlp_out)
@@ -749,29 +938,36 @@ if __name__ == "__main__":
     model_id = "gpt2"
     print(f"Loading {model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="balanced")
+    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
     
     # EAP Wrapper
     eap = EAPGraph(model)
     eap_tokenizer = EAPTokenizer(tokenizer)
     
     prompts = [
-        "Suppose John lives in a houseboat, Ellie Kemper lives in an apartment, and Jane lives in a cabin. Therefore, the person who lives in an apartment is a citizen of",
-        "If Alex resides in a tent, Ellie Kemper resides in a condo, and Chris resides in a mansion, then the individual residing in a condo is a citizen of",
-        "Given that Sam occupies a treehouse, Ellie Kemper occupies a duplex, and Pat occupies a farmhouse, the person occupying the duplex is a citizen of",
-        "In a list of some countries, Brazil is ranked 5th, Croatia is ranked 3rd, and Japan is ranked 1st. The rank of the country that Ellie Kemper is a citizen of is",
-        "If in a global sports competition, France secures the 8th position, Croatia claims the 2nd, and Australia is at the 6th position, the position Ellie Kemper's home country holds is",
-        "During an international economic summit, Canada is placed 7th, Croatia is 4th, and South Korea is 10th in terms of economic growth. The placement of the country where Ellie Kemper resides as a citizen is"
+        "Suppose John lives in a houseboat, Ellie Kemper lives in an apartment, and Keanu Reeves lives in a cabin. Therefore, the person who lives in an apartment is a citizen of",
     ]
-    subjects = ["Ellie Kemper"] * len(prompts)
-    ans_tokens = [" Croatia", " Croatia", " Croatia", " 3rd", " 2nd", " 4th"]
-    ans_ids = [tokenizer(a)["input_ids"][0] for a in ans_tokens]
+    corrupted_prompts = [
+        "Suppose John lives in a houseboat, Keanu Reeves lives in an apartment, and Ellie Kemper lives in a cabin. Therefore, the person who lives in an apartment is a citizen of",
+    ]
+    target_token = [
+        " United States",
+    ]
+    foil_token = [
+        " Canada",
+    ]
+    ans_ids = [tokenizer(a)["input_ids"][0] for a in target_token]
     ans_ids = torch.tensor(ans_ids).to(eap.main_device)
+    foil_ids = [tokenizer(a)["input_ids"][0] for a in foil_token]
+    foil_ids = torch.tensor(foil_ids).to(eap.main_device)
     
     # Pre-process inputs
-    input_ids, attention_mask, subject_indices = eap_tokenizer.tokenize_inputs(prompts, subjects)
+    input_ids, attention_mask, _ = eap_tokenizer.tokenize_inputs(prompts)
+    corrupted_input_ids, _, _ = eap_tokenizer.tokenize_inputs(corrupted_prompts)
     
-    results = eap.run_eap(input_ids, attention_mask, subject_indices, ans_ids, noise_scale=0.1)
+    logit_diff_metric = get_logit_diff_metric(ans_ids, foil_ids)
+    
+    results = eap.run_eap(input_ids, attention_mask, logit_diff_metric, corrupted_input_ids=corrupted_input_ids)
     
     # Standalone analysis
     find_peak_mlp_hubs(results)

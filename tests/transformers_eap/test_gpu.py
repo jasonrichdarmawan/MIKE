@@ -2,6 +2,7 @@ import torch
 import unittest
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers_eap import EAPGraph, EAPTokenizer
+from transformers_eap.eap_graph import get_nll_metric
 
 class TestMultiGPU(unittest.TestCase):
     
@@ -35,7 +36,16 @@ class TestMultiGPU(unittest.TestCase):
         # Note: input_ids must be on main device, checked inside tokenize_inputs? 
         # tokenize_inputs puts them on self.main_device. EAPGraph detects main_device from model.
         # If model is split, main_device is usually cuda:0.
-        results = eap.run_eap(input_ids, attention_mask, subject_indices, ans_ids)
+        
+        # Define Metric
+        nll_metric = get_nll_metric(ans_ids)
+             
+        results = eap.run_eap(
+             input_ids, 
+             attention_mask, 
+             metric_fn=nll_metric,
+             subject_indices=subject_indices
+        )
         
         # Check L0 Q Input
         key = "blocks.0.hook_q_input"

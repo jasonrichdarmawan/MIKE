@@ -2,6 +2,7 @@ import torch
 import unittest
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers_eap import EAPGraph, EAPTokenizer
+from transformers_eap.eap_graph import get_nll_metric
 
 class TestMultiModel(unittest.TestCase):
     
@@ -25,7 +26,17 @@ class TestMultiModel(unittest.TestCase):
         # Pre-process
         input_ids, attention_mask, subject_indices = eap_tokenizer.tokenize_inputs(prompts, subjects)
         
-        results = eap.run_eap(input_ids, attention_mask, subject_indices, ans_ids, noise_scale=0.1)
+        # Define Metric
+        batch_indices = torch.arange(len(input_ids)).to(eap.main_device)
+        nll_metric = get_nll_metric(ans_ids)
+
+        results = eap.run_eap(
+             input_ids, 
+             attention_mask, 
+             metric_fn=nll_metric,
+             subject_indices=subject_indices,
+             noise_scale=0.1
+        )
         
         # Check L0 Q Input
         # Qwen has 0.5B params. Layers: 24? Heads?
@@ -58,7 +69,16 @@ class TestMultiModel(unittest.TestCase):
         # Pre-process
         input_ids, attention_mask, subject_indices = eap_tokenizer.tokenize_inputs(prompts, subjects)
         
-        results = eap.run_eap(input_ids, attention_mask, subject_indices, ans_ids, noise_scale=0.1)
+        # Define Metric
+        nll_metric = get_nll_metric(ans_ids)
+             
+        results = eap.run_eap(
+             input_ids, 
+             attention_mask, 
+             metric_fn=nll_metric,
+             subject_indices=subject_indices,
+             noise_scale=0.1
+        )
         
         key = "blocks.0.hook_q_input"
         self.assertIn(key, results)
