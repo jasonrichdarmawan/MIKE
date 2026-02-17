@@ -103,6 +103,127 @@ def print_top_edges(scores, n=30):
         
         print(f"{i+1:02d}. {k}  (Score: {v:.4f})")
 
+
+def layer_norm_backward_independent(grad_y, x, ln_module):
+    """
+    Backpropagate through LayerNorm for a specific 'head' slice acting as if independent.
+    
+    Equations:
+    Forward: y = (x - mu) / sigma * gamma + beta
+    Let x_hat = (x - mu) / sigma
+    dy = grad_y * gamma
+    
+    Standard LN Backward (dx):
+    dx_hat = dy
+    dx = (1/sigma) * [ dx_hat - mean(dx_hat) - x_hat * mean(dx_hat * x_hat) ]
+    
+    This function applies the backward pass assuming grad_y is the gradient 
+    w.r.t the output of the LayerNorm corresponding to a specific head's 
+    downstream usage, properly accounting for the shared normalization statistics.
+    """
+    x = x.to(grad_y.device).to(grad_y.dtype)
+    dim = -1
+    
+    # 1. Statistics
+    mu = x.mean(dim=dim, keepdim=True)
+    var = x.var(dim=dim, unbiased=False, keepdim=True)
+    std = (var + ln_module.eps).sqrt()
+    x_hat = (x - mu) / std
+    
+    # 2. Gradient of normalized input (dy * gamma)
+    gamma = ln_module.weight.to(grad_y.device).to(grad_y.dtype)
+    
+    # Handle broadcasting for Head-Dimension if present
+    # grad_y can be [B, S, H, D] (Attention) or [B, S, D] (MLP)
+    if grad_y.dim() == 4:
+        # Attention Case: [B, S, H, D]
+        # Expand x_hat and std for broadcasting
+        x_hat = x_hat.unsqueeze(2) # [B, S, 1, D]
+        std = std.unsqueeze(2)     # [B, S, 1, D]
+    elif grad_y.dim() == 3:
+        # MLP Case: [B, S, D]
+        # No extra unsqueeze needed for H dimension
+        pass
+    
+    dx_hat = grad_y * gamma    # [B, S, H, D] or [B, S, D]
+    
+    # 3. Reduction Terms (averaging over D dimension)
+    term2 = dx_hat.mean(dim=dim, keepdim=True) # mean(dy)
+    term3 = x_hat * (dx_hat * x_hat).mean(dim=dim, keepdim=True) # x_hat * mean(dy * x_hat)
+    
+    # 4. Final Gradient (distributed to inputs)
+    grad_x = (dx_hat - term2 - term3) / std
+    return grad_x
+
+def rms_norm_backward_independent(grad_y, x, rms_module):
+    """
+    Backpropagate through RMSNorm for a specific 'head' slice.
+    
+    Equations:
+    Forward: y = x * w * rsqrt(mean(x^2) + eps)
+    Let r = rsqrt(mean(x^2) + eps)
+    y = x * w * r
+    
+    Backward:
+    dx = r * (dy * w - x * mean(dy * w * x) * r^2)
+       = r * (dy * w - x * mean(dy * w * x) / (mean(x^2) + eps))
+    
+    This matches the standard RMSNorm gradient derivation.
+    """
+    x = x.to(grad_y.device).to(grad_y.dtype)
+    dim = -1
+    
+    # 1. Statistics
+    input_dtype = x.dtype
+    x_f32 = x.float()
+    
+    # Variance here matches mean(x^2)
+    ms = x_f32.pow(2).mean(dim, keepdim=True)
+    r = torch.rsqrt(ms + rms_module.variance_epsilon) # 1/RMS
+    
+    # 2. Pre-computations
+    w = rms_module.weight.float().to(grad_y.device)
+    
+    # grad_y is [B, S, H, D]
+    # w is [D] or [H, D] depending on how it's stored, usually [D] for the full layer.
+    # However, for 'independent' backward, we are effectively saying that grad_y 
+    # corresponds to a specific slice of the output.
+    
+    # CAUTION: 'w' in RMSNorm is applying to the *output* of the normalization 
+    # (elementwise affine).
+    
+    # If we are doing "block-independent" attribution, we assume linearity.
+    # The term `dy * w` : 
+    dy_scaled = grad_y.to(torch.float32) * w
+    
+    # 3. Reduction Term
+    # term = mean(dy_scaled * x)
+    # We must be careful with broadcasting.
+    # x is [B, S, D], grad_y is [B, S, H, D].
+    
+    x_expanded = x_f32
+    r_expanded = r
+    
+    if grad_y.dim() == 4:
+        # Attention Case: [B, S, H, D]
+        x_expanded = x_f32.unsqueeze(2)     # [B, S, 1, D]
+        r_expanded = r.unsqueeze(2)         # [B, S, 1, 1]
+    
+    # term: [B, S, H, 1] OR [B, S, 1]
+    term = (dy_scaled * x_expanded).mean(dim=dim, keepdim=True)
+    
+    # 4. Final Gradient
+    # dx = r * (dy_scaled - x * term * r^2)
+    # Note: r^2 = 1 / (ms + eps)
+    
+    ms_expanded = ms
+    if grad_y.dim() == 4:
+         ms_expanded = ms.unsqueeze(2)
+
+    dx = r_expanded * (dy_scaled - x_expanded * term / (ms_expanded + rms_module.variance_epsilon))
+    
+    return dx.to(input_dtype)
+
 # --- Model Component Registries ---
 
 def get_gpt2_components(model, layer_idx):
@@ -111,6 +232,8 @@ def get_gpt2_components(model, layer_idx):
     return {
         "o": layer.attn.c_proj,
         "fused_qkv": layer.attn.c_attn,
+        "ln_1": layer.ln_1, # Component responsible for Norm before Attention
+        "ln_2": layer.ln_2, # Component responsible for Norm before MLP
         "is_fused_qkv": True,
         "is_conv1d": True,
         "mlp_in": layer.mlp.c_fc,
@@ -126,6 +249,8 @@ def get_llama_like_components(model, layer_idx):
         "q": layer.self_attn.q_proj,
         "k": layer.self_attn.k_proj,
         "v": layer.self_attn.v_proj,
+        "ln_1": layer.input_layernorm, # Component responsible for Norm before Attention
+        "ln_2": layer.post_attention_layernorm, # MLP Norm
         "is_fused_qkv": False,
         "is_conv1d": False,
         "mlp_in": layer.mlp, # Use full MLP block to capture gradients from both Gate and Up paths
@@ -141,6 +266,8 @@ def get_gptj_components(model, layer_idx):
         "q": layer.attn.q_proj,
         "k": layer.attn.k_proj,
         "v": layer.attn.v_proj,
+        "ln_1": layer.ln_1, # Component responsible for Norm before Attention
+        "ln_2": layer.ln_1, # Shared Norm for MLP in parallel architecture
         "is_fused_qkv": False,
         "is_conv1d": False,
         "mlp_in": layer.mlp.fc_in,
@@ -221,6 +348,9 @@ class EAPGraph:
             
             if type == "resid_pre":
                 self.activations[name] = input[0].detach().cpu()
+
+            elif type == "resid_mid":
+                self.activations[name] = input[0].detach().cpu()
                 
             elif type == "mlp_out":
                 self.activations[name] = output.detach().cpu()
@@ -259,9 +389,17 @@ class EAPGraph:
 
     # --- Gradient Hooks ---
     def get_gradient_hook(self, name, type="std", layer_idx=None):
+        """
+        Retrieves gradients for attention heads and MLPs.
+        
+        Crucially, for Attention Heads, this function now manually backpropagates through 
+        the LayerNorm/RMSNorm (LN1) to attribute gradients to the *Residual Stream* (Pre-LN).
+        
+        This enables proper attribution of previous layer outputs -> current layer heads.
+        """
         def hook(module, grad_input, grad_output):
             if type == "qkv_input":
-                # Fused Case
+                # Fused Case (GPT-2)
                 comps, _ = self._get_layer_components(layer_idx)
                 gy = grad_output[0].detach() 
                 w = comps["fused_qkv"].weight 
@@ -286,13 +424,28 @@ class EAPGraph:
                     gx_q = torch.einsum("bsho,iho->bshi", g_q_heads, w_q_heads)
                     gx_k = torch.einsum("bsho,iho->bshi", g_k_heads, w_k_heads)
                     gx_v = torch.einsum("bsho,iho->bshi", g_v_heads, w_v_heads)
-                    
+                
+                # --- Manual Norm Backward ---
+                ln_module = comps["ln_1"]
+                # Must have captured activations previously
+                x_pre_ln = self.activations[f"blocks.{layer_idx}.hook_resid_pre"].to(gx_q.device)
+                
+                if "RMSNorm" in ln_module.__class__.__name__:
+                    gx_q = rms_norm_backward_independent(gx_q, x_pre_ln, ln_module)
+                    gx_k = rms_norm_backward_independent(gx_k, x_pre_ln, ln_module)
+                    gx_v = rms_norm_backward_independent(gx_v, x_pre_ln, ln_module)
+                else: 
+                    # Assume LayerNorm
+                    gx_q = layer_norm_backward_independent(gx_q, x_pre_ln, ln_module)
+                    gx_k = layer_norm_backward_independent(gx_k, x_pre_ln, ln_module)
+                    gx_v = layer_norm_backward_independent(gx_v, x_pre_ln, ln_module)
+
                 self.gradients[f"blocks.{layer_idx}.hook_q_input"] = gx_q.detach().cpu()
                 self.gradients[f"blocks.{layer_idx}.hook_k_input"] = gx_k.detach().cpu()
                 self.gradients[f"blocks.{layer_idx}.hook_v_input"] = gx_v.detach().cpu()
 
             elif type in ["q_input", "k_input", "v_input"]:
-                # Separate Q/K/V Case
+                # Separate Q/K/V Case (Llama/GPT-J)
                 # Why not use grad_input[0]?
                 # grad_input[0] is the gradient w.r.t. the input of the linear layer (dL/dX).
                 # However, this gradient is SUMMED over all heads (because X is shared).
@@ -300,6 +453,7 @@ class EAPGraph:
                 # (partial L / partial X_h) to compute edge scores S -> Head_h.
                 # We can recover this by taking grad_output (dL/dQ_all), splitting it by head, 
                 # and backpropagating through that head's specific weight slice.
+                comps, _ = self._get_layer_components(layer_idx)
                 
                 gy = grad_output[0].detach()
                 w = module.weight 
@@ -313,14 +467,23 @@ class EAPGraph:
                 
                 # View gradients: [B, S, H, D]
                 gy_heads = gy.view(b, s, n_heads, self.head_dim)
+                
                 # View weights: [Out, In] -> [H, D, In] (Transposed logic handled in einsum)
-                # Linear weights are (Out, In).
+                # Linear weights are (Out, In). Llama/GPTJ usually [H*D, Hidden]
                 w_heads = w.view(n_heads, self.head_dim, self.hidden_size)
                 
-                # We compute dL/dX_h = dL/dY_h @ W_h
-                # dL/dY corresponds to gy_heads. W_h is the weight slice for head h.
-                # Result is the gradient at the input (X) derived purely from the path through head h.
+                # Compute gradient w.r.t input of Linear (Post-LN)
+                # dL/dX_h = dL/dY_h @ W_h
                 gx = torch.einsum("bsho,hoi->bshi", gy_heads, w_heads)
+                
+                # --- Manual Norm Backward ---
+                ln_module = comps["ln_1"]
+                x_pre_ln = self.activations[f"blocks.{layer_idx}.hook_resid_pre"].to(gx.device)
+                
+                if "RMSNorm" in ln_module.__class__.__name__:
+                    gx = rms_norm_backward_independent(gx, x_pre_ln, ln_module)
+                else:
+                    gx = layer_norm_backward_independent(gx, x_pre_ln, ln_module)
                 
                 self.gradients[name] = gx.detach().cpu()
 
@@ -329,7 +492,26 @@ class EAPGraph:
                 # grad_input[0] corresponds to the input tensor (d_model), whereas grad_output 
                 # would be the expanded hidden state (d_mlp), which doesn't match the source dimension.
                 if grad_input[0] is not None:
-                    self.gradients[name] = grad_input[0].detach().cpu()
+                    gx = grad_input[0].detach()
+                     
+                    # --- Manual Norm Backward ---
+                    # We need to know which LN corresponds to the MLP.
+                    # In GPT2/GPTJ, it's ln_2. In Llama, it's post_attention_layernorm.
+                    comps, _ = self._get_layer_components(layer_idx)
+                     
+                    # Check if we have an MLP-specific LN in our components getter.
+                    # GPT-2 has layer.ln_2. Llama has layer.post_attention_layernorm
+                    if "ln_2" in comps:
+                        ln_module = comps["ln_2"]
+                         
+                        x_pre_ln_2 = self.activations[f"blocks.{layer_idx}.hook_resid_mid"].to(gx.device)
+                        
+                        if "RMSNorm" in ln_module.__class__.__name__:
+                            gx = rms_norm_backward_independent(gx, x_pre_ln_2, ln_module)
+                        else:
+                            gx = layer_norm_backward_independent(gx, x_pre_ln_2, ln_module)
+                    
+                    self.gradients[name] = gx.detach().cpu()
             
             elif type == "resid_post":
                 if grad_output[0] is not None:
@@ -349,7 +531,16 @@ class EAPGraph:
             self.handles.append(comps["o"].register_forward_pre_hook(
                 self.get_activation_hook(f"blocks.{i}.attn.hook_result", type="attn.result", layer_idx=i)
             ))
-            # 3. MLP Out (Source)
+
+            # 3. MLP Pre-LN Input (Resid Mid)
+            # Necessary for accurate MLP attribution w/ manual LN backprop
+            if "ln_2" in comps and comps["ln_2"] is not None:
+                # Use pre-hook on the LN module itself to capture its input
+                self.handles.append(comps["ln_2"].register_forward_pre_hook(
+                    self.get_activation_hook(f"blocks.{i}.hook_resid_mid", type="resid_mid")
+                ))
+
+            # 4. MLP Out (Source)
             self.handles.append(comps["mlp_out"].register_forward_hook(
                 self.get_activation_hook(f"blocks.{i}.hook_mlp_out", type="mlp_out")
             ))
@@ -375,11 +566,11 @@ class EAPGraph:
 
             # 2. MLP Input
             self.handles.append(comps["mlp_in"].register_full_backward_hook(
-                self.get_gradient_hook(f"blocks.{i}.hook_mlp_in", type="mlp_in")
+                self.get_gradient_hook(f"blocks.{i}.hook_mlp_in", type="mlp_in", layer_idx=i)
             ))
             # 3. Resid Post
             self.handles.append(comps["layer_block"].register_full_backward_hook(
-                self.get_gradient_hook(f"blocks.{i}.hook_resid_post", type="resid_post")
+                self.get_gradient_hook(f"blocks.{i}.hook_resid_post", type="resid_post", layer_idx=i)
             ))
 
     def run_eap(
@@ -403,6 +594,10 @@ class EAPGraph:
         self.model.eval()
         self.model.zero_grad()
         self.reset_hooks()
+        
+        # We need activations for the manual backward pass (x_pre_ln), 
+        # so we must register forward hooks as well.
+        self.register_forward_hooks() 
         self.register_backward_hooks()
         
         input_ids = input_ids.to(self.main_device)
@@ -421,17 +616,12 @@ class EAPGraph:
         
         # Collect & CPU offload
         clean_grads = {k: v.clone() for k, v in self.gradients.items()}
+        clean_acts = self.activations.copy()
+        # We use .copy() to decouple clean_acts from self.activations, which will be 
+        # overwritten in the next forward pass. Deep cloning (v.clone()) is not strictly 
+        # necessary as hooks create new tensor instances, so shallow copy saves memory/time.
         self.reset_hooks()
         self.model.zero_grad()
-        
-        # --- Clean Forward ---
-        self.register_forward_hooks()
-        with torch.no_grad():
-            self.model(input_ids)
-            # We use .copy() to decouple clean_acts from self.activations, which will be 
-            # overwritten in the next forward pass. Deep cloning (v.clone()) is not strictly 
-            # necessary as hooks create new tensor instances, so shallow copy saves memory/time.
-            clean_acts = self.activations.copy()
             
         # --- Noise Stats (from WTE) ---
         _, embed = self._get_layer_components(0) 
@@ -460,6 +650,7 @@ class EAPGraph:
             return output + (noise * mask)
 
         h_noise = embed.register_forward_hook(noise_hook)
+        self.register_forward_hooks()
         with torch.no_grad():
             self.model(input_ids)
             corrupt_acts = self.activations.copy()
