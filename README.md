@@ -60,15 +60,206 @@ pip install zhipuai
 Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
 
 - E. Biran et al. [1]:
-  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
-  - Run `analysis/generate_entity_description.py` to do Patchscopes entity description experiments.
-  - Run `analysis/project_sublayer.py` to do sublayer projection experiments.
-  - Run `analysis/patch_activations.py` to do back-patching experiments.
-  - Run `analysis/classify_results.py` to classify the experiments' results.
-  - Run `analysis/analyze_resutls.py` to generate figures.
-- Y. Yao et al. [2]:
   - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/{correct/incorrect/inconsistent}.csv` files. Use it to do back-patching experiments.
+  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
+    ```bash
+    python analysis/evaluate_dataset.py gpt2 --input_path datasets/two_hop.csv --output_path datasets/gpt2/two_hop.csv
+    ```
+  - Run `analysis/generate_entity_description.py` to do Patchscopes entity description experiments.
+    <details>
+      <summary>GPT2 example</summary>
+      ```bash
+      MODEL=gpt2
+      DATA_DIR=datasets/${MODEL}
+      SEED=0
+
+      COMPOSITION=correct
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+      
+      SOURCE_TOKEN=e1
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/entity_description/$SOURCE_TOKEN_entity_description_s${SEED}.csv
+      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
+
+      SOURCE_TOKEN=last
+      OUTPUT_PATH=$DATA_DIR/composition_${COMPOSITION}/entity_description/${SOURCE_TOKEN}_entity_description_s${SEED}.csv
+      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
+
+      COMPOSITION=incorrect
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+
+      SOURCE_TOKEN=e1
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/entity_description/${SOURCE_TOKEN}_entity_description_s${SEED}.csv
+      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
+
+      SOURCE_TOKEN=last
+      OUTPUT_PATH=$DATA_DIR/composition_${COMPOSITION}/entity_description/${SOURCE_TOKEN}_entity_description_s${SEED}.csv
+      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
+      ```
+    </details>
+  - Run `analysis/project_sublayer.py` to do sublayer projection experiments.
+    <details>
+      <summary>GPT2 example</summary>
+      ```bash
+      MODEL=gpt2
+      DATA_DIR=datasets/${MODEL}
+
+      COMPOSITION=correct
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+
+      SUBLAYER=attention
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
+      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+    
+      SUBLAYER=mlp
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
+      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+
+      COMPOSITION=incorrect
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+
+      SUBLAYER=attention
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
+      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+    
+      SUBLAYER=mlp
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
+      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+      ```
+    </details>
+  - Run `analysis/patch_activations.py` to do back-patching experiments.
+    <details>
+      <summary>GPT2 example</summary>
+      ```bash
+      MODEL=gpt2
+      DATA_DIR=datasets/${MODEL}
+
+      COMPOSITION=correct
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+    
+      SOURCE_TOKEN=e1
+      TARGET_TOKEN=original
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+
+      SOURCE_TOKEN=last
+      TARGET_TOKEN=original
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+
+      COMPOSITION=incorrect
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+
+      SOURCE_TOKEN=e1
+      TARGET_TOKEN=original
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+
+      SOURCE_TOKEN=last
+      TARGET_TOKEN=original
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+      ```
+    </details>
+  - Run `analysis/knockout_attention.py` to do attention knockout experiments.
+    <details>
+      <summary>GPT2 example</summary>
+      ```bash
+      MODEL=gpt2
+      PROMPT_TYPE=composition
+      DATA_DIR=datasets/${MODEL}
+      K=3
+      
+      COMPOSITION=correct
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+      
+      KNOCKOUT_SOURCE=last
+      KNOCKOUT_TARGET=e1
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/attention_knockout/${KNOCKOUT_SOURCE}_${KNOCKOUT_TARGET}_attention_knockout_k${K}_${PROMP_TYPE}.csv
+
+      python analysis/knockout_attention.py $MODEL $KNOCKOUT_SOURCE $KNOCKOUT_TARGET --input-path $INPUT_PATH --output-path $OUTPUT_PATH --k $K --prompt $PROMPT_TYPE
+
+      COMPOSITION=incorrect
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+      
+      KNOCKOUT_SOURCE=last
+      KNOCKOUT_TARGET=e1
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/attention_knockout/${KNOCKOUT_SOURCE}_${KNOCKOUT_TARGET}_attention_knockout_k${K}_${PROMP_TYPE}.csv
+
+      python analysis/knockout_attention.py $MODEL $KNOCKOUT_SOURCE $KNOCKOUT_TARGET --input-path $INPUT_PATH --output-path $OUTPUT_PATH --k $K --prompt $PROMPT_TYPE
+      ```
+    </details>
+  - Run `analysis/classify_results.py` to classify the experiments' results.
+    <details>
+      <summary>GPT2 example</summary>
+      ```bash
+      MODEL=gpt2
+      DATA_DIR=datasets/${MODEL}
+
+      COMPOSITION=correct
+      RESULT_DIR=${DATA_DIR}/composition_${COMPOSITION}
+      python analysis/classify_results.py $RESULT_DIR
+
+      COMPOSITION=incorrect
+      RESULT_DIR=${DATA_DIR}/composition_${COMPOSITION}
+      python analysis/classify_results.py $RESULT_DIR
+      ```
+    </details>
+  - Run `analysis/analyze_resutls.py` to generate figures.
+    <details>
+      <summary>GPT2 example</summary>
+      ```bash
+      MODEL=gpt2
+      DATA_DIR=datasets
+      OUTPUT_PATH=output
+
+      python analysis/analyze_results.py $DATA_DIR $OUTPUT_PATH -m $MODEL
+      ```
+    </details>
+- Y. Yao et al. [2]:
   - Run `analysis/analyze_subset.py` to compute the `backpatch_t1`, `backpatch_t2`, `t1_to_t2` success rate.
+    <details>
+      <summary>GPT2 example</summary>
+
+      do extra activation patching
+      ```bash
+      MODEL=gpt2
+      DATA_DIR=datasets/${MODEL}
+
+      COMPOSITION=incorrect
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+
+      SOURCE_TOKEN=e1
+      TARGET_TOKEN=last
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+
+      COMPOSITION=inconsistent
+      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
+    
+      SOURCE_TOKEN=e1
+      TARGET_TOKEN=original
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+
+      SOURCE_TOKEN=last
+      TARGET_TOKEN=original
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+
+      SOURCE_TOKEN=e1
+      TARGET_TOKEN=last
+      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
+      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
+      ```
+
+      analyze
+      ```bash
+      MODEL=gpt2
+      DATA_DIR=datasets/gpt2
+
+      python analysis/analyze_subset.py --data_dir $DATA_DIR
+      ```
+    </details>
 
 [1] E. Biran et al., "Hopping Too Late: Exploring Limitations of Large Language models on Multi-Hop Queries," in EMNLP 2024
 [2] Y. Yao et al., "CaKe: Circuit-aware Editing Enables Generalizable Knowledge Learners," in EMNLP 2025

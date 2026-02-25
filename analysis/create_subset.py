@@ -60,15 +60,15 @@ def sample_group(group: pd.DataFrame, n=100):
     return group.sample(n=min(len(group), n), random_state=42)
 
 df_r_correct_sampled = df_r_correct.groupby(["r1_type", "r2_type"], group_keys=False).apply(sample_group)
-df_r_correct_sampled.to_csv(dataset_dir / model_name / "correct.csv")
+df_r_correct_sampled.to_csv(dataset_dir / model_name / "composition_correct" / "two_hop.csv")
 print(f"Sampled df_r_correct from {len(df_r_correct)} to {len(df_r_correct_sampled)}")
 
 df_r_incorrect_sampled = df_r_incorrect[~df_r_incorrect.index.isin(df_r_inconsistent.index)].groupby(["r1_type", "r2_type"], group_keys=False).apply(sample_group, n=50)
-df_r_incorrect_sampled.to_csv(dataset_dir / model_name / "incorrect.csv")
+df_r_incorrect_sampled.to_csv(dataset_dir / model_name / "composition_incorrect" / "two_hop.csv")
 print(f"Sampled df_r_incorrect from {len(df_r_incorrect)} to {len(df_r_incorrect_sampled)}")
 
 df_r_inconsistent = df_r_inconsistent.groupby(["r1_type", "r2_type"], group_keys=False).apply(sample_group, n=30)
-df_r_inconsistent.to_csv(dataset_dir / model_name / "inconsistent.csv")
+df_r_inconsistent.to_csv(dataset_dir / model_name / "composition_inconsistent" / "two_hop.csv")
 print(f"Sampled df_r_inconsistent from {len(df_r_inconsistent)} to {len(df_r_inconsistent)}")
 
 # %%

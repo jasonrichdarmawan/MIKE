@@ -274,10 +274,9 @@ def main(args):
         dataset_path = f"{args.datasets_dir}/{model}"
         plots_path = f"{args.output_path}/{model}"
 
-        full_layers = load_layers(f"{dataset_path}/layers.csv")
         layers[model] = {
-            "correct": full_layers[full_layers["composition_correct"]],
-            "incorrect": full_layers[~full_layers["composition_correct"]]
+            "correct": load_layers(f"{dataset_path}/composition_correct/layers.csv"),
+            "incorrect": load_layers(f"{dataset_path}/composition_incorrect/layers.csv")
         }
         print(f"Correct setting example count: {len(layers[model]['correct'])}")
         print(f"Incorrect setting example count: {len(layers[model]['incorrect'])}")
@@ -296,11 +295,9 @@ def main(args):
         dataset_path = f"{args.datasets_dir}/{model}"
         plots_path = f"{args.output_path}/{model}"
 
-        e1_desc = load_entity_description(f"{dataset_path}/entity_description", "e1")
-        last_desc = load_entity_description(f"{dataset_path}/entity_description", "last")
         entity_descriptions[model] = {
-            "e1": e1_desc[e1_desc["composition_correct"]],
-            "last": last_desc[last_desc["composition_correct"]]
+            "e1": load_entity_description(f"{dataset_path}/composition_correct/entity_description", "e1"),
+            "last": load_entity_description(f"{dataset_path}/composition_correct/entity_description", "last")
         }
         print(f"Correct setting entity description counts:\n{get_entity_counts(layers[model]['correct'])}")
         print(f"Incorrect setting entity description counts:\n{get_entity_counts(layers[model]['incorrect'])}")
@@ -314,16 +311,14 @@ def main(args):
         dataset_path = f"{args.datasets_dir}/{model}"
         plots_path = f"{args.output_path}/{model}"
 
-        e1_bp = load_backpatching(f"{dataset_path}/activation_patching/e1_original_activation_patching_classified.csv")
-        last_bp = load_backpatching(f"{dataset_path}/activation_patching/last_original_activation_patching_classified.csv")
         backpatching[model] = {
             "correct": {
-                "e1": e1_bp[e1_bp["composition_correct"]],
-                "last": last_bp[last_bp["composition_correct"]]
+                "e1": load_backpatching(f"{dataset_path}/composition_correct/activation_patching/e1_original_activation_patching_classified.csv"),
+                "last": load_backpatching(f"{dataset_path}/composition_correct/activation_patching/last_original_activation_patching_classified.csv")
             },
             "incorrect": {
-                "e1": e1_bp[~e1_bp["composition_correct"]],
-                "last": last_bp[~last_bp["composition_correct"]]
+                "e1": load_backpatching(f"{dataset_path}/composition_incorrect/activation_patching/e1_original_activation_patching_classified.csv"),
+                "last": load_backpatching(f"{dataset_path}/composition_incorrect/activation_patching/last_original_activation_patching_classified.csv")
             }
         }
         plot_layer_matrix(backpatching[model]["incorrect"]["e1"], True, f"{plots_path}/backpatching_e1.pdf")
