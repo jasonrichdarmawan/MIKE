@@ -72,9 +72,9 @@ if __name__ == "__main__":
 
     MODEL_PATH = hparams.model_name
     if args.editing_method == 'CAKE':
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto",torch_dtype=torch.bfloat16)
+        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16)
     else:
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto",torch_dtype=torch.float32)
+        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.float32)
     # 添加FFN层的LoRA配置
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, use_fast=False)
     tokenizer.pad_token = tokenizer.eos_token
@@ -115,6 +115,6 @@ if __name__ == "__main__":
         print(metrics)
         all_metrics.append(metrics)
     res = calculate_averages(all_metrics)
-    os.makedirs(args.metrics_save_dir,exist_ok=True)
-    json.dump(all_metrics, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_metrics.json','w'),indent=4)
-    json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_res.json','w'),indent=4)
+    os.makedirs(args.metrics_save_dir, exist_ok=True)
+    json.dump(all_metrics, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_metrics.json','w'), indent=4)
+    json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_res.json','w'), indent=4)

@@ -170,35 +170,66 @@ def mello(task_prompt, q, model, tokenizer, stop, contriever, contriever_tokeniz
     return check_answer_in_pred(ans, answer), prompt
 
 
-def preprocess_function(examples,tokenizer):
-    # 将每个item_case_examples中的text和target组合
+def preprocess_function(examples, tokenizer):
+    """
+    Caveat:
+    - CaKE's implementation do not turn padded positions into -100
+    
+    Combine the `text` and `target` fields in each `item_case_examples`.
+    
+    examples: dicts-of-lists
+    """
     all_texts = []
     all_targets = []
     
     for item in examples['item_case_examples']:
+        """
+        example['text']: "Fernando Santos is a citizen of"
+        example['target']: "United Kingdom"
+        """
         for example in item:
             all_texts.append(example['text'])
             all_targets.append(example['target'])
             
-    # 组合输入和目标文本
+    # Combine input and target text
     inputs = [f"{text} {target}" for text, target in zip(all_texts, all_targets)]
     random.shuffle(inputs)
     learning_texts = []
     learning_targets = []
     for item in examples['learning_examples']:
+        """
+        example['text']: "If Maria lives in a mansion, Fernando Santos resides in a townhouse, and Jose lives in a bungalow, then the person who resides in a townhouse is a citizen of which country?"
+        example['target']: "The person who resides in a townhouse is a citizen of the United Kingdom."
+        """
         for example in item:
             learning_texts.append(example['text'])
             learning_targets.append(example['target'])
-    learning_inputs = [f"{text} {target}." for text, target in zip(learning_texts, learning_targets)]
+    learning_inputs = [f"{text} {target}" for text, target in zip(learning_texts, learning_targets)]
     random.shuffle(learning_inputs)
-    # 对整个序列进行tokenize
+    # Tokenize the entire sequence
     final_inputs = inputs + learning_inputs
     model_inputs = tokenizer(final_inputs, padding=True, truncation=True, max_length=256, return_tensors="np")
-    model_inputs['labels'] = model_inputs["input_ids"].copy()
+    labels = model_inputs["input_ids"].copy()
+    labels[model_inputs["attention_mask"] == 0] = -100
+    model_inputs['labels'] = labels
     return model_inputs
 
-def check_answer(model,question, tokenizer,answer, device,max_new_tokens=50):
-    """检查模型是否能正确回答问题"""
+def check_answer(model, question, tokenizer, answer, device, max_new_tokens=50):
+    """
+    Check if the model can answer the questions correctly
+    
+    Example:
+    - metrics['hop_wise']
+      - question:
+        - 'Answer: Fernando Santos is a citizen of'
+        - 'Question: What is the country of citizenship of Fernando Santos?\nAnswer: The answer is'
+      - answer: ["Britain", "UK", "G. B.", "GBR", ...]
+    - metrics['accuracy']
+      - question: 
+        - "Answer: The head of state of the country where Fernando Santos holds citizenship is"
+        - "Question: Who is the head of state of the country where Fernando Santos hold a citizenship?\nAnswer: The answer is"
+      - answer: ["Emerson Dambudzo Mnangagwa", ...]
+    """
     inputs = tokenizer(question, return_tensors="pt").to(device)
     outputs = model.generate(
         **inputs,
@@ -209,25 +240,74 @@ def check_answer(model,question, tokenizer,answer, device,max_new_tokens=50):
         pad_token_id=tokenizer.eos_token_id
     )
     generated_text = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-    return check_answer_in_pred(generated_text,answer)
+    return check_answer_in_pred(generated_text, answer), generated_text
 
 def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=False):
+    """
+    Caveat:
+    - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
+    
+    Example:
+    - edit_item['new_answer_alias']: ["Emerson Dambudzo Mnangagwa", ...]
+    - edit_item['new_answer']: "Emerson Mnangagwa"
+    - edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
+    - edit_item['questions']: ["Who is the head of state of the country where Fernando Santos hold a citizenship?"]
+    """
     metrics = {
-        'hop_wise':[],
-        'accuracy':[],
+        'hop_wise': [],
+        'accuracy': [],
+        'hop_wise_predictions': [],
+        'accuracy_predictions': []
     }
     device = f"cuda:{hparams.device}"
     for i in edit_item['new_single_hops']:
+        """
+        i['answer_alias']: ["Britain", "UK", "G. B.", "GBR", ...]
+        i['answer']: "United Kingdom"
+        i['cloze']: "Fernando Santos is a citizen of"
+        i['question']: "What is the country of citizenship of Fernando Santos?"
+        """
         temp_metrics = []
+        temp_predictions = []
         ans = i['answer_alias']
         ans.append(i['answer'])
-        temp_metrics.append(check_answer(model,'Answer: ' + i['cloze'],tokenizer,ans,device,max_new_tokens=10))
-        temp_metrics.append(check_answer(model,'Question: ' + i['question']+'\nAnswer: The answer is',tokenizer,ans,device,max_new_tokens=10))
+        question = 'Answer: ' + i['cloze']
+        result, generated_text = check_answer(model, question, tokenizer, ans, device, max_new_tokens=10)
+        temp_metrics.append(result)
+        temp_predictions.append({
+            "question": question,
+            "generated_text": generated_text,
+            "answer": ans
+        })
+        question = 'Question: ' + i['question'] + '\nAnswer: The answer is'
+        result, generated_text = check_answer(model, question, tokenizer, ans, device, max_new_tokens=10)
+        temp_metrics.append(result)
+        temp_predictions.append({
+            "question": question,
+            "generated_text": generated_text,
+            "answer": ans
+        })
         metrics['hop_wise'].append(temp_metrics)
+        metrics['hop_wise_predictions'].append(temp_predictions)
     answer = edit_item['new_answer_alias']
     answer.append(edit_item['new_answer'])
-    metrics['accuracy'].append(check_answer(model,'Answer: ' + edit_item['cloze_question'],tokenizer,answer,device,max_new_tokens=10))
-    metrics['accuracy'].append(check_answer(model,'Question: ' + edit_item['questions'][0]+'\nAnswer: The answer is',tokenizer,answer,device,max_new_tokens=10))
+    question = 'Answer: ' + edit_item['cloze_question']
+    result, generated_text = check_answer(model, question, tokenizer, answer, device, max_new_tokens=10)
+    metrics['accuracy'].append(result)
+    metrics['accuracy_predictions'].append({
+        "question": question,
+        "generated_text": generated_text,
+        "answer": answer
+    })
+    for i in edit_item['questions']:
+        question = 'Question: ' + i + '\nAnswer: The answer is'
+        result, generated_text = check_answer(model, question, tokenizer, answer, device, max_new_tokens=10)
+        metrics['accuracy'].append(result)
+        metrics['accuracy_predictions'].append({
+            "question": question,
+            "generated_text": generated_text,
+            "answer": answer
+        })
     return metrics
 
 def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, contriever_tokenizer, embs, test_generation=False):
@@ -257,14 +337,27 @@ def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriev
     return metrics
 
 def cake(original_model, tokenizer, item, hparams, test_generation=False):
-    target_modules = ["q_proj", "v_proj","k_proj","o_proj","up_proj","down_proj","gate_proj"] 
-    model = create_lora_model(original_model,target_modules=target_modules)
+    """
+    Caveat: return the base model after editing
+    """
+    target_modules = ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "gate_proj"] 
+    model = create_lora_model(original_model, target_modules=target_modules)
     # original_model = original_model.to(device)
     model.enable_input_require_grads()
     train_examples = []
     item_case_examples = []
     learning_examples = []
     for rewrite in item['requested_rewrite']:
+        """
+        prompt: "Fernando Santos is a citizen of"
+        target: "United Kingdom"
+        
+        rewrite_item['question']: "Which country issues Fernando Santos' passport?"
+        rewrite_item['answer']: "The United Kingdom issues Fernando Santos' passport as he is a citizen of the United Kingdom."
+        
+        learning_item['question']: "If Maria lives in a mansion, Fernando Santos resides in a townhouse, and Jose lives in a bungalow, then the person who resides in a townhouse is a citizen of which country?"
+        learning_item['answer']: "The person who resides in a townhouse is a citizen of the United Kingdom."
+        """
         prompt = rewrite['prompt'].format(rewrite['subject'])
         target = rewrite['target_new']['str']
         item_case_examples.append({
@@ -283,8 +376,8 @@ def cake(original_model, tokenizer, item, hparams, test_generation=False):
                     "text": learning_item['question'],
                     "target": learning_item['answer']
                 })
-    train_examples.append({'item_case_examples':item_case_examples,'learning_examples':learning_examples})
-    train_dataset = Dataset.from_list(train_examples)
+    train_examples.append({'item_case_examples': item_case_examples,'learning_examples': learning_examples})
+    train_dataset = Dataset.from_list(train_examples) # converts a Python list of dicts into Dataset where each list element becomes one row and dict keys become columns
     train_dataset = train_dataset.map(
         preprocess_function,
         batched=True,
@@ -293,16 +386,16 @@ def cake(original_model, tokenizer, item, hparams, test_generation=False):
     )
 
     training_args = TrainingArguments(
-            output_dir=f'./output/',
-            overwrite_output_dir=True,
-            num_train_epochs=40,
-            per_device_train_batch_size=4,
-            learning_rate=1e-4,
-            save_strategy="no",
-            bf16=True,
-            logging_steps=10,
-            report_to="none",
-        )
+        output_dir=f'./output/',
+        overwrite_output_dir=True,
+        num_train_epochs=40,
+        per_device_train_batch_size=4,
+        learning_rate=1e-4,
+        save_strategy="no",
+        bf16=True,
+        logging_steps=10,
+        report_to="none",
+    )
 
     trainer = Trainer(
         model=model,
