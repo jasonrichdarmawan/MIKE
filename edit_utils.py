@@ -7,6 +7,8 @@ from EasyEdit.easyeditor.util import nethook
 import random
 from datasets import Dataset
 from transformers import TrainingArguments, Trainer, StoppingCriteria, StoppingCriteriaList
+
+
 def mean_pooling(token_embeddings, mask):
     token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
     sentence_embeddings = token_embeddings.sum(dim=1) / mask.sum(dim=1)[..., None]
@@ -15,6 +17,39 @@ def mean_pooling(token_embeddings, mask):
 def check_answer_in_pred(pred, answers):
     pred = pred.lower()
     return any([a.lower() in pred for a in answers])
+
+
+def _supports_chat_template(tokenizer):
+    return hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template is not None
+
+
+def _format_chat_prompt(prompt, tokenizer):
+    if not _supports_chat_template(tokenizer):
+        return prompt
+    messages = [{"role": "user", "content": prompt}]
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+
+def _format_chat_train_pair(text, target, tokenizer):
+    """
+    Example:
+    - text: ""If Maria lives in a mansion, Fernando Santos resides in a townhouse, and Jose lives in a bungalow, then the person who resides in a townhouse is a citizen of which country?"
+    - target: "The person who resides in a townhouse is a citizen of the United Kingdom."
+    """
+    if not _supports_chat_template(tokenizer):
+        full_text = f"{text} {target}"
+        prompt_text = text
+        return full_text, prompt_text
+
+    full_messages = [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": target},
+    ]
+    prompt_messages = [{"role": "user", "content": text}]
+
+    full_text = tokenizer.apply_chat_template(full_messages, tokenize=False, add_generation_prompt=False)
+    prompt_text = tokenizer.apply_chat_template(prompt_messages, tokenize=False, add_generation_prompt=True)
+    return full_text, prompt_text
 
 def get_sent_embeddings(sents, contriever, tok, device, BSZ=32):
     all_embs = []
@@ -174,6 +209,7 @@ def preprocess_function(examples, tokenizer):
     """
     Caveat:
     - CaKE's implementation do not turn padded positions into -100
+    - CaKE's implementation do not use chat-template formatting, and do not mask the prompt part with -100
     
     Combine the `text` and `target` fields in each `item_case_examples`.
     
@@ -191,9 +227,9 @@ def preprocess_function(examples, tokenizer):
             all_texts.append(example['text'])
             all_targets.append(example['target'])
             
-    # Combine input and target text
-    inputs = [f"{text} {target}" for text, target in zip(all_texts, all_targets)]
-    random.shuffle(inputs)
+    # Build training pairs first so chat-template formatting can keep alignment.
+    pairs = list(zip(all_texts, all_targets))
+    random.shuffle(pairs)
     learning_texts = []
     learning_targets = []
     for item in examples['learning_examples']:
@@ -204,12 +240,39 @@ def preprocess_function(examples, tokenizer):
         for example in item:
             learning_texts.append(example['text'])
             learning_targets.append(example['target'])
-    learning_inputs = [f"{text} {target}" for text, target in zip(learning_texts, learning_targets)]
-    random.shuffle(learning_inputs)
-    # Tokenize the entire sequence
-    final_inputs = inputs + learning_inputs
-    model_inputs = tokenizer(final_inputs, padding=True, truncation=True, max_length=256, return_tensors="np")
+    learning_pairs = list(zip(learning_texts, learning_targets))
+    random.shuffle(learning_pairs)
+
+    # Tokenize with/without chat template using consistent prompt/target boundaries.
+    all_pairs = pairs + learning_pairs
+    full_sequences = []
+    prompt_sequences = []
+    for text, target in all_pairs:
+        full_text, prompt_text = _format_chat_train_pair(text, target, tokenizer)
+        full_sequences.append(full_text)
+        prompt_sequences.append(prompt_text)
+
+    model_inputs = tokenizer(
+        full_sequences,
+        padding=True,
+        truncation=True,
+        max_length=256,
+        return_tensors="np",
+        add_special_tokens=not _supports_chat_template(tokenizer),
+    )
+    prompt_inputs = tokenizer(
+        prompt_sequences,
+        padding=False,
+        truncation=True,
+        max_length=256,
+        return_tensors=None,
+        add_special_tokens=not _supports_chat_template(tokenizer),
+    )
+
     labels = model_inputs["input_ids"].copy()
+    for idx, prompt_ids in enumerate(prompt_inputs["input_ids"]):
+        prefix_length = min(len(prompt_ids), labels.shape[1])
+        labels[idx, :prefix_length] = -100
     labels[model_inputs["attention_mask"] == 0] = -100
     model_inputs['labels'] = labels
     return model_inputs
@@ -230,7 +293,12 @@ def check_answer(model, question, tokenizer, answer, device, max_new_tokens=50):
         - "Question: Who is the head of state of the country where Fernando Santos hold a citizenship?\nAnswer: The answer is"
       - answer: ["Emerson Dambudzo Mnangagwa", ...]
     """
-    inputs = tokenizer(question, return_tensors="pt").to(device)
+    prompt = _format_chat_prompt(question, tokenizer)
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        add_special_tokens=not _supports_chat_template(tokenizer),
+    ).to(device)
     outputs = model.generate(
         **inputs,
         max_new_tokens=max_new_tokens,
@@ -277,7 +345,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
         temp_predictions.append({
             "question": question,
             "generated_text": generated_text,
-            "answer": ans
+            "answer": i['answer']
         })
         question = 'Question: ' + i['question'] + '\nAnswer: The answer is'
         result, generated_text = check_answer(model, question, tokenizer, ans, device, max_new_tokens=10)
@@ -285,7 +353,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
         temp_predictions.append({
             "question": question,
             "generated_text": generated_text,
-            "answer": ans
+            "answer": i['answer']
         })
         metrics['hop_wise'].append(temp_metrics)
         metrics['hop_wise_predictions'].append(temp_predictions)
@@ -297,7 +365,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
     metrics['accuracy_predictions'].append({
         "question": question,
         "generated_text": generated_text,
-        "answer": answer
+        "answer": edit_item['new_answer']
     })
     for i in edit_item['questions']:
         question = 'Question: ' + i + '\nAnswer: The answer is'
@@ -306,7 +374,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
         metrics['accuracy_predictions'].append({
             "question": question,
             "generated_text": generated_text,
-            "answer": answer
+            "answer": edit_item['new_answer']
         })
     return metrics
 
@@ -376,7 +444,7 @@ def cake(original_model, tokenizer, item, hparams, test_generation=False):
                     "text": learning_item['question'],
                     "target": learning_item['answer']
                 })
-    train_examples.append({'item_case_examples': item_case_examples,'learning_examples': learning_examples})
+    train_examples.append({'item_case_examples': item_case_examples, 'learning_examples': learning_examples})
     train_dataset = Dataset.from_list(train_examples) # converts a Python list of dicts into Dataset where each list element becomes one row and dict keys become columns
     train_dataset = train_dataset.map(
         preprocess_function,

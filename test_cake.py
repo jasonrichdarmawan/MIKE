@@ -8,8 +8,15 @@ import torch
 import os
 
 def calculate_averages(data):
+    """
+    Caveat:
+    - CaKE's implementation only evaluate the 1st multi-hop question
+    
+    - "overall_hop_wise_average": the average of correctly answering the single-hop questions.
+    - "accuracy_averages": the average of correctly answering the multi-hop questions.
+    """
     total_cases = len(data)
-    accuracy_true_count = [0, 0] 
+    accuracy_case_averages = []
     hop_wise_case_averages = [] 
     
     for case in data:
@@ -24,19 +31,17 @@ def calculate_averages(data):
         case_hop_average = case_hop_true_count / total_hops
         hop_wise_case_averages.append(case_hop_average)
         
-        accuracy_true_count[0] += 1 if accuracy[0] else 0
-        accuracy_true_count[1] += 1 if accuracy[1] else 0
+        accuracy_true_count = sum(1 for x in accuracy if x)
+        accuracy_average = accuracy_true_count / len(accuracy)
+        accuracy_case_averages.append(accuracy_average)
     
     overall_hop_wise_avg = sum(hop_wise_case_averages) / total_cases
-    accuracy_avg = [count/total_cases for count in accuracy_true_count]
+    accuracy_avg = sum(accuracy_case_averages) / total_cases
     
     return {
         "total_cases": total_cases,
         "overall_hop_wise_average": f"{overall_hop_wise_avg:.3f}",
-        "accuracy_averages": {
-            "cloze": f"{accuracy_avg[0]:.3f}",
-            "qa": f"{accuracy_avg[1]:.3f}"
-        }
+        "accuracy_averages": f"{accuracy_avg:.3f}"
     }
 
 if __name__ == "__main__":
