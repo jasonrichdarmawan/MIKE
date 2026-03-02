@@ -30,8 +30,8 @@ for _, r1_g in r1_groups:
     for _, r2_g in r2_groups:
         match_group = shift_group(r2_g)
         
-        # add e2_new and e3_new only where both r2 and r3 match
-        mask = (r2_g["r1"] == match_group["r1"]) & (r2_g["r2"] == match_group["r2"])
+        # avoid writing if e2_new == e2 AND e3_new == e3
+        mask = (r2_g["e2"] != match_group["e2"]) | (r2_g["e3"] != match_group["e3"])
         
         r2_g["e2_new"] = None
         r2_g["e3_new"] = None
@@ -39,7 +39,6 @@ for _, r1_g in r1_groups:
         r2_g["e3_label_new"] = None
         r2_g["e2_aliases_new"] = None
         r2_g["e3_aliases_new"] = None
-        
         r2_g.loc[mask, "e2_new"] = match_group.loc[mask, "e2"].values
         r2_g.loc[mask, "e3_new"] = match_group.loc[mask, "e3"].values
         r2_g.loc[mask, "e2_label_new"] = match_group.loc[mask, "e2_label"].values
@@ -53,6 +52,32 @@ for _, r1_g in r1_groups:
 # concatenate all rows into a single dataframe
 result = pd.concat(rows)
 
+# %%
+# validate the result
+def check_errors(df):
+    # idenfity self mapping rows
+    self_mapping = (df["e2"] == df["e2_new"]) & (df["e3"] == df["e3_new"])
+
+    # identify rows with no counterfactuals generated
+    no_counterfactual = df["e2_new"].isna()
+
+    failiure_cases = df[self_mapping | no_counterfactual]
+
+
+    if not failiure_cases.empty:
+        print(f"{self_mapping.sum()} self mapping cases found.")
+        print(f"{no_counterfactual.sum()} rows with no counterfactuals generated.")
+        print("Errors found in the following rows:")
+        print(failiure_cases[['e1', 'e2', 'e3', 'e2_new', 'e3_new']].head())
+
+        print(f"total rows: {len(df)}")
+        print(f"total error rows: {len(failiure_cases)}")
+        print(f"total valid rows: {len(df) - len(failiure_cases)}")
+    else:
+        print("No errors found in the result.")
+check_errors(result)
+
+# %%
 # sort to ensure original order is maintained
 result.sort_index(inplace=True)
 
