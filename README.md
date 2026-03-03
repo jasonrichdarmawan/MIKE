@@ -16,7 +16,7 @@ This work aims to improve the knowledge editing performance under the multi-hop 
 
 Install micromamba:
 ```
-conda install conda-forge::micromamba
+brew install micromamba
 ```
 
 Note: You can use conda instead of micromamba. For our case, we have trouble in installing EasyEdit's requirements: `numpy==1.22.1` with conda.
@@ -48,9 +48,9 @@ micromamba install -c nvidia pytorch==2.1.0
 ```
 
 ```
-micromamba install tqdm==4.62.3 transformers==4.44.2 openai==0.27.9 peft==0.7.1 timm==0.9.7 iopath==0.1.10 sentencepiece seaborn
+micromamba install tqdm==4.62.3 transformers==4.44.2 openai==2.24.0 peft==0.7.1 timm==0.9.7 iopath==0.1.10 sentencepiece seaborn
 
-pip install opencv-python==0.48.0.76 fairscale==0.4.13
+pip install opencv-python==4.8.0.76 fairscale==0.4.13
 
 micromamba install beartype jaxtyping
 
@@ -59,6 +59,20 @@ pip install zhipuai sniffio
 
 ## 📚Analyze
 Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
+
+- Constructing MQuAKE for multi-lingual knowledge editing benchmark:
+  - Copy `datasets/MQuAKE-CF-3k-v2-cake.json` to `datasets/MQuAKE-CF-3k-v2-clke.json`
+  - Run `analysis/llm_translate.py` to translate
+  ```bash
+  DATA_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
+  MODEL="gpt-oss-120b"
+  ENDPOINT=<YOUR_ENDPOINT>
+  API_KEY=<YOUR_API_KEY>
+  : 'CASE_ID=<START> <STOP>"'
+  CASE_ID="1 1"
+  LANGUAGE="zh"
+  python analysis/llm_translate.py --dataset_path $DATA_PATH --model $MODEL --endpoint $ENDPOINT --api_key $API_KEY --case_id ${=CASE_ID} --language ${=LANGUAGE}
+  ```
 
 - E. Biran et al. [1]:
   - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/composition_{correct/incorrect/inconsistent}/two_hop.csv` files. Use it to do back-patching experiments.
