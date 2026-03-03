@@ -59,7 +59,6 @@ def parse_model_json(content: str):
     - '{"final": "{\\"answer\\": \\\"yes\\\"}"}' -> {"answer": "yes"}
     - 'Not JSON at all' -> None
     """
-    breakpoint()
     def unwrap_envelope(payload):
         if not isinstance(payload, dict):
             return payload
