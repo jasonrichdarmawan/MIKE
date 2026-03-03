@@ -118,10 +118,12 @@ def translate_case(case_data, target_lang_name, lang_code, max_retries=3):
     
 Rules:
 1. Output ONLY a valid JSON object.
-2. ROOT LEVEL ONLY: Do not wrap your response in parent keys like "final", "translated", or "json". The output must start directly with the same root keys as the input (e.g., {{"question": [...], "answer": "..."}}).
+2. ROOT LEVEL ONLY: Do not wrap your response in parent keys. The output must start directly with the same root keys as the input.
 3. Translate all string values, arrays of strings, and nested dictionaries into {target_lang_name}.
-4. CRITICAL FOR ALIASES: For 'answer_alias', you MUST provide the aliases, common names, short names, and transliterations as they are naturally used in {target_lang_name}. DO NOT copy English acronyms unless they are the primary way the entity is known.
-5. Retain any formatting or placeholders like {{}}."""
+4. CRITICAL FOR ALIASES: For 'answer_alias', you MUST provide natural aliases and transliterations. Do not just copy English acronyms.
+5. Retain any formatting or placeholders like {{}}.
+6. GRAMMAR & NUANCE: Ensure translations are grammatically correct. Preserve phrasing variations if multiple slightly different questions exist.
+7. CRITICAL FOR CLOZE: The 'cloze' key is for evaluating BASE language models via pure next-token prediction. It MUST be an abruptly incomplete sentence. DO NOT use placeholders like "...", "___", or "～". The string must cut off exactly before the target answer. For languages like Chinese or Japanese, you MUST rewrite the syntax (e.g., instead of "X is ~'s citizen", use "X's nationality is") so the target answer naturally falls at the absolute end of the string."""
 
     # Call the API (Using JSON mode if the model supports it)
     for attempt in range(1, max_retries + 1):
@@ -131,8 +133,16 @@ Rules:
                 {"role": "system", "content": system_prompt},
                 
                 # OPTIONAL: Add a 1-shot example if the model fails to follow instructions
-                {"role": "user", "content": json.dumps({"answer": "United Kingdom", "answer_alias": ["Britain", "UK", "GBR", "Great Britain", "The UK", "🇬🇧"]}, ensure_ascii=False)},
-                {"role": "assistant", "content": json.dumps({"answer": "イギリス", "answer_alias": ["英国", "グレートブリテン", "連合王国", "イギリス連合王国", "🇬🇧"]}, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps({
+                    "answer": "United Kingdom", 
+                    "answer_alias": ["Britain", "UK", "GBR", "Great Britain", "The UK", "🇬🇧"],
+                    "cloze_question": "Fernando Santos is a citizen of"
+                }, ensure_ascii=False)},
+                {"role": "assistant", "content": json.dumps({
+                    "answer": "イギリス", 
+                    "answer_alias": ["英国", "グレートブリテン", "連合王国", "イギリス連合王国", "🇬🇧"],
+                    "cloze_question": "フェルナンド・サントスが市民権を有する国は"
+                }, ensure_ascii=False)},
                 
                 {"role": "user", "content": json.dumps(input_json, ensure_ascii=False)}
             ],
