@@ -51,6 +51,12 @@ sns.set_style("whitegrid")
 SUBSETS = ["composition_correct", "composition_incorrect", "composition_inconsistent"]
 SUBSET_LABELS = ["correct", "incorrect", "inconsistent"]
 
+PROMPT_SUBDIR = {
+    "composition": "neuron_attribution",
+    "first-hop":   "neuron_attribution_first_hop",
+    "second-hop":  "neuron_attribution_second_hop",
+}
+
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
 
@@ -356,6 +362,97 @@ def plot_query_value_neurons(attn_query_neuron_data, ffn_neuron_data, n_layers, 
         plt.close()
 
 
+# ── Plot 7: neuron overlap across prompt types ────────────────────────────────
+
+def _jaccard_per_layer(df_a, df_b, id_cols, n_layers):
+    """
+    Mean Jaccard similarity per layer between two neuron DataFrames.
+
+    For each (example, layer), computes |intersection| / |union| of neuron sets
+    identified by id_cols (e.g. ['neuron_id'] for FFN, ['head', 'neuron_id'] for attn),
+    then averages across examples.
+
+    Returns: Series indexed by layer (0..n_layers-1), values in [0, 1].
+    """
+    key = ["id", "layer"] + id_cols
+
+    sets_a = (df_a.groupby(["id", "layer"])[id_cols]
+              .apply(lambda g: set(map(tuple, g.values)))
+              .rename("a"))
+    sets_b = (df_b.groupby(["id", "layer"])[id_cols]
+              .apply(lambda g: set(map(tuple, g.values)))
+              .rename("b"))
+
+    combined = sets_a.to_frame().join(sets_b, how="inner")
+    combined["jaccard"] = combined.apply(
+        lambda r: len(r["a"] & r["b"]) / len(r["a"] | r["b"])
+        if r["a"] | r["b"] else np.nan,
+        axis=1,
+    )
+    combined = combined.reset_index()
+    return (combined.groupby("layer")["jaccard"].mean()
+            .reindex(range(n_layers), fill_value=np.nan))
+
+
+def plot_neuron_overlap(overlap_data, n_layers, path):
+    """
+    Pairwise Jaccard similarity of top-K neuron sets across prompt types, per layer.
+
+    Two panels: FFN neurons (left) | Attn neurons (right).
+    One line per pair: composition↔first-hop, composition↔second-hop, first-hop↔second-hop.
+
+    Jaccard per (example, layer) = |intersection| / |union| of neuron identifiers.
+    FFN: identified by neuron_id. Attn: identified by (head, neuron_id).
+    Mean across examples shown with 95% CI band.
+
+    High overlap → same neurons activate regardless of prompt type (shared circuit).
+    Low overlap  → different neurons for different hops (separate circuits).
+
+    overlap_data: dict prompt_type -> {"ffn_neurons": df, "attn_neurons": df}
+                  (only prompt types with data are included)
+    """
+    pairs = [(a, b) for i, a in enumerate(overlap_data) for b in list(overlap_data)[i+1:]]
+    if not pairs:
+        print("  [SKIP] plot_neuron_overlap: need at least 2 prompt types")
+        return
+
+    pair_labels = {
+        ("composition", "first-hop"):  "composition ↔ first-hop",
+        ("composition", "second-hop"): "composition ↔ second-hop",
+        ("first-hop",   "second-hop"): "first-hop ↔ second-hop",
+    }
+
+    with sns.plotting_context("paper", font_scale=1.3):
+        fig, axes = plt.subplots(1, 2, figsize=(14, 4), sharey=True)
+        x = np.arange(n_layers)
+
+        for ax, neuron_key, id_cols, title in [
+            (axes[0], "ffn_neurons",  ["neuron_id"],         "FFN neuron overlap"),
+            (axes[1], "attn_neurons", ["head", "neuron_id"], "Attn neuron overlap"),
+        ]:
+            for pt_a, pt_b in pairs:
+                df_a = overlap_data[pt_a].get(neuron_key)
+                df_b = overlap_data[pt_b].get(neuron_key)
+                if df_a is None or df_b is None:
+                    continue
+                label = pair_labels.get((pt_a, pt_b), f"{pt_a} ↔ {pt_b}")
+                j = _jaccard_per_layer(df_a, df_b, id_cols, n_layers)
+                ax.plot(x, j.values, "o-", markersize=3, label=label)
+
+            ax.set_title(title)
+            ax.set_xlabel("Layer")
+            ax.set_ylabel("Mean Jaccard similarity")
+            ax.set_xticks(range(0, n_layers, 2))
+            ax.set_ylim(0, 1)
+            ax.axhline(0, color="black", linewidth=0.5)
+            ax.legend(loc="upper left", fontsize=8)
+
+        fig.tight_layout()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, bbox_inches="tight")
+        plt.close()
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(args):
@@ -445,6 +542,25 @@ def main(args):
             f"{plots_path}/query_value_neurons{prompt_suffix}.pdf",
         )
         print(f"Saved query value neurons  -> {plots_path}/query_value_neurons{prompt_suffix}.pdf")
+
+        # ── Neuron overlap across prompt types (always attempted) ─────────────
+        for subset, label in zip(SUBSETS, SUBSET_LABELS):
+            subset_dir = f"{dataset_path}/{subset}"
+            overlap_data = {}
+            for pt, subdir in PROMPT_SUBDIR.items():
+                try:
+                    d = load_neuron_lpi(subset_dir, subdir)
+                    overlap_data[pt] = {"ffn_neurons":  d["ffn_neurons"],
+                                        "attn_neurons": d["attn_neurons"]}
+                except FileNotFoundError:
+                    pass
+            if len(overlap_data) < 2:
+                print(f"  [SKIP] neuron overlap {label}: need data for 2+ prompt types")
+                continue
+            out = f"{plots_path}/neuron_overlap_{label}.pdf"
+            plot_neuron_overlap(overlap_data, n_layers, out)
+            print(f"Saved neuron overlap ({label}) -> {out}")
+
 
 
 if __name__ == "__main__":
