@@ -201,7 +201,8 @@ target_case_ids = list(range(start, stop + 1))
 
 missing_case_ids = [case_id for case_id in target_case_ids if case_id not in case_index]
 if missing_case_ids:
-    raise ValueError(f"case_id(s) not found in dataset: {missing_case_ids}")
+    print(f"Skipping missing case_id(s): {missing_case_ids}")
+    target_case_ids = [cid for cid in target_case_ids if cid in case_index]
 
 jobs = [
     (case_id, language)
