@@ -70,15 +70,29 @@ def load_neuron_lpi(dataset_dir: str, attr_subdir: str = "neuron_attribution"):
         p = path / fname
         return pd.read_csv(p) if p.exists() else None
 
-    return {
-        "sublayer":           pd.read_csv(path / "sublayer_lpi.csv"),
-        "head":               pd.read_csv(path / "head_lpi.csv"),
-        "ffn_neurons":        pd.read_csv(path / "ffn_neurons.csv"),
-        "attn_neurons":       pd.read_csv(path / "attn_neurons.csv"),
-        "ffn_query_layers":   _optional("ffn_query_layers.csv"),
-        "attn_query_layers":  _optional("attn_query_layers.csv"),
-        "attn_query_neurons": _optional("attn_query_neurons.csv"),
+    data = {
+        "sublayer":          pd.read_csv(path / "sublayer_lpi.csv"),
+        "head":              pd.read_csv(path / "head_lpi.csv"),
+        "ffn_neurons":       pd.read_csv(path / "ffn_neurons.csv"),
+        "attn_neurons":      pd.read_csv(path / "attn_neurons.csv"),
+        "ffn_query_layers":  _optional("ffn_query_layers.csv"),
+        "attn_query_layers": _optional("attn_query_layers.csv"),
     }
+    # Auto-detect chain depth: load all chain_order{N}_{ffn,attn}.csv present
+    order = 1
+    while True:
+        found_any = False
+        for ntype in ("ffn", "attn"):
+            key = f"chain_order{order}_{ntype}"
+            df  = _optional(f"{key}.csv")
+            data[key] = df
+            if df is not None:
+                found_any = True
+        if not found_any:
+            break
+        order += 1
+    data["chain_max_order"] = order - 1  # depth actually found on disk
+    return data
 
 
 # ── Plot 1: sublayer LPI line profile (subset comparison) ────────────────────
@@ -453,6 +467,71 @@ def plot_neuron_overlap(overlap_data, n_layers, path):
         plt.close()
 
 
+# ── Plot 8: chained backward attribution layer profile ────────────────────────
+
+def plot_chain_layer_profile(lpi_data, n_layers, path):
+    """
+    Grid of subplots showing mean backward-chain score per layer at each order.
+
+    Layout: max_order rows × 2 columns (FFN | Attn neuron type).
+    Each cell shows one line per subset (correct/incorrect/inconsistent).
+
+    Order 1 = direct activators of order-0 value neurons (second-hop mechanism).
+    Order 2 = activators of order-1 (bridge between hops).
+    Order 3 = activators of order-2 (expected first-hop computation).
+
+    High mean score at a layer → that layer's neurons strongly activate the
+    next-order neurons, revealing the layer-wise computational depth.
+    """
+    # Infer max_order from the data (use the maximum depth found across subsets)
+    max_order = max(
+        (lpi.get("chain_max_order", 0) for lpi in lpi_data.values()),
+        default=0,
+    )
+    if max_order == 0:
+        print("  [SKIP] plot_chain_layer_profile: no chain data available")
+        return
+
+    with sns.plotting_context("paper", font_scale=1.2):
+        fig, axes = plt.subplots(max_order, 2,
+                                 figsize=(12, 3 * max_order),
+                                 sharey="row")
+        if max_order == 1:
+            axes = [axes]  # ensure 2-D indexing
+
+        for order in range(1, max_order + 1):
+            row = order - 1
+            for col, ntype in enumerate(("ffn", "attn")):
+                ax = axes[row][col]
+                key = f"chain_order{order}_{ntype}"
+                for label, lpi in lpi_data.items():
+                    df = lpi.get(key)
+                    if df is None or len(df) == 0:
+                        continue
+                    mean_by_layer = (
+                        df.groupby("layer")["score"].mean()
+                        .reindex(range(n_layers), fill_value=0)
+                    )
+                    ax.plot(range(n_layers), mean_by_layer.values,
+                            "o-", markersize=2, label=label)
+
+                ax.axhline(0, color="black", linewidth=0.5)
+                ax.set_xlabel("Layer" if row == max_order - 1 else "")
+                ax.set_xticks(range(0, n_layers, 2))
+                ax.set_ylabel(f"Order {order}\nmean score" if col == 0 else "")
+                type_label = "FFN neurons" if ntype == "ffn" else "Attn neurons"
+                if row == 0:
+                    ax.set_title(type_label)
+                if row == 0 and col == 1:
+                    ax.legend(loc="upper right", fontsize=7)
+
+        fig.suptitle("Backward attribution chain by layer and order", y=1.01)
+        fig.tight_layout()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, bbox_inches="tight")
+        plt.close()
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(args):
@@ -535,13 +614,11 @@ def main(args):
         )
         print(f"Saved query layer bars     -> {plots_path}/query_layer_bars{prompt_suffix}.pdf")
 
-        plot_query_value_neurons(
-            {label: lpi[label]["attn_query_neurons"] for label in loaded},
-            {label: lpi[label]["ffn_neurons"]        for label in loaded},
-            n_layers,
-            f"{plots_path}/query_value_neurons{prompt_suffix}.pdf",
+        plot_chain_layer_profile(
+            lpi, n_layers,
+            f"{plots_path}/chain_layer_profile{prompt_suffix}.pdf",
         )
-        print(f"Saved query value neurons  -> {plots_path}/query_value_neurons{prompt_suffix}.pdf")
+        print(f"Saved chain layer profile  -> {plots_path}/chain_layer_profile{prompt_suffix}.pdf")
 
         # ── Neuron overlap across prompt types (always attempted) ─────────────
         for subset, label in zip(SUBSETS, SUBSET_LABELS):
