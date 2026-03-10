@@ -67,6 +67,8 @@ For example:
 # Import necessary libraries and modules
 
 import pandas as pd
+import numpy as np
+
 from IPython.display import display
 
 from create_dataset import RELATION_AFTER_ENTITY_TEMPLATES
@@ -234,16 +236,27 @@ display(df[mask][["e1_label", "r1_type", "r2_type", "e2_label", "source_prompt"]
 mask = (groups.transform("nunique") < 2)
 display(df[mask][["e1", "e1_label", "r1_type", "r2_type", "e2_type", "e2_label", "e3", "e3_label", "source_prompt"]])
 
+def has_no_valid_partner(group: pd.DataFrame, partner: str):
+  e1 = group["e1"].to_numpy()
+  e2 = group[partner].to_numpy()
+  partner = (e1[:, None] != e1[None, :]) & (e2[:, None] != e2[None, :])
+  np.fill_diagonal(partner, False)
+  return pd.Series(~partner.any(axis=1), index=group.index)
+
+mask_no_partner = df.groupby(["r1_type", "r2_type"], group_keys=False).apply(lambda g: has_no_valid_partner(g, "e2"))
+unswappable_instances = df[mask_no_partner]
+display(unswappable_instances[["e1_label", "r1_type", "r2_type", "e2_label", "source_prompt"]])
+
 # %%
-# check if the groups with less than 2 distinct `e2` values have different `e3` values, which means we can swap `e3` values to generate counterfactuals
+# check if the groups with less than 2 distinct `e2` values, but have more than 2 distinct `e3` values, which means we can swap `e3` values to generate counterfactuals
 """
 Findings:
-- only 1 pair of instance with the same `r1_type` and `r2_type`, different `e1`, same `e2`, but different `e3`.
-- the rest is the same `e1`, `r1_type`, `r2_type`, `e2`, but different `e3`.
+- Groups with less than 2 distinct `e2` values but more than 2 distinct `e3` values cannot be used to generate counterfactuals by swapping `e3` values
+  - This is because there is only 1 pair with the same `r1_type` and `r2_type`, different `e1`, same `e2`, but different `e3`. However, the `e1` of instance 1 and the `e3` of instance 2 are the same, which means we can't swap `e3` values to generate counterfactuals for these two instances.
+  - the rest is the same `e1`, `r1_type`, `r2_type`, `e2`, but different `e3`.
   - These instances exists because the answer to [r2 r1 e1] `source_prompt` have multiple `e3` values in Wikidata e.g. (Larry Page and Sergey Brin are both founders of Google Patents), but each instance only includes one of the `e3` values and duplicates the [r2 r1 e1] `source_prompt`.
-- Verdict: 
-  - Even groups with less than 2 distinct `e2` values but more than 2 distinct `e3` values cannot be used to generate counterfactuals by swapping `e3` values
-  - The solution might be to replace `e3` values without swapping. However, it might cause knowledge conflict (e.g. we change [e2, r2, e3 -> e3_new], there may be conflict with [e1, r1, e2] of other instances). So we will not generate counterfactuals for these groups
+- Verdict:
+  - We can't generate counterfactuals by swapping `e3` values for the remaining groups with less than 2 distinct `e2`, but have more than 2 distinct `e3` values.
   
 Question:
 1. if we change [subject, relation, target -> target_new],
@@ -254,15 +267,32 @@ Question:
        - there is a chance that there is no [subject, relation] of other instance to be used as reference (note: we should look [e1, r1] and [e2, r2] of other instances), which means we can't fix the knowledge conflict.
        - so, during the construction of counterfactuals, we need to have:
          - a column to indicate whether the instance have been swapped, and so should not be swapped again
-         - a memory of [subject, relation, target, target_new] to check at every instance, if [e1, r1] or [e2, r2] is in the memory bank and the target's instance is not target_new, then resolve the knowledge conflict.
+         - a memory of [subject, relation, target, target_new] to check when we are about to swap, if [e1, r1] is in the memory bank and the target's instance is not target_new, then resolve the knowledge conflict
+         - a column to indicate knowledge conflict can not be resolved, so that we can filter out these instances in the final counterfactual dataset
+   - if we change [e2, r2, e3 -> target_new], we only need to change it.
+   
+Verdict:
+- We will generate counterfactuals by swapping `e2` values in group of `r1_type` and `r2_type`, until all groups are swapped.
+- Store the counterfactual in a memory bank, so [subject, relation, target, target_new] is only changed once
+- After we swap `e2` values in all groups, we will check if there is knowledge conflict in [e1, r1] or [e2, r2] of that instance. If there is knowledge conflict, we will resolve it. If we can't resolve it, we will mark it in the column `knowledge_conflict` as True
 """
 
-groups_e3 = df[mask].groupby(["r1_type", "r2_type"])["e3"]
+def has_valid_partner(group: pd.DataFrame, partner: str):
+  e1 = group["e1"].to_numpy()
+  e3 = group[partner].to_numpy()
+  partner = (e1[:, None] != e1[None, :]) & (e3[:, None] != e3[None, :])
+  np.fill_diagonal(partner, False)
+  return pd.Series(partner.any(axis=1), index=group.index)
+
+groups_e3 = unswappable_instances.groupby(["r1_type", "r2_type"])["e3"]
 display(groups_e3.nunique()[groups_e3.nunique() >= 2])
 
 mask_e3 = (groups_e3.transform("nunique") >= 2)
 mask_e3 = mask_e3[mask_e3 == True]
 display(df.loc[mask_e3.index][["e1", "e1_label", "r1_type", "r2_type", "e2_type", "e2_label", "e3", "e3_type", "e3_label", "source_prompt"]])
+
+mask_swappable = unswappable_instances.groupby(["r1_type", "r2_type"], group_keys=False).apply(lambda g: has_valid_partner(g, "e3"))
+display(df[mask][mask_swappable][["e1", "e1_label", "r1_type", "r2_type", "e2_type", "e2_label", "e3", "e3_type", "e3_label", "source_prompt"]])
 
 # %%
 
@@ -276,6 +306,7 @@ def shift_group(g):
     return shifted
 
 # %%
+
 rows = []
 
 # group dataframe by r1
@@ -308,10 +339,12 @@ for _, r1_g in r1_groups:
 
 # %%
 # concatenate all rows into a single dataframe
+
 result = pd.concat(rows)
 
 # %%
 # validate the result
+
 def check_errors(df):
     # idenfity self mapping rows
     self_mapping = (df["e2"] == df["e2_new"]) & (df["e3"] == df["e3_new"])
@@ -333,14 +366,16 @@ def check_errors(df):
         print(f"total valid rows: {len(df) - len(failiure_cases)}")
     else:
         print("No errors found in the result.")
+
 check_errors(result)
 
 # %%
 # sort to ensure original order is maintained
-result.sort_index(inplace=True)
 
+result.sort_index(inplace=True)
 
 #%%
 # format and save the result
+
 result.drop("Unnamed: 0", axis=1, inplace=True)
 result.to_csv("../datasets/two_hop_counterfactual.csv")
