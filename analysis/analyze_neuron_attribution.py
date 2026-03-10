@@ -101,6 +101,18 @@ def load_overlap_position(subset_dir: str):
     return pd.read_csv(p) if p.exists() else None
 
 
+def load_overlap_position_by_layer(subset_dir: str):
+    """
+    Load overlap_position_by_layer.csv for a subset.
+
+    Columns: pair, neuron_class, ntype_a, order_a, ntype_b, order_b,
+             layer, side ("a" or "b"), position, mean_count, n
+    mean_count = average number of overlapping neurons at (layer, position) per example.
+    """
+    p = Path(subset_dir) / "overlap_position_by_layer.csv"
+    return pd.read_csv(p) if p.exists() else None
+
+
 def load_jaccard(subset_dir: str):
     """
     Load pre-computed Jaccard similarity CSV for a subset.
@@ -665,6 +677,101 @@ def plot_chain_position_dist(lpi_data, path):
         plt.close()
 
 
+# ── Plot 12: overlap position × layer heatmap ────────────────────────────────
+
+def plot_overlap_position_by_layer(overlap_pos_layer_df, n_layers, path, pair_key,
+                                   subset_label, two_hop_label="two-hop"):
+    """
+    Heatmap of overlapping neuron count by (layer, position) for each comparison.
+
+    One figure per (pair_key, subset_label).
+    Rows of the figure: neuron_class (FFN | Attn).
+    Cols of the figure: unique (order_a, order_b) comparisons, sorted by order.
+    Each cell: heatmap where x = position type, y = layer, colour = mean_count.
+    Side "a" (two-hop side) is shown — it is the richer chain and the key diagnostic.
+    """
+    if overlap_pos_layer_df is None or len(overlap_pos_layer_df) == 0:
+        print(f"  [SKIP] plot_overlap_position_by_layer({pair_key}, {subset_label}): no data")
+        return
+
+    sub = overlap_pos_layer_df[
+        (overlap_pos_layer_df["pair"] == pair_key) &
+        (overlap_pos_layer_df["side"] == "a")
+    ]
+    if len(sub) == 0:
+        print(f"  [SKIP] plot_overlap_position_by_layer({pair_key}): pair not found")
+        return
+
+    # Unique (order_a, order_b) comparisons: same-order first (diagonal), then cross-order
+    comparisons = sorted(
+        sub[["order_a", "order_b"]].drop_duplicates().itertuples(index=False),
+        key=lambda r: (r.order_a != r.order_b, r.order_a, r.order_b)
+    )
+    pos_types = ["e1", "r1", "r2", "last", "other"]
+    ncs = ["ffn", "attn"]
+    n_rows = len(ncs)
+    n_cols = len(comparisons)
+
+    vmax = sub["mean_count"].max() if len(sub) > 0 else 1.0
+
+    with sns.plotting_context("paper", font_scale=1.1):
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(max(3, 1.4 * len(pos_types)) * n_cols,
+                     max(3, 0.4 * n_layers) * n_rows),
+            squeeze=False,
+        )
+
+        for ri, nc in enumerate(ncs):
+            for ci, cmp in enumerate(comparisons):
+                ax = axes[ri][ci]
+                cell = sub[
+                    (sub["neuron_class"] == nc) &
+                    (sub["order_a"] == cmp.order_a) &
+                    (sub["order_b"] == cmp.order_b)
+                ]
+                # Build layer × position matrix via pivot
+                matrix = np.zeros((n_layers, len(pos_types)))
+                if len(cell) > 0:
+                    piv = (
+                        cell[cell["position"].isin(pos_types)]
+                        .pivot_table(index="layer", columns="position",
+                                     values="mean_count", aggfunc="sum", fill_value=0)
+                        .reindex(index=range(n_layers), columns=pos_types, fill_value=0)
+                    )
+                    matrix = piv.values
+
+                im = ax.imshow(matrix, aspect="auto", cmap="YlOrRd",
+                               vmin=0, vmax=vmax, origin="lower")
+                ax.set_xticks(range(len(pos_types)))
+                ax.set_xticklabels(pos_types, rotation=30, ha="right", fontsize=8)
+                ax.set_yticks(range(0, n_layers, max(1, n_layers // 6)))
+                ax.set_yticklabels(range(0, n_layers, max(1, n_layers // 6)), fontsize=8)
+
+                title_nc = "FFN" if nc == "ffn" else "Attn"
+                ax.set_title(f"{title_nc} | ord {cmp.order_a}↔{cmp.order_b}", fontsize=9)
+                if ci == 0:
+                    ax.set_ylabel("Layer")
+                if ri == n_rows - 1:
+                    ax.set_xlabel("Position")
+
+        fig.colorbar(
+            plt.cm.ScalarMappable(cmap="YlOrRd",
+                                  norm=plt.Normalize(vmin=0, vmax=vmax)),
+            ax=axes, orientation="vertical", label="Mean overlapping neuron count",
+            fraction=0.02, pad=0.04,
+        )
+        fig.suptitle(
+            f"Overlap position × layer: {pair_key} ({subset_label})\n"
+            f"Two-hop side shown",
+            y=1.01,
+        )
+        fig.tight_layout()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, bbox_inches="tight")
+        plt.close()
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(args):
@@ -765,8 +872,9 @@ def main(args):
 
         for label in SUBSET_LABELS:
             neuron_dir    = f"{dataset_path}/neuron_attribution/{label}"
-            jaccard_df    = load_jaccard(neuron_dir)
-            overlap_pos_df = load_overlap_position(neuron_dir)
+            jaccard_df              = load_jaccard(neuron_dir)
+            overlap_pos_df          = load_overlap_position(neuron_dir)
+            overlap_pos_layer_df    = load_overlap_position_by_layer(neuron_dir)
 
             # Same-order Jaccard overlap plots — one per unique order value
             orders_in_jaccard = []
@@ -806,6 +914,11 @@ def main(args):
                     out = f"{plots_path}/overlap_position_{slug}_{label}{prompt_suffix}.pdf"
                     plot_overlap_position(overlap_pos_df, out, pair_key, label)
                     print(f"Saved overlap position   ({one_hop_pt}, {label}) -> {out}")
+
+                    out = f"{plots_path}/overlap_pos_layer_{slug}_{label}{prompt_suffix}.pdf"
+                    plot_overlap_position_by_layer(overlap_pos_layer_df, n_layers,
+                                                  out, pair_key, label)
+                    print(f"Saved overlap pos×layer  ({one_hop_pt}, {label}) -> {out}")
 
             # Chain mean layer summary — load from compact chain_mean_layer.csv files
             for pt in PROMPT_TYPES:

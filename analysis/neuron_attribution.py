@@ -763,10 +763,13 @@ class _Accum:
 
 # ── Checkpoint helpers ────────────────────────────────────────────────────────
 
-def _save_checkpoint(path, accum, jaccard_accum, overlap_pos_accum, overlap_pos_n, next_idx):
+def _save_checkpoint(path, accum, jaccard_accum, overlap_pos_accum,
+                     overlap_pos_layer_accum, overlap_pos_n, next_idx):
     with open(path, "wb") as f:
         pickle.dump({"accum": accum, "jaccard_accum": jaccard_accum,
-                     "overlap_pos_accum": overlap_pos_accum, "overlap_pos_n": overlap_pos_n,
+                     "overlap_pos_accum": overlap_pos_accum,
+                     "overlap_pos_layer_accum": overlap_pos_layer_accum,
+                     "overlap_pos_n": overlap_pos_n,
                      "next_idx": next_idx}, f)
 
 
@@ -839,14 +842,16 @@ def main(args):
         start_idx = 0
         accum = {pt: _Accum() for pt in args.prompts}
         jaccard_accum = defaultdict(list)
-        overlap_pos_accum = defaultdict(float)  # key+(side,pos_label) -> total count
-        overlap_pos_n     = defaultdict(int)    # key -> n_examples
+        overlap_pos_accum       = defaultdict(float)  # key+(side,pos_label) -> total count
+        overlap_pos_layer_accum = defaultdict(float)  # key+(layer,side,pos_label) -> total count
+        overlap_pos_n           = defaultdict(int)    # key -> n_examples
         if ckpt_path.exists():
             ckpt = _load_checkpoint(ckpt_path)
             accum             = ckpt["accum"]
             jaccard_accum     = ckpt["jaccard_accum"]
-            overlap_pos_accum = ckpt.get("overlap_pos_accum", defaultdict(float))
-            overlap_pos_n     = ckpt.get("overlap_pos_n",     defaultdict(int))
+            overlap_pos_accum       = ckpt.get("overlap_pos_accum",       defaultdict(float))
+            overlap_pos_layer_accum = ckpt.get("overlap_pos_layer_accum", defaultdict(float))
+            overlap_pos_n           = ckpt.get("overlap_pos_n",           defaultdict(int))
             start_idx         = ckpt["next_idx"]
             print(f"  Resuming from checkpoint at example {start_idx}/{n}")
 
@@ -964,9 +969,11 @@ def main(args):
                                 for pos in nd_a.get(key, []):
                                     lbl = _resolve_pos_label(pos, pl_a)
                                     overlap_pos_accum[base_key + ("a", lbl)] += 1
+                                    overlap_pos_layer_accum[base_key + (layer, "a", lbl)] += 1
                                 for pos in nd_b.get(key, []):
                                     lbl = _resolve_pos_label(pos, pl_b)
                                     overlap_pos_accum[base_key + ("b", lbl)] += 1
+                                    overlap_pos_layer_accum[base_key + (layer, "b", lbl)] += 1
                         # Count this example (once per order-pair, not per layer)
                         overlap_pos_n[base_key] += 1
 
@@ -974,7 +981,8 @@ def main(args):
                 print(f"  {idx + 1}/{n}", end="\r", flush=True)
             if args.checkpoint_every > 0 and (idx + 1) % args.checkpoint_every == 0:
                 _save_checkpoint(ckpt_path, accum, jaccard_accum,
-                                 overlap_pos_accum, overlap_pos_n, idx + 1)
+                                 overlap_pos_accum, overlap_pos_layer_accum,
+                                 overlap_pos_n, idx + 1)
         print(f"  {n}/{n} done      ")
 
         # Save per-prompt-type compact outputs
@@ -1008,6 +1016,21 @@ def main(args):
         ]
         pd.DataFrame(overlap_pos_rows).to_csv(na_subset_dir / "overlap_position.csv", index=False)
         print(f"  -> {na_subset_dir}/overlap_position.csv ({len(overlap_pos_rows)} rows)")
+
+        # Save overlap position × layer distribution
+        overlap_pos_layer_rows = [
+            {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
+             "ntype_b": ntype_b, "order_b": ord_b, "layer": layer, "side": side,
+             "position": plabel,
+             "mean_count": cnt / max(overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)], 1),
+             "n": overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)]}
+            for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, layer, side, plabel), cnt
+            in overlap_pos_layer_accum.items()
+        ]
+        pd.DataFrame(overlap_pos_layer_rows).to_csv(
+            na_subset_dir / "overlap_position_by_layer.csv", index=False)
+        print(f"  -> {na_subset_dir}/overlap_position_by_layer.csv "
+              f"({len(overlap_pos_layer_rows)} rows)")
 
         # Clean up checkpoint after successful subset completion
         if ckpt_path.exists():
