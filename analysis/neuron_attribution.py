@@ -18,9 +18,12 @@ Outputs per (prompt_type, subset) under <data_dir>/neuron_attribution/<subset>/<
   chain_mean_layer.csv    — score-weighted mean layer per (order, ntype)
 
 Outputs per subset under <data_dir>/neuron_attribution/<subset>/ (covering all prompt-type pairs):
-  jaccard.csv             — mean Jaccard similarity per (pair, ntype, order_a, order_b, layer)
-                            Same-order rows (order_a == order_b) are used for value-neuron
-                            overlap plots; cross-order rows for the chain-hop heatmaps.
+  jaccard.csv             — mean Jaccard similarity per (pair, neuron_class, ntype_a, order_a,
+                            ntype_b, order_b, layer).  neuron_class is "ffn" or "attn" and
+                            groups same-class neurons regardless of chain ntype.
+                            Same-order same-ntype rows: used for value/query neuron overlap plots.
+                            Cross-order or cross-ntype (but same neuron_class) rows: used for
+                            the +1-order-shift chain-hop heatmaps.
 
 Example output tree for --data-dir datasets/gpt2:
     datasets/gpt2/neuron_attribution/
@@ -771,16 +774,19 @@ def main(args):
                     continue
                 pair_key = f"{pt_a}__{pt_b}"
                 for (ord_a, ntype_a), layers_a in sets_a.items():
+                    nc_a = "ffn" if ntype_a.startswith("ffn") else "attn"
                     for (ord_b, ntype_b), layers_b in sets_b.items():
-                        if ntype_a != ntype_b:
+                        nc_b = "ffn" if ntype_b.startswith("ffn") else "attn"
+                        if nc_a != nc_b:
                             continue
-                        ntype = ntype_a
                         for layer in range(layer_num):
                             s_a = layers_a.get(layer, frozenset())
                             s_b = layers_b.get(layer, frozenset())
                             j = _jaccard(s_a, s_b)
                             if not math.isnan(j):
-                                jaccard_accum[(pair_key, ntype, ord_a, ord_b, layer)].append(j)
+                                jaccard_accum[
+                                    (pair_key, nc_a, ntype_a, ord_a, ntype_b, ord_b, layer)
+                                ].append(j)
 
             if (idx + 1) % 10 == 0 or idx == n - 1:
                 print(f"  {idx + 1}/{n}", end="\r", flush=True)
@@ -799,11 +805,11 @@ def main(args):
 
         # Save cross-prompt Jaccard CSV in the neuron_attribution subset directory
         jaccard_rows = [
-            {"pair": pair, "ntype": ntype, "order_a": ord_a, "order_b": ord_b,
-             "layer": layer,
+            {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
+             "ntype_b": ntype_b, "order_b": ord_b, "layer": layer,
              "mean_jaccard": sum(vals) / len(vals),
              "n": len(vals)}
-            for (pair, ntype, ord_a, ord_b, layer), vals in jaccard_accum.items()
+            for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, layer), vals in jaccard_accum.items()
         ]
         pd.DataFrame(jaccard_rows).to_csv(na_subset_dir / "jaccard.csv", index=False)
         print(f"  -> {na_subset_dir}/jaccard.csv ({len(jaccard_rows)} rows)")

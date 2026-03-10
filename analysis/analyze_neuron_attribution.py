@@ -17,7 +17,6 @@ Two types of scores are used throughout:
 
 Produces:
   sublayer_lpi_profile.pdf    -- mean LPI per layer as lines (correct/incorrect/inconsistent)
-  sublayer_lpi_bars.pdf       -- interleaved attention/FFN bars per layer, one panel per subset
   head_lpi_heatmap.pdf        -- mean head LPI heatmap (layer x head) per subset
   neuron_layer_dist.pdf       -- top-K FFN and attn neuron counts per layer, one line per subset
   query_layer_bars.pdf        -- residual stream decomposition: LPI-weighted contribution of
@@ -93,9 +92,10 @@ def load_jaccard(subset_dir: str):
     """
     Load pre-computed Jaccard similarity CSV for a subset.
 
-    Columns: pair, ntype, order_a, order_b, layer, mean_jaccard, n
-    Same-order rows (order_a == order_b): used for value-neuron overlap plots.
-    Cross-order rows: used for chain-hop heatmaps.
+    Columns: pair, neuron_class, ntype_a, order_a, ntype_b, order_b, layer, mean_jaccard, n
+    neuron_class is "ffn" or "attn" (groups same-class neurons across chain ntypes).
+    Same-order same-ntype rows: used for value/query neuron overlap plots.
+    Cross-order or cross-ntype same-class rows: used for chain-hop heatmaps.
     """
     p = Path(subset_dir) / "jaccard.csv"
     return pd.read_csv(p) if p.exists() else None
@@ -135,47 +135,7 @@ def plot_sublayer_lpi_profile(lpi_data, n_layers: int, path: str):
         plt.close()
 
 
-# ── Plot 2: interleaved attention/FFN bars ────────────────────────────────────
-
-def plot_sublayer_lpi_bars(lpi_data, n_layers: int, path: str):
-    """
-    One panel per subset. At each layer, two adjacent bars:
-      darksalmon = attention mean LPI, lightseagreen = FFN mean LPI.
-    """
-    n = len(lpi_data)
-    with sns.plotting_context("paper", font_scale=1.3):
-        fig, axes = plt.subplots(1, n, figsize=(6 * n, 3.5), sharey=True)
-        if n == 1:
-            axes = [axes]
-
-        bar_w = 0.4
-        x = np.arange(n_layers)
-
-        for ax, (label, df) in zip(axes, lpi_data.items()):
-            stats = df.groupby(["layer", "sublayer"])["lpi"].agg(["mean", "sem"]).reset_index()
-            attn = stats[stats["sublayer"] == "attention"].set_index("layer").reindex(range(n_layers))
-            ffn  = stats[stats["sublayer"] == "ffn"].set_index("layer").reindex(range(n_layers))
-
-            ax.bar(x - bar_w / 2, attn["mean"], bar_w,
-                   yerr=attn["sem"], color="darksalmon", label="attention", capsize=2)
-            ax.bar(x + bar_w / 2, ffn["mean"],  bar_w,
-                   yerr=ffn["sem"],  color="lightseagreen", label="FFN", capsize=2)
-
-            ax.axhline(0, color="black", linewidth=0.6)
-            ax.set_title(label.capitalize())
-            ax.set_xlabel("Layer")
-            ax.set_xticks(range(0, n_layers, 2))
-            if ax == axes[0]:
-                ax.set_ylabel("Mean LPI")
-
-        axes[-1].legend(loc="upper left")
-        fig.tight_layout()
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(path, bbox_inches="tight")
-        plt.close()
-
-
-# ── Plot 3: head LPI heatmap ─────────────────────────────────────────────────
+# ── Plot 2: head LPI heatmap ─────────────────────────────────────────────────
 
 def plot_head_lpi_heatmap(lpi_data, n_layers: int, n_heads: int, path: str):
     """
@@ -297,14 +257,19 @@ def plot_neuron_overlap(jaccard_df, n_layers, path, order=0):
     """
     Pairwise Jaccard similarity of top-K neuron sets across prompt types, per layer.
 
-    Uses pre-computed jaccard.csv (same-order rows: order_a == order_b == order).
+    Uses pre-computed jaccard.csv (same-order same-ntype rows: order_a == order_b == order,
+    ntype_a == ntype_b). Filters by neuron_class ("ffn" | "attn") for two panels.
     Two panels: FFN neurons (left) | Attn neurons (right).
     """
     if jaccard_df is None or len(jaccard_df) == 0:
         print(f"  [SKIP] plot_neuron_overlap(order={order}): no jaccard data")
         return False
 
-    sub = jaccard_df[(jaccard_df["order_a"] == order) & (jaccard_df["order_b"] == order)]
+    sub = jaccard_df[
+        (jaccard_df["order_a"] == order) &
+        (jaccard_df["order_b"] == order) &
+        (jaccard_df["ntype_a"] == jaccard_df["ntype_b"])
+    ]
     if len(sub) == 0:
         print(f"  [SKIP] plot_neuron_overlap(order={order}): no data at this order")
         return False
@@ -315,26 +280,21 @@ def plot_neuron_overlap(jaccard_df, n_layers, path, order=0):
         "first-hop__second-hop": "first-hop ↔ second-hop",
     }
 
-    # At order 0: ntype labels are "ffn"/"attn" (value neurons).
-    # At order > 0: labels are "ffn→attn"/"attn→ffn" (chain neurons).
-    ntype_ffn  = "ffn"      if order == 0 else "ffn→attn"
-    ntype_attn = "attn"     if order == 0 else "attn→ffn"
-
     with sns.plotting_context("paper", font_scale=1.3):
         fig, axes = plt.subplots(1, 2, figsize=(14, 4), sharey=True)
         x = np.arange(n_layers)
         title_prefix = "Value neuron" if order == 0 else f"Order-{order} query neuron"
 
-        for ax, ntype, title in [
-            (axes[0], ntype_ffn,  f"{title_prefix} overlap (FFN)"),
-            (axes[1], ntype_attn, f"{title_prefix} overlap (Attn)"),
+        for ax, nc, title in [
+            (axes[0], "ffn",  f"{title_prefix} overlap (FFN)"),
+            (axes[1], "attn", f"{title_prefix} overlap (Attn)"),
         ]:
-            sub_nt = sub[sub["ntype"] == ntype]
+            sub_nt = sub[sub["neuron_class"] == nc]
             for pair in sub_nt["pair"].unique():
                 label = pair_labels.get(pair, pair)
                 by_layer = (
                     sub_nt[sub_nt["pair"] == pair]
-                    .set_index("layer")["mean_jaccard"]
+                    .groupby("layer")["mean_jaccard"].mean()
                     .reindex(range(n_layers), fill_value=np.nan)
                 )
                 ax.plot(x, by_layer.values, "o-", markersize=3, label=label)
@@ -361,10 +321,18 @@ def plot_cross_order_overlap(jaccard_df, n_layers, path, pair_key,
     """
     Cross-order Jaccard heatmap: one-hop chain orders (rows) vs two-hop chain orders (cols).
 
-    Uses pre-computed jaccard.csv with cross-order rows (order_a ≠ order_b).
-    Each cell = mean Jaccard similarity averaged over layers.
-    Two panels: FFN | Attn neurons.
+    Uses pre-computed jaccard.csv filtered by pair_key and neuron_class.
+    Each cell = mean Jaccard similarity of the corresponding (order_a, order_b) pair,
+    averaged over all layers. Supports cross-ntype same-class comparisons (e.g. first-hop
+    order-0 "ffn" vs two-hop order-1 "ffn→attn"), enabling the +1-order-shift hypothesis.
 
+    The three comparisons captured (for first-hop vs two-hop, FFN panel):
+      [row=0, col=1] first-hop order-0 "ffn"     ↔ two-hop order-1 "ffn→attn"
+      [row=1, col=2] first-hop order-1 "ffn→attn" ↔ two-hop order-2 "ffn→attn"
+    And for Attn panel:
+      [row=0, col=1] first-hop order-0 "attn"    ↔ two-hop order-1 "attn→ffn"
+
+    Two panels: FFN neurons (left) | Attn neurons (right).
     pair_key: e.g. "two-hop__first-hop"
     """
     if jaccard_df is None or len(jaccard_df) == 0:
@@ -376,36 +344,36 @@ def plot_cross_order_overlap(jaccard_df, n_layers, path, pair_key,
         print(f"  [SKIP] plot_cross_order_overlap({pair_key}): pair not found in jaccard.csv")
         return
 
-    # Determine axis orders from the pair key
     # pair_key = "pt_a__pt_b"; order_a corresponds to pt_a, order_b to pt_b
     pt_a, pt_b = pair_key.split("__")
-    # For the plot: rows = one_hop orders (pt that matches one_hop_label), cols = two-hop orders
+    # rows = one_hop orders, cols = two_hop orders
     if pt_a == two_hop_label:
-        row_col = "order_b"   # rows = one_hop (pt_b), cols = two_hop (pt_a)
-        col_col = "order_a"
+        row_col = "order_b"   # one_hop is pt_b
+        col_col = "order_a"   # two_hop is pt_a
     else:
-        row_col = "order_a"
-        col_col = "order_b"
+        row_col = "order_a"   # one_hop is pt_a
+        col_col = "order_b"   # two_hop is pt_b
 
     row_orders = sorted(sub[row_col].unique())
     col_orders = sorted(sub[col_col].unique())
 
     with sns.plotting_context("paper", font_scale=1.2):
         fig, axes = plt.subplots(1, 2,
-                                 figsize=(max(6, len(col_orders) * 1.2 + 2),
-                                          max(4, len(row_orders) * 1.2 + 1)))
+                                 figsize=(max(6, len(col_orders) * 1.5 + 2),
+                                          max(4, len(row_orders) * 1.5 + 1)))
 
-        for ax, ntype, title in [
+        for ax, nc, title in [
             (axes[0], "ffn",  "FFN neurons"),
             (axes[1], "attn", "Attn neurons"),
         ]:
-            sub_nt = sub[sub["ntype"] == ntype]
+            sub_nt = sub[sub["neuron_class"] == nc]
             matrix = np.full((len(row_orders), len(col_orders)), np.nan)
 
             for i, ro in enumerate(row_orders):
                 for j, co in enumerate(col_orders):
                     cell = sub_nt[(sub_nt[row_col] == ro) & (sub_nt[col_col] == co)]
                     if len(cell) > 0:
+                        # Average over layers (and over any ntype_a/ntype_b variants)
                         matrix[i, j] = cell["mean_jaccard"].mean()
 
             vmax = np.nanmax(matrix) if not np.all(np.isnan(matrix)) else 1.0
@@ -582,10 +550,6 @@ def main(args):
         plot_sublayer_lpi_profile(sublayer_data, n_layers,
                                   f"{plots_path}/sublayer_lpi_profile{prompt_suffix}.pdf")
         print(f"Saved sublayer LPI profile -> {plots_path}/sublayer_lpi_profile{prompt_suffix}.pdf")
-
-        plot_sublayer_lpi_bars(sublayer_data, n_layers,
-                               f"{plots_path}/sublayer_lpi_bars{prompt_suffix}.pdf")
-        print(f"Saved sublayer LPI bars    -> {plots_path}/sublayer_lpi_bars{prompt_suffix}.pdf")
 
         plot_head_lpi_heatmap(
             {label: lpi[label]["head"] for label in loaded},
