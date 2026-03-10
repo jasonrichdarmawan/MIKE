@@ -2,32 +2,50 @@
 Compute neuron-level LPI and chained backward attribution for all examples.
 
 Replaces neuron_lpi.py + neuron_query.py: loads the model once, loops over all
-prompt types and subsets, runs both analyses per example sharing one forward pass.
+subsets, and for each example runs all requested prompt types together (sharing
+one tokeniser/model call per prompt) so cross-prompt Jaccard can be computed
+on-the-fly without saving large per-example CSV files.
 
-Outputs per (prompt_type, subset) in the corresponding neuron_attribution_* directory:
+Outputs per (prompt_type, subset) under <data_dir>/neuron_attribution/<subset>/<prompt_type>/:
   sublayer_lpi.csv        — per-(example, layer, sublayer): lpi + top_k_tokens
-  head_lpi.csv            — per-(example, layer, head): lpi + top_k_tokens
-  ffn_neurons.csv         — top-K FFN value neurons (order 0): lpi + top_k_tokens
-  attn_neurons.csv        — top-K attn value neurons (order 0): lpi + top_k_tokens
+  head_lpi.csv            — per-(example, layer, head):     lpi + top_k_tokens
   ffn_query_layers.csv    — LPI-weighted residual contribution of prior layers to top-K FFN neurons
   attn_query_layers.csv   — LPI-weighted residual contribution of prior layers to top-K attn neurons
-  chain_order{N}_ffn.csv  — order-N FFN neurons in the alternating backward chain
-                            (FFN neurons that activate order-(N-1) attn neurons)
-  chain_order{N}_attn.csv — order-N attn value neurons in the alternating backward chain
-                            (attn neurons that activate order-(N-1) FFN neurons)
+  neuron_layer_dist.csv   — average neuron count per layer per example (all orders and ntypes)
+  chain_profile.csv       — mean attribution score per (order, ntype, layer)
+                            ntypes: "ffn"/"attn" at order 0; "attn←ffn"/"ffn←attn" at order 1;
+                            "ffn←attn" only at order 2
+  chain_mean_layer.csv    — score-weighted mean layer per (order, ntype)
 
-  The chain alternates: order-0 FFN/attn → order-1 (attn_query/ffn_query) → order-2 → ...
-  Second-hop computation is expected at orders 0-1; first-hop at orders 2-3.
+Outputs per subset under <data_dir>/neuron_attribution/<subset>/ (covering all prompt-type pairs):
+  jaccard.csv             — mean Jaccard similarity per (pair, ntype, order_a, order_b, layer)
+                            Same-order rows (order_a == order_b) are used for value-neuron
+                            overlap plots; cross-order rows for the chain-hop heatmaps.
+
+Example output tree for --data-dir datasets/gpt2:
+    datasets/gpt2/neuron_attribution/
+        correct/
+            two-hop/          sublayer_lpi.csv, chain_profile.csv, ...
+            first-hop/        sublayer_lpi.csv, ...
+            second-hop/       sublayer_lpi.csv, ...
+            jaccard.csv
+        incorrect/
+            ...
+        inconsistent/
+            ...
 
 Usage:
     python analysis/neuron_attribution.py
     python analysis/neuron_attribution.py --model-name gpt2 --subsets correct incorrect
-    python analysis/neuron_attribution.py --prompts composition first-hop second-hop
-    python analysis/neuron_attribution.py --prompts first-hop second-hop --subsets correct incorrect
+    python analysis/neuron_attribution.py --prompts two-hop first-hop second-hop
 """
 
 import argparse
+import math
+import pickle
 import sys
+from collections import defaultdict
+from itertools import combinations
 from pathlib import Path
 
 import patch_model
@@ -36,13 +54,9 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-# ── Output directory per prompt type ─────────────────────────────────────────
-
-PROMPT_SUBDIR = {
-    "composition": "neuron_attribution",
-    "first-hop":   "neuron_attribution_first_hop",
-    "second-hop":  "neuron_attribution_second_hop",
-}
+# Prompt type names are used directly as subdirectory names under
+# <data_dir>/neuron_attribution/<subset>/<prompt_type>/
+PROMPT_TYPES = ["two-hop", "first-hop", "second-hop"]
 
 
 # ── Projection helpers ────────────────────────────────────────────────────────
@@ -50,9 +64,6 @@ PROMPT_SUBDIR = {
 def project_to_vocab(vectors, final_std, ln_f_weight, lm_head):
     """
     Approximate final-LayerNorm + lm_head projection.
-
-    Uses a fixed normalization scale (final_std) computed from the last layer's
-    last-token output, matching the original neuron-attribution paper's approach.
 
     vectors: (..., hidden_dim)
     returns: (..., vocab_size) logits
@@ -66,21 +77,21 @@ def decode_top_k(vectors, final_std, ln_f_weight, lm_head, tokenizer, k=10):
     """
     Project vectors through the unembedding and return the top-k token strings.
 
-    vectors: (..., hidden_dim)  — single vector or batch
-    returns: list of top-k token strings per vector  (shape: [..., k] as nested list)
+    vectors: (..., hidden_dim)
+    returns: list of top-k token strings per vector
     """
     logits = project_to_vocab(vectors, final_std, ln_f_weight, lm_head)
     top_idx = logits.topk(k, dim=-1).indices
     if top_idx.dim() == 1:
-        return [tokenizer.decode([i]) for i in top_idx.tolist()]
+        return tokenizer.convert_ids_to_tokens(top_idx.tolist())
     flat = top_idx.reshape(-1, k).tolist()
-    return [[tokenizer.decode([i]) for i in row] for row in flat]
+    return [tokenizer.convert_ids_to_tokens(row) for row in flat]
 
 
 # ── LPI computations ──────────────────────────────────────────────────────────
 
 def compute_layer_lpi(states, layer_num, predict_index, final_std, ln_f_weight, lm_head,
-                       tokenizer, top_k_proj=10):
+                      tokenizer, top_k_proj=10):
     """
     Layer-level LPI: how much does each attention / FFN sublayer increase the
     log-probability of the predicted token?
@@ -133,13 +144,12 @@ def compute_head_lpi(states, info, layer_num, head_num, head_dim,
 
 
 def compute_ffn_neuron_lpi(states, info, layer_num, predict_index,
-                            final_std, ln_f_weight, lm_head,
-                            tokenizer, top_k=300, top_k_proj=10):
+                            final_std, ln_f_weight, lm_head, top_k=300):
     """
     FFN value neuron LPI: per-neuron contribution to the predicted token.
 
-    Returns top_k (layer_i, neuron_id, lpi_score, top_k_tokens) tuples globally,
-    sorted descending by score.
+    Returns top_k (layer_i, neuron_id, pos, lpi_score) tuples globally,
+    sorted descending by score. pos is always -1 (last token).
     """
     all_neurons = []
     for layer_i in range(layer_num):
@@ -156,57 +166,55 @@ def compute_ffn_neuron_lpi(states, info, layer_num, predict_index,
         k = min(top_k, lpi.shape[0])
         topk_scores, topk_idx = lpi.topk(k)
         for neuron_id, score in zip(topk_idx.tolist(), topk_scores.tolist()):
-            all_neurons.append((layer_i, neuron_id, score))
+            all_neurons.append((layer_i, neuron_id, -1, score))
 
-    all_neurons.sort(key=lambda x: x[2], reverse=True)
-    all_neurons = all_neurons[:top_k]
-
-    result = []
-    for layer_i, neuron_id, score in all_neurons:
-        fc2 = info["get_ffn_down_proj"](info["layers"][layer_i])
-        tokens = decode_top_k(fc2[neuron_id], final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj)
-        result.append((layer_i, neuron_id, score, tokens))
-    return result
+    all_neurons.sort(key=lambda x: x[3], reverse=True)
+    return all_neurons[:top_k]
 
 
 def compute_attn_neuron_lpi(states, info, layer_num, head_num, head_dim,
-                             predict_index, final_std, ln_f_weight, lm_head,
-                             tokenizer, top_k=300, top_k_proj=10):
+                             predict_index, final_std, ln_f_weight, lm_head, top_k=300):
     """
     Attention value neuron LPI: per-(layer, head, neuron_dim, source_pos) contribution.
 
-    Returns top_k (layer_i, head_i, neuron_id, pos, lpi_score, top_k_tokens) tuples globally,
+    Processes one source position at a time to bound peak memory at
+    (head_num × head_dim × hidden_dim) + (head_num × head_dim × vocab_size) per step,
+    avoiding the full (seq_len × head_num × head_dim × vocab_size) intermediate tensor.
+
+    Returns top_k (layer_i, head_i, neuron_id, pos, lpi_score) tuples globally,
     sorted descending by score.
     """
     all_neurons = []
     for layer_i in range(layer_num):
         layer_input_last = states[layer_i]["layer_input"][-1]
-        v_heads = states[layer_i]["attn_subvalues"].permute(1, 0, 2)
-        o_proj  = info["get_attn_o_proj"](info["layers"][layer_i])
-        neuron_contribs = v_heads.unsqueeze(-1) * o_proj
+        attn_sv = states[layer_i]["attn_subvalues"]           # (head_num, seq_len, head_dim)
+        o_proj  = info["get_attn_o_proj"](info["layers"][layer_i])  # (head_num, head_dim, hidden_dim)
+        seq_len = attn_sv.shape[1]
 
-        base = torch.log_softmax(project_to_vocab(layer_input_last, final_std, ln_f_weight, lm_head), -1)[predict_index]
-        plus   = neuron_contribs + layer_input_last
-        logits = project_to_vocab(plus, final_std, ln_f_weight, lm_head)
-        lpi    = torch.log_softmax(logits, -1)[..., predict_index] - base
+        base = torch.log_softmax(
+            project_to_vocab(layer_input_last, final_std, ln_f_weight, lm_head), -1
+        )[predict_index]
 
-        k = min(top_k, lpi.numel())
-        topk_scores, topk_flat_idx = lpi.reshape(-1).topk(k)
-        for flat_i, score in zip(topk_flat_idx.tolist(), topk_scores.tolist()):
-            pos      = flat_i // (head_num * head_dim)
-            head_i   = (flat_i % (head_num * head_dim)) // head_dim
-            neuron_i = flat_i % head_dim
-            all_neurons.append((layer_i, head_i, neuron_i, pos, score))
+        layer_neurons = []
+        for pos in range(seq_len):
+            v_pos = attn_sv[:, pos, :]                        # (head_num, head_dim)
+            neuron_contribs = v_pos.unsqueeze(-1) * o_proj    # (head_num, head_dim, hidden_dim)
+            plus   = neuron_contribs + layer_input_last
+            logits = project_to_vocab(plus, final_std, ln_f_weight, lm_head)
+            lpi    = torch.log_softmax(logits, -1)[..., predict_index] - base  # (head_num, head_dim)
+
+            k_pos = min(top_k, lpi.numel())
+            topk_scores, topk_flat_idx = lpi.reshape(-1).topk(k_pos)
+            for flat_i, score in zip(topk_flat_idx.tolist(), topk_scores.tolist()):
+                head_i   = flat_i // head_dim
+                neuron_i = flat_i % head_dim
+                layer_neurons.append((layer_i, head_i, neuron_i, pos, score))
+
+        layer_neurons.sort(key=lambda x: x[4], reverse=True)
+        all_neurons.extend(layer_neurons[:top_k])
 
     all_neurons.sort(key=lambda x: x[4], reverse=True)
-    all_neurons = all_neurons[:top_k]
-
-    result = []
-    for layer_i, head_i, neuron_i, pos, score in all_neurons:
-        o_proj = info["get_attn_o_proj"](info["layers"][layer_i])
-        tokens = decode_top_k(o_proj[head_i, neuron_i], final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj)
-        result.append((layer_i, head_i, neuron_i, pos, score, tokens))
-    return result
+    return all_neurons[:top_k]
 
 
 # ── Query computations ────────────────────────────────────────────────────────
@@ -214,9 +222,6 @@ def compute_attn_neuron_lpi(states, info, layer_num, head_num, head_dim,
 def _build_residual_components(states, layer_limit, pos):
     """
     Collect residual stream components at token position `pos` up to `layer_limit`.
-
-    For FFN query:   layer_limit = ffn_layer, pos = last token (-1)
-    For attn query:  layer_limit = attn_layer, pos = source token position
     """
     components = [states[0]["layer_input"][pos]]
     for i in range(layer_limit):
@@ -232,7 +237,7 @@ def compute_ffn_query_layers(states, info, top_neurons, layer_num):
     Returns: list of (layer_i, sublayer, score)
     """
     all_scores = [0.0] * (1 + 2 * layer_num)
-    for ffn_layer, neuron_id, lpi_score in top_neurons:
+    for ffn_layer, neuron_id, _pos, lpi_score in top_neurons:
         key_scaled = (
             info["get_ffn_key"](info["layers"][ffn_layer], neuron_id)
             * info["get_ffn_ln_weight"](info["layers"][ffn_layer])
@@ -289,14 +294,27 @@ def compute_attn_query_layers(states, info, top_neurons, layer_num, head_dim,
 
 
 def compute_attn_query_neurons(states, info, top_neurons, head_dim,
-                               head_num, num_kv_heads, top_k=300):
+                               head_num, num_kv_heads, coeff_stack, top_k=300):
     """
     Find which FFN neurons from prior layers most activate the top-K attn value neurons.
 
-    Returns: list of (layer_i, neuron_id, aggregate_score)
+    Tracks each found FFN neuron's source position (the sequence position at which the
+    FFN fired, i.e. the same position the attn V-key reads from).
+
+    coeff_stack: pre-stacked coeff_scores (layer_num, seq_len, ffn_dim) from process_example.
+    info must contain 'fc2_stack' (layer_num, ffn_dim, hidden_dim), pre-stacked in main().
+
+    Returns: list of (layer_i, neuron_id, pos, aggregate_score)
     """
-    num_groups  = head_num // num_kv_heads
-    ffn_scores = {}
+    num_groups = head_num // num_kv_heads
+    layer_num  = len(states)
+    ffn_dim    = coeff_stack.shape[-1]
+    seq_len    = coeff_stack.shape[1]
+    device     = coeff_stack.device
+
+    # acc[layer, pos, neuron] — per source-position to preserve positional identity
+    acc = torch.zeros(layer_num, seq_len, ffn_dim, device=device)
+
     for attn_layer, head_i, neuron_i, pos, lpi_score in top_neurons:
         kv_head_i   = head_i // num_groups
         flat_neuron = kv_head_i * head_dim + neuron_i
@@ -307,95 +325,121 @@ def compute_attn_query_neurons(states, info, top_neurons, head_dim,
         total = (states[attn_layer]["layer_input"][pos] * key_scaled).sum().item()
         if abs(total) < 1e-9:
             continue
-        for layer_i in range(attn_layer):
-            fc2   = info["get_ffn_down_proj"](info["layers"][layer_i])
-            coeff = states[layer_i]["coeff_scores"][pos]
-            contribs = coeff.unsqueeze(-1) * fc2
-            inner  = (contribs * key_scaled).sum(-1)
-            normed = inner / total * lpi_score
-            k = min(top_k, len(normed))
-            for idx in normed.topk(k).indices.tolist():
-                key = (layer_i, idx)
-                ffn_scores[key] = ffn_scores.get(key, 0.0) + normed[idx].item()
+        scale = lpi_score / total
+        if attn_layer > 0:
+            # Vectorised over layers: (attn_layer, ffn_dim, hidden_dim) @ (hidden_dim,) -> (attn_layer, ffn_dim)
+            fc2_proj = info["fc2_stack"][:attn_layer] @ key_scaled
+            acc[:attn_layer, pos] += fc2_proj * coeff_stack[:attn_layer, pos] * scale
 
-    sorted_neurons = sorted(ffn_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
-    return [(layer_i, neuron_id, score) for (layer_i, neuron_id), score in sorted_neurons]
+    flat = acc.reshape(-1)
+    k = min(top_k, flat.numel())
+    topk_vals, topk_idx = flat.topk(k)
+    stride_l = seq_len * ffn_dim
+    result = []
+    for flat_i, score in zip(topk_idx.tolist(), topk_vals.tolist()):
+        layer_i   = flat_i // stride_l
+        rem       = flat_i % stride_l
+        pos_out   = rem // ffn_dim
+        neuron_id = rem % ffn_dim
+        # Normalize last position to -1 for consistency with order-0 FFN tuples
+        if pos_out == seq_len - 1:
+            pos_out = -1
+        result.append((layer_i, neuron_id, pos_out, score))
+    return result
 
 
-def compute_ffn_query_neurons(states, info, top_neurons, head_num, head_dim, top_k=300):
+def compute_ffn_query_neurons(states, info, top_neurons, head_num, head_dim,
+                              attn_sv_stack, top_k=300):
     """
     Find which attention value neurons from prior layers most activate the top-K FFN neurons.
 
-    Symmetric to compute_attn_query_neurons but in the reverse direction:
-    - Target: FFN value neurons (ffn_layer, neuron_id, lpi_score)
-    - For each target, compute the FFN key projection (gate_proj row scaled by LN weight)
-    - Decompose the residual at last token position before FFN into attn value contributions
-    - Each attn value neuron (layer_i, head_i, neuron_i, pos) contributes:
-          attn_subvalues[head_i, pos, neuron_i] * o_proj[head_i, neuron_i, :]
-      to the residual; inner product with key_scaled gives attribution score
+    top_neurons: list of (layer_i, neuron_id, pos, lpi_score)
+      pos == -1 means last token (order-0 FFN neurons).
+      pos != -1 means a non-last source position (order≥1 chain neurons from
+      compute_attn_query_neurons); attn_subvalues only stores last-token attention
+      patterns, so the attn-source breakdown is skipped for those — only last-position
+      FFN targets contribute to the output.
 
-    Note: includes ffn_layer's own attention (residual before FFN = layer_input + attn_out).
+    Also fixes: same-layer attention (layer_i == ffn_layer) is now included,
+    since it writes directly into the FFN's input residual.
+
+    attn_sv_stack: pre-stacked attn_subvalues (layer_num, head_num, seq_len, head_dim).
+    info must contain 'o_proj_stack' (layer_num, head_num, head_dim, hidden_dim).
 
     Returns: list of (layer_i, head_i, neuron_id, pos, aggregate_score)
     """
-    attn_scores = {}
-    for ffn_layer, neuron_id, lpi_score in top_neurons:
+    layer_num = len(states)
+    seq_len   = attn_sv_stack.shape[2]
+    device    = attn_sv_stack.device
+
+    acc = torch.zeros(layer_num, head_num, seq_len, head_dim, device=device)
+
+    for ffn_layer, neuron_id, pos, lpi_score in top_neurons:
         key_scaled = (
             info["get_ffn_key"](info["layers"][ffn_layer], neuron_id)
             * info["get_ffn_ln_weight"](info["layers"][ffn_layer])
         )
-        # Normalize against the full residual at last token before FFN
-        residual = states[ffn_layer]["residual_output"][-1]
+        residual = states[ffn_layer]["residual_output"][pos]
         total = (residual * key_scaled).sum().item()
         if abs(total) < 1e-9:
             continue
+        scale = lpi_score / total
 
-        # Include attn contributions from layers 0..ffn_layer (inclusive: the FFN sees
-        # residual_output = layer_input + attn_out at ffn_layer)
-        for layer_i in range(ffn_layer + 1):
-            attn_sv = states[layer_i]["attn_subvalues"]  # [heads, seq, head_dim]
-            o_proj  = info["get_attn_o_proj"](info["layers"][layer_i])  # [heads, head_dim, hidden]
-            # dot_products[h, n] = (o_proj[h, n, :] * key_scaled).sum()
-            dot_products = (o_proj * key_scaled).sum(-1)              # [heads, head_dim]
-            # weighted[h, pos, n] = attn_sv[h, pos, n] * dot_products[h, n]
-            weighted = attn_sv * dot_products.unsqueeze(1)            # [heads, seq, head_dim]
-            normed   = weighted / total * lpi_score
+        # attn_subvalues = alpha[last_token, src_pos] * V[src_pos] — valid only for
+        # last-position FFN targets. Skip non-last positions to avoid wrong attribution.
+        if pos != -1:
+            continue
 
-            k = min(top_k, normed.numel())
-            topk_scores, topk_flat = normed.reshape(-1).topk(k)
-            seq_len = attn_sv.shape[1]
-            for flat_i, score in zip(topk_flat.tolist(), topk_scores.tolist()):
-                head_i   = flat_i // (seq_len * head_dim)
-                rem      = flat_i % (seq_len * head_dim)
-                pos      = rem // head_dim
-                neuron_i = rem % head_dim
-                key = (layer_i, head_i, neuron_i, pos)
-                attn_scores[key] = attn_scores.get(key, 0.0) + score
+        # Vectorised over layers: (ffn_layer+1, head_num, head_dim, hidden_dim) @ (hidden_dim,)
+        # -> (ffn_layer+1, head_num, head_dim)
+        dot_all = info["o_proj_stack"][:ffn_layer + 1] @ key_scaled
+        # attn_sv_stack[:ffn_layer+1]: (ffn_layer+1, head_num, seq_len, head_dim)
+        # dot_all.unsqueeze(2):        (ffn_layer+1, head_num, 1,        head_dim)
+        acc[:ffn_layer + 1] += attn_sv_stack[:ffn_layer + 1] * dot_all.unsqueeze(2) * scale
 
-    sorted_neurons = sorted(attn_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
-    return [(layer_i, head_i, neuron_i, pos, score)
-            for (layer_i, head_i, neuron_i, pos), score in sorted_neurons]
+    flat = acc.reshape(-1)
+    k = min(top_k, flat.numel())
+    topk_vals, topk_idx = flat.topk(k)
+    stride_h = seq_len * head_dim
+    stride_l = head_num * stride_h
+    result = []
+    for flat_i, score in zip(topk_idx.tolist(), topk_vals.tolist()):
+        layer_i  = flat_i // stride_l
+        rem      = flat_i % stride_l
+        head_i   = rem // stride_h
+        rem2     = rem % stride_h
+        pos      = rem2 // head_dim
+        neuron_i = rem2 % head_dim
+        result.append((layer_i, head_i, neuron_i, pos, score))
+    return result
 
 
 # ── Per-example driver ────────────────────────────────────────────────────────
 
 def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_dim,
-                    num_kv_heads, top_k_ffn, top_k_proj, top_k_query, max_order=None):
+                    num_kv_heads, top_k_ffn, top_k_proj, top_k_query, max_order=2):
     """
-    Run one forward pass and compute all LPI and chained backward attribution.
+    Run one forward pass and compute all LPI and fixed 2-order backward attribution.
 
-    LPI and query share the same forward pass states — no redundant computation.
-
-    The backward chain alternates FFN→attn and attn→FFN until both produce empty
-    neuron sets (chain naturally exhausted) or max_order is reached (safety cap).
-    With max_order=None (default) the chain runs to completion.
+    Chain structure (max_order controls depth):
+        order 0: "ffn"      — FFN value neurons (LPI)
+                 "attn"     — attn value neurons (LPI)
+        order 1: "attn←ffn" — attn neurons activating order-0 FFN  (FFN key decomp, validated)
+                 "ffn←attn" — FFN neurons activating order-0 attn  (attn V-key decomp)
+        order 2: "ffn←attn" — FFN neurons activating order-1 attn  (attn V-key decomp)
+                 ("attn←ffn" omitted at order 2: order-1 FFN are at non-last positions,
+                  attn_subvalues unavailable for those)
+    max_order=2 for two-hop; max_order=1 for first-hop and second-hop (order-2 adds
+    no interpretive value for single-hop prompts).
 
     Returns:
-        layer_rows, head_rows, ffn_rows, attn_neuron_rows,
-        ffn_query_rows, attn_query_rows,
-        chain   — list of (order, neuron_type, rows) for order 1..depth
-                  neuron_type "ffn"  -> [(layer_i, neuron_id, score)]
-                  neuron_type "attn" -> [(layer_i, head_i, neuron_id, pos, score)]
+        layer_rows   — [(layer_i, sublayer, lpi, top_k_tokens), ...]
+        head_rows    — [(layer_i, head_i, lpi, top_k_tokens), ...]
+        ffn_top      — [(layer_i, neuron_id, pos, score), ...]   (order-0 FFN, pos=-1)
+        attn_top     — [(layer_i, head_i, neuron_i, pos, score), ...]
+        ffn_query_rows  — [(layer_i, sublayer, score), ...]
+        attn_query_rows — [(layer_i, sublayer, score), ...]
+        chain        — [(order, ntype, rows), ...]
     """
     device = next(model.parameters()).device
     tokens = tokenizer.encode(prompt)
@@ -406,72 +450,186 @@ def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_di
 
     states = patch_model.extract_states(layer_num)
 
-    last_hidden = states[-1]["layer_output"][-1]
-    final_std = (last_hidden.var(unbiased=False) + 1e-5).sqrt().item()
-    predict_index = info["lm_head"](
-        (last_hidden - last_hidden.mean()) / final_std * info["ln_f_weight"]
-    ).argmax().item()
+    with torch.no_grad():
+        last_hidden = states[-1]["layer_output"][-1]
+        final_std = (last_hidden.var(unbiased=False) + 1e-5).sqrt().item()
+        predict_index = info["lm_head"](
+            (last_hidden - last_hidden.mean()) / final_std * info["ln_f_weight"]
+        ).argmax().item()
 
-    ln_f_weight = info["ln_f_weight"]
-    lm_head     = info["lm_head"]
+        ln_f_weight = info["ln_f_weight"]
+        lm_head     = info["lm_head"]
 
-    # LPI
-    layer_rows = compute_layer_lpi(
-        states, layer_num, predict_index, final_std, ln_f_weight, lm_head,
-        tokenizer, top_k_proj=top_k_proj)
-    head_rows = compute_head_lpi(
-        states, info, layer_num, head_num, head_dim,
-        predict_index, final_std, ln_f_weight, lm_head,
-        tokenizer, top_k_proj=top_k_proj)
-    ffn_rows = compute_ffn_neuron_lpi(
-        states, info, layer_num, predict_index,
-        final_std, ln_f_weight, lm_head,
-        tokenizer, top_k=top_k_ffn, top_k_proj=top_k_proj)
-    attn_neuron_rows = compute_attn_neuron_lpi(
-        states, info, layer_num, head_num, head_dim,
-        predict_index, final_std, ln_f_weight, lm_head,
-        tokenizer, top_k=top_k_ffn, top_k_proj=top_k_proj)
+        # Pre-stack per-example tensors once; avoids repeated dict-access inside loops
+        coeff_stack   = torch.stack([s["coeff_scores"]   for s in states])  # (L, seq, ffn_dim)
+        attn_sv_stack = torch.stack([s["attn_subvalues"] for s in states])  # (L, head, seq, d)
 
-    # Layer-level query decomposition — reuse same states
-    ffn_top  = [(r[0], r[1], r[2]) for r in ffn_rows]
-    attn_top = [(r[0], r[1], r[2], r[3], r[4]) for r in attn_neuron_rows]
+        layer_rows = compute_layer_lpi(
+            states, layer_num, predict_index, final_std, ln_f_weight, lm_head,
+            tokenizer, top_k_proj=top_k_proj)
+        head_rows = compute_head_lpi(
+            states, info, layer_num, head_num, head_dim,
+            predict_index, final_std, ln_f_weight, lm_head,
+            tokenizer, top_k_proj=top_k_proj)
+        ffn_top = compute_ffn_neuron_lpi(
+            states, info, layer_num, predict_index,
+            final_std, ln_f_weight, lm_head, top_k=top_k_ffn)
+        attn_top = compute_attn_neuron_lpi(
+            states, info, layer_num, head_num, head_dim,
+            predict_index, final_std, ln_f_weight, lm_head, top_k=top_k_ffn)
 
-    ffn_query_rows  = compute_ffn_query_layers(states, info, ffn_top, layer_num)
-    attn_query_rows = compute_attn_query_layers(states, info, attn_top, layer_num, head_dim,
-                                                head_num, num_kv_heads)
+        ffn_query_rows  = compute_ffn_query_layers(states, info, ffn_top, layer_num)
+        attn_query_rows = compute_attn_query_layers(states, info, attn_top, layer_num, head_dim,
+                                                    head_num, num_kv_heads)
 
-    # Chained backward attribution: alternates FFN→attn and attn→FFN.
-    # Runs until both next sets are empty (chain naturally exhausted at layer 0)
-    # or until max_order steps (safety cap; None = no cap).
-    chain = []
-    cur_ffn  = ffn_top   # [(layer_i, neuron_id, score)]
-    cur_attn = attn_top  # [(layer_i, head_i, neuron_i, pos, score)]
-    order = 0
+        chain = []
 
-    while True:
-        order += 1
-        if max_order is not None and order > max_order:
-            break
+        # Order 1
+        ord1_attn = compute_ffn_query_neurons(
+            states, info, ffn_top, head_num, head_dim, attn_sv_stack, top_k=top_k_query)
+        ord1_ffn  = compute_attn_query_neurons(
+            states, info, attn_top, head_dim, head_num, num_kv_heads, coeff_stack,
+            top_k=top_k_query)
+        if ord1_attn:
+            chain.append((1, "attn←ffn", ord1_attn))
+        if ord1_ffn:
+            chain.append((1, "ffn←attn", ord1_ffn))
 
-        # FFN neurons that activated the previous order's attn neurons
-        next_ffn = compute_attn_query_neurons(
-            states, info, cur_attn, head_dim, head_num, num_kv_heads, top_k=top_k_query)
+        # Order 2: only "ffn←attn" from order-1 "attn←ffn"
+        # "attn←ffn" at order 2 is omitted — order-1 FFN are at non-last positions
+        # and attn_subvalues does not cover per-position attention patterns.
+        if max_order >= 2 and ord1_attn:
+            ord2_ffn = compute_attn_query_neurons(
+                states, info, ord1_attn, head_dim, head_num, num_kv_heads, coeff_stack,
+                top_k=top_k_query)
+            if ord2_ffn:
+                chain.append((2, "ffn←attn", ord2_ffn))
 
-        # Attn neurons that activated the previous order's FFN neurons
-        next_attn = compute_ffn_query_neurons(
-            states, info, cur_ffn, head_num, head_dim, top_k=top_k_query)
-
-        if not next_ffn and not next_attn:
-            break  # chain exhausted: nothing left to look back at
-
-        chain.append((order, "ffn", next_ffn))
-        chain.append((order, "attn", next_attn))
-
-        cur_ffn  = next_ffn  if next_ffn  else cur_ffn
-        cur_attn = next_attn if next_attn else cur_attn
-
-    return (layer_rows, head_rows, ffn_rows, attn_neuron_rows,
+    return (layer_rows, head_rows, ffn_top, attn_top,
             ffn_query_rows, attn_query_rows, chain)
+
+
+# ── Neuron-set helpers for Jaccard ────────────────────────────────────────────
+
+def _get_prompt(row, prompt_type):
+    if prompt_type == "two-hop":
+        return row["source_prompt"]
+    elif prompt_type == "first-hop":
+        return f"{row['r1_template'].format(row['e1_label'])} is"
+    elif prompt_type == "second-hop":
+        return f"{row['r2_template'].format(row['e2_label'])} is"
+
+
+def _ffn_sets_by_layer(neurons):
+    """[(layer_i, neuron_id, pos, score), ...] -> {layer: frozenset(neuron_id)}"""
+    d = defaultdict(set)
+    for layer_i, neuron_id, _pos, score in neurons:
+        d[layer_i].add(neuron_id)
+    return {l: frozenset(s) for l, s in d.items()}
+
+
+def _attn_sets_by_layer(neurons):
+    """[(layer_i, head_i, neuron_i, pos, score), ...] -> {layer: frozenset((head_i, neuron_i))}
+    Position is intentionally ignored so the same circuit component at different
+    source positions is treated as one neuron.
+    """
+    d = defaultdict(set)
+    for layer_i, head_i, neuron_i, pos, score in neurons:
+        d[layer_i].add((head_i, neuron_i))
+    return {l: frozenset(s) for l, s in d.items()}
+
+
+def _jaccard(s_a, s_b):
+    u = s_a | s_b
+    return len(s_a & s_b) / len(u) if u else float("nan")
+
+
+# ── Per-prompt-type accumulator ───────────────────────────────────────────────
+
+class _Accum:
+    """
+    Accumulates per-example statistics for one (prompt_type, subset) combination.
+
+    The compact outputs avoid storing one row per neuron per example:
+      neuron_layer_dist.csv  — mean_count per (order, ntype, layer)
+      chain_profile.csv      — mean_score per (order, ntype, layer)
+      chain_mean_layer.csv   — score-weighted mean layer per (order, ntype)
+    """
+    def __init__(self):
+        self.layer_rows      = []
+        self.head_rows       = []
+        self.ffn_query_rows  = []
+        self.attn_query_rows = []
+        self.n_examples      = 0
+        # (order, ntype, layer) accumulators
+        self.count_sum   = defaultdict(float)   # sum of #neurons per example
+        self.score_sum   = defaultdict(float)   # sum of scores (per individual neuron)
+        self.score_count = defaultdict(int)     # number of neurons seen
+        # (order, ntype) accumulators for mean-layer calculation
+        self.wt_layer_sum = defaultdict(float)  # sum(|score| * layer)
+        self.wt_sum       = defaultdict(float)  # sum(|score|)
+        self.wt_n         = defaultdict(int)    # total neuron count
+
+    def add_neurons(self, order, ntype, neurons):
+        """Register one example's neuron rows for aggregation."""
+        counts = defaultdict(int)
+        for row in neurons:
+            layer_i = row[0]
+            score   = row[-1]
+            counts[layer_i] += 1
+            self.score_sum[(order, ntype, layer_i)]   += score
+            self.score_count[(order, ntype, layer_i)] += 1
+            w = abs(score)
+            self.wt_layer_sum[(order, ntype)] += w * layer_i
+            self.wt_sum[(order, ntype)]       += w
+            self.wt_n[(order, ntype)]         += 1
+        for layer_i, cnt in counts.items():
+            self.count_sum[(order, ntype, layer_i)] += cnt
+
+    def save(self, output_dir, n_examples):
+        """Write compact CSV files to output_dir."""
+        pd.DataFrame(self.layer_rows).to_csv(output_dir / "sublayer_lpi.csv",     index=False)
+        pd.DataFrame(self.head_rows).to_csv(output_dir / "head_lpi.csv",           index=False)
+        pd.DataFrame(self.ffn_query_rows).to_csv(output_dir / "ffn_query_layers.csv",  index=False)
+        pd.DataFrame(self.attn_query_rows).to_csv(output_dir / "attn_query_layers.csv", index=False)
+
+        # Neuron layer distribution
+        dist_rows = [
+            {"order": order, "ntype": ntype, "layer": layer,
+             "mean_count": cnt / n_examples}
+            for (order, ntype, layer), cnt in self.count_sum.items()
+        ]
+        pd.DataFrame(dist_rows).to_csv(output_dir / "neuron_layer_dist.csv", index=False)
+
+        # Chain profile (mean score per layer)
+        profile_rows = [
+            {"order": order, "ntype": ntype, "layer": layer,
+             "mean_score": self.score_sum[(order, ntype, layer)] / n,
+             "n": n}
+            for (order, ntype, layer), n in self.score_count.items()
+        ]
+        pd.DataFrame(profile_rows).to_csv(output_dir / "chain_profile.csv", index=False)
+
+        # Score-weighted mean layer per (order, ntype)
+        mean_layer_rows = [
+            {"order": order, "ntype": ntype,
+             "mean_layer": self.wt_layer_sum[(order, ntype)] / wt,
+             "n_neurons": self.wt_n[(order, ntype)]}
+            for (order, ntype), wt in self.wt_sum.items() if wt > 0
+        ]
+        pd.DataFrame(mean_layer_rows).to_csv(output_dir / "chain_mean_layer.csv", index=False)
+
+
+# ── Checkpoint helpers ────────────────────────────────────────────────────────
+
+def _save_checkpoint(path, accum, jaccard_accum, next_idx):
+    with open(path, "wb") as f:
+        pickle.dump({"accum": accum, "jaccard_accum": jaccard_accum, "next_idx": next_idx}, f)
+
+
+def _load_checkpoint(path):
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -481,9 +639,10 @@ def main(args):
     print(f"Device: {device}  Model: {args.model_name}")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    is_llama = "llama" in args.model_name.lower()
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
-        attn_implementation="eager",  # required for Llama (SDPA doesn't expose attn weights)
+        **({"attn_implementation": "eager"} if is_llama else {}),
     ).to(device)
     model.eval()
 
@@ -491,129 +650,167 @@ def main(args):
     info = patch_model.model_info(model)
 
     cfg = model.config
-    if hasattr(cfg, "n_layer"):           # GPT-2
+    # layer_num must be known before pre-stacking weights; resolve it first
+    if hasattr(cfg, "n_layer"):
+        _layer_num_tmp = cfg.n_layer
+    elif hasattr(cfg, "num_hidden_layers"):
+        _layer_num_tmp = cfg.num_hidden_layers
+    else:
+        raise ValueError(f"Cannot infer layer count from {type(cfg).__name__}")
+
+    # Pre-stack weight tensors once — avoids repeated lambda calls per example/layer
+    with torch.no_grad():
+        info["fc2_stack"] = torch.stack([
+            info["get_ffn_down_proj"](info["layers"][i]) for i in range(_layer_num_tmp)
+        ])  # (layer_num, ffn_dim, hidden_dim)
+        info["o_proj_stack"] = torch.stack([
+            info["get_attn_o_proj"](info["layers"][i]).contiguous() for i in range(_layer_num_tmp)
+        ])  # (layer_num, head_num, head_dim, hidden_dim)
+    if hasattr(cfg, "n_layer"):
         layer_num    = cfg.n_layer
         head_num     = cfg.n_head
         head_dim     = cfg.n_embd // cfg.n_head
-        num_kv_heads = cfg.n_head          # no GQA
-    elif hasattr(cfg, "num_hidden_layers"):  # Llama
+        num_kv_heads = cfg.n_head
+    else:
         layer_num    = cfg.num_hidden_layers
         head_num     = cfg.num_attention_heads
         head_dim     = cfg.hidden_size // cfg.num_attention_heads
-        num_kv_heads = cfg.num_key_value_heads  # may differ from head_num (GQA)
-    else:
-        raise ValueError(f"Cannot infer layer/head config from {type(cfg).__name__}")
+        num_kv_heads = cfg.num_key_value_heads
 
     data_dir = Path(args.data_dir)
+    prompt_pairs = list(combinations(args.prompts, 2))
 
-    for prompt_type in args.prompts:
-        output_subdir = PROMPT_SUBDIR[prompt_type]
-        print(f"\n=== prompt={prompt_type} -> {output_subdir} ===")
+    for subset in args.subsets:
+        input_path = data_dir / f"composition_{subset}" / "two_hop.csv"
+        if not input_path.exists():
+            print(f"\n[SKIP] {input_path} not found")
+            continue
 
-        for subset in args.subsets:
-            input_path = data_dir / f"composition_{subset}" / "two_hop.csv"
-            if not input_path.exists():
-                print(f"  [SKIP] {input_path} not found")
-                continue
+        df = pd.read_csv(input_path, index_col=0)
+        n  = len(df) if args.max_examples is None else min(len(df), args.max_examples)
+        print(f"\n=== subset={subset}: {n} examples, prompts={args.prompts} ===")
 
-            output_dir = data_dir / f"composition_{subset}" / output_subdir
-            output_dir.mkdir(parents=True, exist_ok=True)
+        # Checkpoint: resume from partial run if available
+        ckpt_path = data_dir / "neuron_attribution" / f"{subset}_ckpt.pkl"
+        ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+        start_idx = 0
+        accum = {pt: _Accum() for pt in args.prompts}
+        jaccard_accum = defaultdict(list)
+        if ckpt_path.exists():
+            ckpt = _load_checkpoint(ckpt_path)
+            accum        = ckpt["accum"]
+            jaccard_accum = ckpt["jaccard_accum"]
+            start_idx    = ckpt["next_idx"]
+            print(f"  Resuming from checkpoint at example {start_idx}/{n}")
 
-            df = pd.read_csv(input_path, index_col=0)
-            n  = len(df) if args.max_examples is None else min(len(df), args.max_examples)
-            print(f"\n  {subset}: {n} examples")
+        for idx in range(start_idx, n):
+            row    = df.iloc[idx]
+            row_id = row.get("id", idx)
 
-            layer_rows           = []
-            head_rows_all        = []
-            ffn_rows_all         = []
-            attn_neuron_rows_all = []
-            ffn_query_all        = []
-            attn_query_all       = []
-            # chain_data[(order, neuron_type)] -> list of row dicts
-            chain_data = {}
-
-            for idx in range(n):
-                row = df.iloc[idx]
-                if prompt_type == "composition":
-                    prompt = row["source_prompt"]
-                elif prompt_type == "first-hop":
-                    prompt = f"{row['r1_template'].format(row['e1_label'])} is"
-                elif prompt_type == "second-hop":
-                    prompt = f"{row['r2_template'].format(row['e2_label'])} is"
-                row_id = row.get("id", idx)
-
+            # Process every prompt type for this example
+            ex_results = {}
+            for pt in args.prompts:
+                prompt = _get_prompt(row, pt)
                 try:
-                    (layer_rows_ex, head_rows_ex, ffn_rows_ex, attn_neuron_rows_ex,
-                     ffq, aq, chain_ex) = process_example(
+                    result = process_example(
                         model, info, tokenizer, prompt,
                         layer_num, head_num, head_dim, num_kv_heads,
                         top_k_ffn=args.top_k_ffn,
                         top_k_proj=args.top_k_proj,
                         top_k_query=args.top_k_query,
-                        max_order=args.max_order,
+                        max_order=2 if pt == "two-hop" else 1,
                     )
+                    ex_results[pt] = result
                 except Exception as e:
-                    print(f"    [{idx}] ERROR: {e}", file=sys.stderr)
-                    continue
+                    print(f"  [{idx}] {pt} ERROR: {e}", file=sys.stderr)
 
+            # Build neuron sets and update accumulators for each successful prompt type
+            ex_sets = {}   # pt -> {(order, ntype): {layer: frozenset}}
+            for pt, result in ex_results.items():
+                layer_rows_ex, head_rows_ex, ffn_top, attn_top, ffq, aq, chain_ex = result
+                a = accum[pt]
+                a.n_examples += 1
+
+                # Small per-example rows (kept as-is)
                 for layer_i, sublayer, lpi, tokens in layer_rows_ex:
-                    layer_rows.append({"id": row_id, "layer": layer_i, "sublayer": sublayer,
-                                       "lpi": lpi, "top_k_tokens": tokens})
+                    a.layer_rows.append({"id": row_id, "layer": layer_i, "sublayer": sublayer,
+                                         "lpi": lpi, "top_k_tokens": tokens})
                 for layer_i, head_i, score, tokens in head_rows_ex:
-                    head_rows_all.append({"id": row_id, "layer": layer_i, "head": head_i,
-                                          "lpi": score, "top_k_tokens": tokens})
-                for layer_i, neuron_id, score, tokens in ffn_rows_ex:
-                    ffn_rows_all.append({"id": row_id, "layer": layer_i, "neuron_id": neuron_id,
-                                         "lpi": score, "top_k_tokens": tokens})
-                for layer_i, head_i, neuron_i, pos, score, tokens in attn_neuron_rows_ex:
-                    attn_neuron_rows_all.append({"id": row_id, "layer": layer_i, "head": head_i,
-                                                  "neuron_id": neuron_i, "pos": pos,
-                                                  "lpi": score, "top_k_tokens": tokens})
+                    a.head_rows.append({"id": row_id, "layer": layer_i, "head": head_i,
+                                        "lpi": score, "top_k_tokens": tokens})
                 for layer_i, sublayer, score in ffq:
-                    ffn_query_all.append({"id": row_id, "layer": layer_i,
-                                          "sublayer": sublayer, "score": score})
+                    a.ffn_query_rows.append({"id": row_id, "layer": layer_i,
+                                             "sublayer": sublayer, "score": score})
                 for layer_i, sublayer, score in aq:
-                    attn_query_all.append({"id": row_id, "layer": layer_i,
-                                           "sublayer": sublayer, "score": score})
+                    a.attn_query_rows.append({"id": row_id, "layer": layer_i,
+                                              "sublayer": sublayer, "score": score})
 
+                # Aggregate neuron stats
+                a.add_neurons(0, "ffn",  ffn_top)
+                a.add_neurons(0, "attn", attn_top)
                 for order, ntype, rows in chain_ex:
-                    key = (order, ntype)
-                    if key not in chain_data:
-                        chain_data[key] = []
-                    if ntype == "ffn":
-                        for layer_i, neuron_id, score in rows:
-                            chain_data[key].append({"id": row_id, "layer": layer_i,
-                                                    "neuron_id": neuron_id, "score": score})
-                    else:  # "attn"
-                        for layer_i, head_i, neuron_id, pos, score in rows:
-                            chain_data[key].append({"id": row_id, "layer": layer_i,
-                                                    "head": head_i, "neuron_id": neuron_id,
-                                                    "pos": pos, "score": score})
+                    a.add_neurons(order, ntype, rows)
 
-                if (idx + 1) % 10 == 0 or idx == n - 1:
-                    print(f"    {idx + 1}/{n}", end="\r", flush=True)
-            print(f"    {n}/{n} done      ")
+                # Build per-layer neuron sets for Jaccard computation
+                sets = {
+                    (0, "ffn"):  _ffn_sets_by_layer(ffn_top),
+                    (0, "attn"): _attn_sets_by_layer(attn_top),
+                }
+                for order, ntype, rows in chain_ex:
+                    sets[(order, ntype)] = (
+                        _ffn_sets_by_layer(rows) if ntype.startswith("ffn")
+                        else _attn_sets_by_layer(rows)
+                    )
+                ex_sets[pt] = sets
 
-            pd.DataFrame(layer_rows).to_csv(output_dir / "sublayer_lpi.csv", index=False)
-            pd.DataFrame(head_rows_all).to_csv(output_dir / "head_lpi.csv", index=False)
-            pd.DataFrame(ffn_rows_all).to_csv(output_dir / "ffn_neurons.csv", index=False)
-            pd.DataFrame(attn_neuron_rows_all).to_csv(output_dir / "attn_neurons.csv", index=False)
-            pd.DataFrame(ffn_query_all).to_csv(output_dir / "ffn_query_layers.csv", index=False)
-            pd.DataFrame(attn_query_all).to_csv(output_dir / "attn_query_layers.csv", index=False)
+            # Compute Jaccard for all prompt-type pairs and all order combinations
+            for pt_a, pt_b in prompt_pairs:
+                sets_a = ex_sets.get(pt_a, {})
+                sets_b = ex_sets.get(pt_b, {})
+                if not sets_a or not sets_b:
+                    continue
+                pair_key = f"{pt_a}__{pt_b}"
+                for (ord_a, ntype_a), layers_a in sets_a.items():
+                    for (ord_b, ntype_b), layers_b in sets_b.items():
+                        if ntype_a != ntype_b:
+                            continue
+                        ntype = ntype_a
+                        for layer in range(layer_num):
+                            s_a = layers_a.get(layer, frozenset())
+                            s_b = layers_b.get(layer, frozenset())
+                            j = _jaccard(s_a, s_b)
+                            if not math.isnan(j):
+                                jaccard_accum[(pair_key, ntype, ord_a, ord_b, layer)].append(j)
 
-            for (order, ntype), rows in sorted(chain_data.items()):
-                fname = f"chain_order{order}_{ntype}.csv"
-                pd.DataFrame(rows).to_csv(output_dir / fname, index=False)
+            if (idx + 1) % 10 == 0 or idx == n - 1:
+                print(f"  {idx + 1}/{n}", end="\r", flush=True)
+            if args.checkpoint_every > 0 and (idx + 1) % args.checkpoint_every == 0:
+                _save_checkpoint(ckpt_path, accum, jaccard_accum, idx + 1)
+        print(f"  {n}/{n} done      ")
 
-            print(f"    -> {output_dir}/")
-            print(f"       sublayer_lpi.csv      : {len(layer_rows)} rows")
-            print(f"       head_lpi.csv          : {len(head_rows_all)} rows")
-            print(f"       ffn_neurons.csv       : {len(ffn_rows_all)} rows")
-            print(f"       attn_neurons.csv      : {len(attn_neuron_rows_all)} rows")
-            print(f"       ffn_query_layers.csv  : {len(ffn_query_all)} rows")
-            print(f"       attn_query_layers.csv : {len(attn_query_all)} rows")
-            for (order, ntype), rows in sorted(chain_data.items()):
-                print(f"       chain_order{order}_{ntype}.csv : {len(rows)} rows")
+        # Save per-prompt-type compact outputs
+        na_subset_dir = data_dir / "neuron_attribution" / subset
+        for pt in args.prompts:
+            a = accum[pt]
+            output_dir = na_subset_dir / pt
+            output_dir.mkdir(parents=True, exist_ok=True)
+            a.save(output_dir, n)
+            print(f"  -> {output_dir}/")
+
+        # Save cross-prompt Jaccard CSV in the neuron_attribution subset directory
+        jaccard_rows = [
+            {"pair": pair, "ntype": ntype, "order_a": ord_a, "order_b": ord_b,
+             "layer": layer,
+             "mean_jaccard": sum(vals) / len(vals),
+             "n": len(vals)}
+            for (pair, ntype, ord_a, ord_b, layer), vals in jaccard_accum.items()
+        ]
+        pd.DataFrame(jaccard_rows).to_csv(na_subset_dir / "jaccard.csv", index=False)
+        print(f"  -> {na_subset_dir}/jaccard.csv ({len(jaccard_rows)} rows)")
+
+        # Clean up checkpoint after successful subset completion
+        if ckpt_path.exists():
+            ckpt_path.unlink()
 
 
 if __name__ == "__main__":
@@ -624,19 +821,16 @@ if __name__ == "__main__":
                         default=["correct", "incorrect", "inconsistent"],
                         choices=["correct", "incorrect", "inconsistent"])
     parser.add_argument("--prompts", nargs="+",
-                        default=["composition", "first-hop", "second-hop"],
-                        choices=["composition", "first-hop", "second-hop"],
+                        default=["two-hop", "first-hop", "second-hop"],
+                        choices=["two-hop", "first-hop", "second-hop"],
                         help="Prompt types to run (default: all three)")
     parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument("--top-k-ffn", type=int, default=300,
                         help="Top-K FFN/attn neurons to keep per example (global across layers)")
-    parser.add_argument("--top-k-proj", type=int, default=5,
+    parser.add_argument("--top-k-proj", type=int, default=1,
                         help="Number of top tokens to decode per neuron/head/sublayer projection")
+    parser.add_argument("--checkpoint-every", type=int, default=50,
+                        help="Save a resume checkpoint every N examples (0 to disable)")
     parser.add_argument("--top-k-query", type=int, default=300,
                         help="Top-K neurons to track per neuron in backward chain decomposition")
-    parser.add_argument("--max-order", type=int, default=None,
-                        help="Safety cap on backward attribution chain depth (default: no cap). "
-                             "The chain terminates naturally when no new neurons are found. "
-                             "Order 1 = direct activators of order-0 neurons; "
-                             "second-hop expected at orders 0-1; first-hop at 2-3.")
     main(parser.parse_args())
