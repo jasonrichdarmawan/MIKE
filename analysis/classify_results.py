@@ -278,41 +278,6 @@ def load_sublayer_projections(dataset_dir: str):
     return layers
 
 
-def load_neuron_lpi(dataset_dir: str):
-    """
-    Load neuron LPI data from the neuron_attribution directory.
-
-    Returns dict with keys:
-      'sublayer', 'head', 'ffn_neurons', 'attn_neurons' — always present.
-      'ffn_query_layers', 'attn_query_layers', 'attn_query_neurons' — None if not yet computed
-      (run neuron_query.py first to produce these).
-
-    Caveat:
-    - Handles both 'neuron_attribution' (underscore) and 'neuron-attribution' (hyphen)
-      directory names for backwards compatibility with older runs.
-    """
-    for dirname in ["neuron_attribution", "neuron-attribution"]:
-        path = Path(dataset_dir) / dirname
-        if path.exists():
-            break
-    else:
-        raise FileNotFoundError(f"No neuron attribution directory found in {dataset_dir}")
-
-    def _optional(fname):
-        p = path / fname
-        return pd.read_csv(p) if p.exists() else None
-
-    return {
-        "sublayer":           pd.read_csv(path / "sublayer_lpi.csv"),
-        "head":               pd.read_csv(path / "head_lpi.csv"),
-        "ffn_neurons":        pd.read_csv(path / "ffn_neurons.csv"),
-        "attn_neurons":       pd.read_csv(path / "attn_neurons.csv"),
-        "ffn_query_layers":   _optional("ffn_query_layers.csv"),
-        "attn_query_layers":  _optional("attn_query_layers.csv"),
-        "attn_query_neurons": _optional("attn_query_neurons.csv"),
-    }
-
-
 def main(args):
     """
     Caveat:
