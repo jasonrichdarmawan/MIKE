@@ -69,23 +69,36 @@ def load_neuron_lpi(dataset_dir: str, attr_subdir: str = "two-hop"):
         return pd.read_csv(p) if p.exists() else None
 
     data = {
-        "sublayer":          pd.read_csv(path / "sublayer_lpi.csv"),
-        "head":              pd.read_csv(path / "head_lpi.csv"),
-        "ffn_query_layers":  _optional("ffn_query_layers.csv"),
-        "attn_query_layers": _optional("attn_query_layers.csv"),
-        "neuron_layer_dist": _optional("neuron_layer_dist.csv"),
-        "chain_profile":     _optional("chain_profile.csv"),
-        "chain_mean_layer":  _optional("chain_mean_layer.csv"),
+        "sublayer":             pd.read_csv(path / "sublayer_lpi.csv"),
+        "head":                 pd.read_csv(path / "head_lpi.csv"),
+        "ffn_query_layers":     _optional("ffn_query_layers.csv"),
+        "attn_query_layers":    _optional("attn_query_layers.csv"),
+        "neuron_layer_dist":    _optional("neuron_layer_dist.csv"),
+        "chain_profile":        _optional("chain_profile.csv"),
+        "chain_mean_layer":     _optional("chain_mean_layer.csv"),
+        "chain_position_dist":  _optional("chain_position_dist.csv"),
     }
 
     # Infer max chain order from chain_profile
     cp = data["chain_profile"]
     if cp is not None and len(cp) > 0:
-        data["chain_max_order"] = int(cp["order"].max())
+        data["chain_max_order"] = int(cp["order"].min())  # most negative = deepest
     else:
         data["chain_max_order"] = 0
 
     return data
+
+
+def load_overlap_position(subset_dir: str):
+    """
+    Load overlap_position.csv for a subset.
+
+    Columns: pair, neuron_class, ntype_a, order_a, ntype_b, order_b,
+             side ("a" or "b"), position, mean_count, n
+    side="a" → position of overlapping neuron in pt_a; "b" → in pt_b.
+    """
+    p = Path(subset_dir) / "overlap_position.csv"
+    return pd.read_csv(p) if p.exists() else None
 
 
 def load_jaccard(subset_dir: str):
@@ -317,7 +330,7 @@ def plot_neuron_overlap(jaccard_df, n_layers, path, order=0):
 # ── Plot 7: cross-order Jaccard heatmap ───────────────────────────────────────
 
 def plot_cross_order_overlap(jaccard_df, n_layers, path, pair_key,
-                             one_hop_label, two_hop_label="two-hop"):
+                             one_hop_label, two_hop_label="two-hop", vmax=None):
     """
     Cross-order Jaccard heatmap: one-hop chain orders (rows) vs two-hop chain orders (cols).
 
@@ -376,8 +389,10 @@ def plot_cross_order_overlap(jaccard_df, n_layers, path, pair_key,
                         # Average over layers (and over any ntype_a/ntype_b variants)
                         matrix[i, j] = cell["mean_jaccard"].mean()
 
-            vmax = np.nanmax(matrix) if not np.all(np.isnan(matrix)) else 1.0
-            im = ax.imshow(matrix, aspect="auto", cmap="YlOrRd", vmin=0, vmax=vmax)
+            cell_max = np.nanmax(matrix) if not np.all(np.isnan(matrix)) else 1.0
+            _vmax = vmax if vmax is not None else cell_max
+            im = ax.imshow(matrix, aspect="auto", cmap="YlOrRd", vmin=0, vmax=_vmax,
+                           origin="lower")
             ax.set_title(title)
             ax.set_xlabel(f"{two_hop_label} order")
             ax.set_ylabel(f"{one_hop_label} order" if ax == axes[0] else "")
@@ -412,16 +427,16 @@ def plot_chain_layer_profile(lpi_data, n_layers, path):
         profile = lpi.get("chain_profile")
         if profile is None or len(profile) == 0:
             continue
-        for _, row in profile[profile["order"] >= 1].iterrows():
+        for _, row in profile[profile["order"] < 0].iterrows():
             panels.add((int(row["order"]), row["ntype"]))
 
     if not panels:
         print("  [SKIP] plot_chain_layer_profile: no chain data available")
         return
 
-    # Stable order: sort by (order, ntype) with "ffn→attn" before "attn→ffn"
+    # Stable order: sort by order descending (0, -1, -2) then ntype
     ntype_rank = {"ffn→attn": 0, "attn→ffn": 1}
-    panels = sorted(panels, key=lambda x: (x[0], ntype_rank.get(x[1], 2)))
+    panels = sorted(panels, key=lambda x: (-x[0], ntype_rank.get(x[1], 2)))
 
     n_panels = len(panels)
     with sns.plotting_context("paper", font_scale=1.2):
@@ -486,16 +501,164 @@ def plot_chain_mean_layer(summary_records, path):
             # Match "ffn" (order 0) and "ffn→attn" (order > 0); same for attn.
             sub = df[df["ntype"].str.startswith(ntype_prefix)]
             for (prompt_type, subset), grp in sub.groupby(["prompt_type", "subset"]):
-                grp = grp.sort_values("order")
+                grp = grp.sort_values("order", ascending=False)
                 ax.plot(grp["order"], grp["mean_layer"], "o-", markersize=4,
                         label=f"{prompt_type} / {subset}")
 
             ax.set_title(title)
-            ax.set_xlabel("Chain order (0 = value neurons; 1 = direct query; 2 = ffn→attn only)")
+            ax.set_xlabel("Chain order (0 = value neurons; −1 = direct query; −2 = ffn→attn only)")
             ax.set_ylabel("Score-weighted mean layer" if ax == axes[0] else "")
             ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
             ax.legend(loc="upper right", fontsize=7, ncol=2)
 
+        fig.tight_layout()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, bbox_inches="tight")
+        plt.close()
+
+
+# ── Plot 10: overlap position distribution ────────────────────────────────────
+
+def plot_overlap_position(overlap_pos_df, path, pair_key, subset_label,
+                          two_hop_label="two-hop"):
+    """
+    For each theoretically motivated cross-order comparison, show where overlapping
+    neurons sit in the sequence (e1, r1, r2, last, other).
+
+    Two panels: FFN neurons (left) | Attn neurons (right).
+    Within each panel, one group of bars per (order_a, order_b) comparison,
+    split by position type. Side "a" = position in pt_a, "b" = position in pt_b.
+
+    Since pt_a is typically two-hop (the richer chain), side="a" shows where the
+    shared neurons are in the two-hop prompt — the key diagnostic.
+    """
+    if overlap_pos_df is None or len(overlap_pos_df) == 0:
+        print(f"  [SKIP] plot_overlap_position({pair_key}, {subset_label}): no data")
+        return
+
+    sub = overlap_pos_df[overlap_pos_df["pair"] == pair_key]
+    if len(sub) == 0:
+        print(f"  [SKIP] plot_overlap_position({pair_key}): pair not found")
+        return
+
+    # Focus on side="a" (two-hop side) for the main diagnostic
+    sub_a = sub[sub["side"] == "a"]
+
+    pos_types = ["e1", "r1", "r2", "last", "other"]
+    pt_a, pt_b = pair_key.split("__")
+    # rows = one-hop orders, cols = two-hop orders (same convention as heatmap)
+    if pt_a == two_hop_label:
+        row_col, col_col = "order_b", "order_a"
+    else:
+        row_col, col_col = "order_a", "order_b"
+
+    colors = sns.color_palette("Set2", len(pos_types))
+
+    with sns.plotting_context("paper", font_scale=1.2):
+        fig, axes = plt.subplots(1, 2, figsize=(14, 4), sharey=False)
+
+        for ax, nc, title in [
+            (axes[0], "ffn",  "FFN neurons — overlap position in two-hop"),
+            (axes[1], "attn", "Attn neurons — overlap position in two-hop"),
+        ]:
+            sub_nc = sub_a[sub_a["neuron_class"] == nc]
+            if len(sub_nc) == 0:
+                ax.set_title(title)
+                ax.text(0.5, 0.5, "no data", ha="center", va="center",
+                        transform=ax.transAxes)
+                continue
+
+            # Each comparison is one (order_a, order_b) pair — label as "orda→ordb"
+            comparisons = sorted(sub_nc[[col_col, row_col]].drop_duplicates().itertuples(index=False),
+                                 key=lambda r: (r[0], r[1]))
+            x = np.arange(len(comparisons))
+            bar_w = 0.8 / len(pos_types)
+
+            for pi, (pos, color) in enumerate(zip(pos_types, colors)):
+                heights = []
+                for cmp in comparisons:
+                    cell = sub_nc[
+                        (sub_nc[col_col] == cmp[0]) & (sub_nc[row_col] == cmp[1]) &
+                        (sub_nc["position"] == pos)
+                    ]
+                    heights.append(cell["mean_count"].sum() if len(cell) > 0 else 0.0)
+                offset = (pi - len(pos_types) / 2 + 0.5) * bar_w
+                ax.bar(x + offset, heights, bar_w, label=pos, color=color, alpha=0.85)
+
+            cmp_labels = [f"{c[0]}→{c[1]}" for c in comparisons]
+            ax.set_title(title)
+            ax.set_xlabel(f"two-hop order → {pt_b.replace('-hop','')} order")
+            ax.set_ylabel("Mean overlapping neuron count" if ax == axes[0] else "")
+            ax.set_xticks(x)
+            ax.set_xticklabels(cmp_labels, rotation=15)
+            ax.legend(title="position", fontsize=7, loc="upper right")
+
+        fig.suptitle(f"Position of overlapping neurons: {pair_key} ({subset_label})")
+        fig.tight_layout()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, bbox_inches="tight")
+        plt.close()
+
+
+# ── Plot 11: chain position distribution ─────────────────────────────────────
+
+def plot_chain_position_dist(lpi_data, path):
+    """
+    For each (order, ntype), show the mean neuron count broken down by sequence
+    position type: "e1", "e2", "last", "other".
+
+    One panel per (order, ntype), bars grouped by position_type, one color per subset.
+    Helps test the +1-shift hypothesis: order-2 FFN neurons should concentrate at
+    e2 positions (bridge entity) more than order-0/1 neurons.
+    """
+    # Collect all (order, ntype) panels present in any subset
+    panels = set()
+    for lpi in lpi_data.values():
+        cpd = lpi.get("chain_position_dist")
+        if cpd is not None and len(cpd) > 0:
+            for _, row in cpd.iterrows():
+                panels.add((int(row["order"]), row["ntype"]))
+
+    if not panels:
+        print("  [SKIP] plot_chain_position_dist: no position data available")
+        return
+
+    ntype_rank = {"ffn": 0, "attn": 1, "ffn→attn": 2, "attn→ffn": 3}
+    panels = sorted(panels, key=lambda x: (x[0], ntype_rank.get(x[1], 99)))
+    pos_types = ["e1", "r1", "r2", "last", "other"]
+    subsets = list(lpi_data.keys())
+    x = np.arange(len(pos_types))
+    bar_w = 0.8 / max(len(subsets), 1)
+    colors = sns.color_palette("tab10", len(subsets))
+
+    n_panels = len(panels)
+    with sns.plotting_context("paper", font_scale=1.2):
+        fig, axes = plt.subplots(1, n_panels, figsize=(4 * n_panels, 4), sharey=False)
+        if n_panels == 1:
+            axes = [axes]
+
+        for ax, (order, ntype) in zip(axes, panels):
+            for si, (label, lpi) in enumerate(lpi_data.items()):
+                cpd = lpi.get("chain_position_dist")
+                if cpd is None or len(cpd) == 0:
+                    continue
+                sub = cpd[(cpd["order"] == order) & (cpd["ntype"] == ntype)]
+                counts = (
+                    sub.set_index("position")["mean_count"]
+                    .reindex(pos_types, fill_value=0)
+                )
+                offset = (si - len(subsets) / 2 + 0.5) * bar_w
+                ax.bar(x + offset, counts.values, bar_w,
+                       label=label, color=colors[si], alpha=0.85)
+
+            ax.set_title(f"Order {order} — {ntype}")
+            ax.set_xlabel("Position type")
+            ax.set_ylabel("Mean neuron count" if ax == axes[0] else "")
+            ax.set_xticks(x)
+            ax.set_xticklabels(pos_types)
+            ax.legend(loc="upper right", fontsize=7)
+
+        fig.suptitle("Neuron position distribution by chain order", y=1.02)
         fig.tight_layout()
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(path, bbox_inches="tight")
@@ -578,22 +741,43 @@ def main(args):
         )
         print(f"Saved chain layer profile  -> {plots_path}/chain_layer_profile{prompt_suffix}.pdf")
 
+        plot_chain_position_dist(
+            lpi,
+            f"{plots_path}/chain_position_dist{prompt_suffix}.pdf",
+        )
+        print(f"Saved chain position dist  -> {plots_path}/chain_position_dist{prompt_suffix}.pdf")
+
         # ── Cross-prompt plots (use pre-computed Jaccard CSVs) ─────────────────
         summary_records = []
 
-        for label in SUBSET_LABELS:
-            neuron_dir = f"{dataset_path}/neuron_attribution/{label}"
-            jaccard_df = load_jaccard(neuron_dir)
+        # Compute shared vmax for cross-order heatmaps across all subsets so
+        # colour saturation is comparable. CLI --heatmap-vmax overrides.
+        if args.heatmap_vmax is not None:
+            heatmap_vmax = args.heatmap_vmax
+        else:
+            all_jaccards = []
+            for _label in SUBSET_LABELS:
+                _jdf = load_jaccard(f"{dataset_path}/neuron_attribution/{_label}")
+                if _jdf is not None and len(_jdf) > 0:
+                    all_jaccards.extend(_jdf["mean_jaccard"].dropna().tolist())
+            heatmap_vmax = float(np.nanmax(all_jaccards)) if all_jaccards else 1.0
+            print(f"  heatmap vmax (global): {heatmap_vmax:.3f}")
 
-            # Same-order Jaccard overlap plots (order 0, 1, 2, …)
-            max_order_in_jaccard = 0
+        for label in SUBSET_LABELS:
+            neuron_dir    = f"{dataset_path}/neuron_attribution/{label}"
+            jaccard_df    = load_jaccard(neuron_dir)
+            overlap_pos_df = load_overlap_position(neuron_dir)
+
+            # Same-order Jaccard overlap plots — one per unique order value
+            orders_in_jaccard = []
             if jaccard_df is not None and len(jaccard_df) > 0:
-                max_order_in_jaccard = int(
-                    max(jaccard_df["order_a"].max(), jaccard_df["order_b"].max())
+                orders_in_jaccard = sorted(
+                    set(jaccard_df["order_a"].unique()) | set(jaccard_df["order_b"].unique())
                 )
 
-            for order in range(0, max_order_in_jaccard + 1):
-                out = f"{plots_path}/neuron_overlap_order{order}_{label}{prompt_suffix}.pdf"
+            for order in orders_in_jaccard:
+                slug_order = str(order).replace("-", "neg")
+                out = f"{plots_path}/neuron_overlap_order{slug_order}_{label}{prompt_suffix}.pdf"
                 if plot_neuron_overlap(jaccard_df, n_layers, out, order=order):
                     print(f"Saved neuron overlap (order={order}, {label}) -> {out}")
 
@@ -615,8 +799,13 @@ def main(args):
                         continue
                     out = f"{plots_path}/cross_order_{slug}_{label}{prompt_suffix}.pdf"
                     plot_cross_order_overlap(jaccard_df, n_layers, out, pair_key,
-                                             one_hop_label=one_hop_pt)
+                                             one_hop_label=one_hop_pt,
+                                             vmax=heatmap_vmax)
                     print(f"Saved cross-order overlap ({one_hop_pt}, {label}) -> {out}")
+
+                    out = f"{plots_path}/overlap_position_{slug}_{label}{prompt_suffix}.pdf"
+                    plot_overlap_position(overlap_pos_df, out, pair_key, label)
+                    print(f"Saved overlap position   ({one_hop_pt}, {label}) -> {out}")
 
             # Chain mean layer summary — load from compact chain_mean_layer.csv files
             for pt in PROMPT_TYPES:
@@ -661,4 +850,7 @@ if __name__ == "__main__":
     parser.add_argument("--prompt", default="two-hop",
                         choices=["two-hop", "first-hop", "second-hop"],
                         help="Prompt type: selects which neuron_attribution_* directory to read")
+    parser.add_argument("--heatmap-vmax", type=float, default=None,
+                        help="Fixed colour-scale max for cross-order heatmaps "
+                             "(default: auto from global max across all subsets)")
     main(parser.parse_args())
