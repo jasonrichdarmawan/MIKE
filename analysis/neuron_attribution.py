@@ -638,11 +638,11 @@ def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}  Model: {args.model_name}")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    is_llama = "llama" in args.model_name.lower()
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name, clean_up_tokenization_spaces=True)
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
-        **({"attn_implementation": "eager"} if is_llama else {}),
+        attn_implementation="eager",
     ).to(device)
     model.eval()
 
