@@ -302,12 +302,12 @@ def plot_neuron_overlap(jaccard_df, n_layers, path, order=0):
     """
     if jaccard_df is None or len(jaccard_df) == 0:
         print(f"  [SKIP] plot_neuron_overlap(order={order}): no jaccard data")
-        return
+        return False
 
     sub = jaccard_df[(jaccard_df["order_a"] == order) & (jaccard_df["order_b"] == order)]
     if len(sub) == 0:
         print(f"  [SKIP] plot_neuron_overlap(order={order}): no data at this order")
-        return
+        return False
 
     pair_labels = {
         "two-hop__first-hop":  "two-hop ↔ first-hop",
@@ -316,9 +316,9 @@ def plot_neuron_overlap(jaccard_df, n_layers, path, order=0):
     }
 
     # At order 0: ntype labels are "ffn"/"attn" (value neurons).
-    # At order > 0: labels are "ffn←attn"/"attn←ffn" (chain neurons).
-    ntype_ffn  = "ffn"      if order == 0 else "ffn←attn"
-    ntype_attn = "attn"     if order == 0 else "attn←ffn"
+    # At order > 0: labels are "ffn→attn"/"attn→ffn" (chain neurons).
+    ntype_ffn  = "ffn"      if order == 0 else "ffn→attn"
+    ntype_attn = "attn"     if order == 0 else "attn→ffn"
 
     with sns.plotting_context("paper", font_scale=1.3):
         fig, axes = plt.subplots(1, 2, figsize=(14, 4), sharey=True)
@@ -351,6 +351,7 @@ def plot_neuron_overlap(jaccard_df, n_layers, path, order=0):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(path, bbox_inches="tight")
         plt.close()
+    return True
 
 
 # ── Plot 7: cross-order Jaccard heatmap ───────────────────────────────────────
@@ -433,8 +434,8 @@ def plot_chain_layer_profile(lpi_data, n_layers, path):
 
     Panels are determined by which (order, ntype) combinations have data.
     Expected layout for the fixed 2-order chain:
-      order 1: "ffn←attn" (FFN at entity pos) | "attn←ffn" (attn activating last-pos FFN)
-      order 2: "ffn←attn" (FFN activating order-1 attn)  [no "attn←ffn" at order 2]
+      order 1: "ffn→attn" (FFN at entity pos) | "attn→ffn" (attn activating last-pos FFN)
+      order 2: "ffn→attn" (FFN activating order-1 attn)  [no "attn→ffn" at order 2]
     Uses pre-aggregated chain_profile.csv.
     """
     # Collect all (order, ntype) pairs present in any subset's data
@@ -450,8 +451,8 @@ def plot_chain_layer_profile(lpi_data, n_layers, path):
         print("  [SKIP] plot_chain_layer_profile: no chain data available")
         return
 
-    # Stable order: sort by (order, ntype) with "ffn←attn" before "attn←ffn"
-    ntype_rank = {"ffn←attn": 0, "attn←ffn": 1}
+    # Stable order: sort by (order, ntype) with "ffn→attn" before "attn→ffn"
+    ntype_rank = {"ffn→attn": 0, "attn→ffn": 1}
     panels = sorted(panels, key=lambda x: (x[0], ntype_rank.get(x[1], 2)))
 
     n_panels = len(panels)
@@ -481,7 +482,7 @@ def plot_chain_layer_profile(lpi_data, n_layers, path):
             ax.set_xlabel("Layer")
             ax.set_xticks(range(0, n_layers, 2))
             ax.set_ylabel("Mean score")
-            type_label = "FFN neurons" if ntype == "ffn←attn" else "Attn neurons"
+            type_label = "FFN neurons" if ntype == "ffn→attn" else "Attn neurons"
             ax.set_title(f"Order {order} — {type_label}")
             ax.legend(loc="upper right", fontsize=7)
 
@@ -514,7 +515,7 @@ def plot_chain_mean_layer(summary_records, path):
             (axes[0], "ffn",  "FFN neurons — mean layer per order"),
             (axes[1], "attn", "Attn neurons — mean layer per order"),
         ]:
-            # Match "ffn" (order 0) and "ffn←attn" (order > 0); same for attn.
+            # Match "ffn" (order 0) and "ffn→attn" (order > 0); same for attn.
             sub = df[df["ntype"].str.startswith(ntype_prefix)]
             for (prompt_type, subset), grp in sub.groupby(["prompt_type", "subset"]):
                 grp = grp.sort_values("order")
@@ -522,7 +523,7 @@ def plot_chain_mean_layer(summary_records, path):
                         label=f"{prompt_type} / {subset}")
 
             ax.set_title(title)
-            ax.set_xlabel("Chain order (0 = value neurons; 1 = direct query; 2 = ffn←attn only)")
+            ax.set_xlabel("Chain order (0 = value neurons; 1 = direct query; 2 = ffn→attn only)")
             ax.set_ylabel("Score-weighted mean layer" if ax == axes[0] else "")
             ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
             ax.legend(loc="upper right", fontsize=7, ncol=2)
@@ -629,8 +630,8 @@ def main(args):
 
             for order in range(0, max_order_in_jaccard + 1):
                 out = f"{plots_path}/neuron_overlap_order{order}_{label}{prompt_suffix}.pdf"
-                plot_neuron_overlap(jaccard_df, n_layers, out, order=order)
-                print(f"Saved neuron overlap (order={order}, {label}) -> {out}")
+                if plot_neuron_overlap(jaccard_df, n_layers, out, order=order):
+                    print(f"Saved neuron overlap (order={order}, {label}) -> {out}")
 
             # Cross-order Jaccard heatmaps: each one-hop vs two-hop
             for one_hop_pt in ("first-hop", "second-hop"):

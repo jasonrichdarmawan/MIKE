@@ -13,8 +13,8 @@ Outputs per (prompt_type, subset) under <data_dir>/neuron_attribution/<subset>/<
   attn_query_layers.csv   — LPI-weighted residual contribution of prior layers to top-K attn neurons
   neuron_layer_dist.csv   — average neuron count per layer per example (all orders and ntypes)
   chain_profile.csv       — mean attribution score per (order, ntype, layer)
-                            ntypes: "ffn"/"attn" at order 0; "attn←ffn"/"ffn←attn" at order 1;
-                            "ffn←attn" only at order 2
+                            ntypes: "ffn"/"attn" at order 0; "attn→ffn"/"ffn→attn" at order 1;
+                            "ffn→attn" only at order 2
   chain_mean_layer.csv    — score-weighted mean layer per (order, ntype)
 
 Outputs per subset under <data_dir>/neuron_attribution/<subset>/ (covering all prompt-type pairs):
@@ -424,10 +424,10 @@ def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_di
     Chain structure (max_order controls depth):
         order 0: "ffn"      — FFN value neurons (LPI)
                  "attn"     — attn value neurons (LPI)
-        order 1: "attn←ffn" — attn neurons activating order-0 FFN  (FFN key decomp, validated)
-                 "ffn←attn" — FFN neurons activating order-0 attn  (attn V-key decomp)
-        order 2: "ffn←attn" — FFN neurons activating order-1 attn  (attn V-key decomp)
-                 ("attn←ffn" omitted at order 2: order-1 FFN are at non-last positions,
+        order 1: "attn→ffn" — attn neurons activating order-0 FFN  (FFN key decomp, validated)
+                 "ffn→attn" — FFN neurons activating order-0 attn  (attn V-key decomp)
+        order 2: "ffn→attn" — FFN neurons activating order-1 attn  (attn V-key decomp)
+                 ("attn→ffn" omitted at order 2: order-1 FFN are at non-last positions,
                   attn_subvalues unavailable for those)
     max_order=2 for two-hop; max_order=1 for first-hop and second-hop (order-2 adds
     no interpretive value for single-hop prompts).
@@ -491,19 +491,19 @@ def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_di
             states, info, attn_top, head_dim, head_num, num_kv_heads, coeff_stack,
             top_k=top_k_query)
         if ord1_attn:
-            chain.append((1, "attn←ffn", ord1_attn))
+            chain.append((1, "attn→ffn", ord1_attn))
         if ord1_ffn:
-            chain.append((1, "ffn←attn", ord1_ffn))
+            chain.append((1, "ffn→attn", ord1_ffn))
 
-        # Order 2: only "ffn←attn" from order-1 "attn←ffn"
-        # "attn←ffn" at order 2 is omitted — order-1 FFN are at non-last positions
+        # Order 2: only "ffn→attn" from order-1 "attn→ffn"
+        # "attn→ffn" at order 2 is omitted — order-1 FFN are at non-last positions
         # and attn_subvalues does not cover per-position attention patterns.
         if max_order >= 2 and ord1_attn:
             ord2_ffn = compute_attn_query_neurons(
                 states, info, ord1_attn, head_dim, head_num, num_kv_heads, coeff_stack,
                 top_k=top_k_query)
             if ord2_ffn:
-                chain.append((2, "ffn←attn", ord2_ffn))
+                chain.append((2, "ffn→attn", ord2_ffn))
 
     return (layer_rows, head_rows, ffn_top, attn_top,
             ffn_query_rows, attn_query_rows, chain)
