@@ -47,9 +47,9 @@ Stage 0: Initialize output columns
   - if a key already exists, always reuse stored `target_new` (memory-first), do not create a second swap for that key
   - maintain an auxiliary lookup view `KB_MEM_SR[(subject_id, relation_id)] -> set(target_new)`
     for fast hop-level resolution before using dataset fallback
-- Initialize protected hop-1 fact set `PROTECTED_HOP1` (used only for swapping_strategy == "e3"):
-  - stores exact hop-1 facts `(e1, r1, e2)` that must never be edited
-  - purpose: prevent silent conflicts where a later direct e3 edit would rewrite a fact used as a protected hop-1 anchor
+- Initialize protected facts set `PROTECTED_FACTS` (used only for swapping_strategy == "e3"):
+  - stores exact facts `(e1, r1, e2)` that must never be edited
+  - purpose: prevent silent conflicts where a later direct e3 edit would rewrite a fact used as a protected anchor
 - Reusable helper for e3 flow:
   - `resolve_effective_subject(row_x)`:
     - if `(e1_x, r1_x, e2_x)` in `KB_MEM`, set `e2_new_x` from memory and return `e2_eff_x = e2_new_x`
@@ -57,7 +57,7 @@ Stage 0: Initialize output columns
   - `evaluate_row_for_e3(row_x)` (used for both i and j):
     - input:
       - row_x with current fields (`e1_x, r1_x, e2_x, r2_x, e3_x, swapped_with_x, row_role_x`)
-      - global stores (`KB_MEM`, `PROTECTED_HOP1`)
+      - global stores (`KB_MEM`, `PROTECTED_FACTS`)
     - output:
       - `state` in {`blocked`, `propagated`, `eligible_for_direct_edit`}
       - `e2_eff_x`
@@ -65,7 +65,7 @@ Stage 0: Initialize output columns
       1) if `swapped_with_x` is not null:
          - return `state = blocked`
       2) set `e2_eff_x = resolve_effective_subject(row_x)`
-      3) if `(e2_eff_x, r2_x, e3_x)` in `PROTECTED_HOP1`:
+      3) if `(e2_eff_x, r2_x, e3_x)` in `PROTECTED_FACTS`:
          - this row cannot be directly edited in e3
          - return `state = blocked`
       4) if `(e2_eff_x, r2_x, e3_x)` in `KB_MEM`:
@@ -147,9 +147,9 @@ Stage 2B: Apply counterfactuals when swapping_strategy == "e3"
       - `KB_MEM[(e2_eff_j, r2_j, e3_j)] = e3_new_j`
     - set `row_role_i = "edit"`, `row_role_j = "edit"`
     - set `swapped_with_i = j` and `swapped_with_j = i`
-    - register protected hop-1 anchors:
-      - add `(e1_i, r1_i, e2_i)` to `PROTECTED_HOP1`
-      - add `(e1_j, r1_j, e2_j)` to `PROTECTED_HOP1` for selected partner j
+    - register protected facts anchors:
+      - add `(e1_i, r1_i, e2_i)` to `PROTECTED_FACTS`
+      - add `(e1_j, r1_j, e2_j)` to `PROTECTED_FACTS` for selected partner j
 
 Stage 3: Resolve knowledge conflict from memory bank (strategy-agnostic)
 - Process each row i in ascending index:
