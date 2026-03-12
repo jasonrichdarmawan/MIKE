@@ -163,26 +163,22 @@ Stage 3: Resolve knowledge conflict from memory bank (strategy-agnostic)
     - `set_unused = False`
   1) Hop-1 propagation check (exact triple):
     - if `(e1, r1, e2)` exists in `KB_MEM`, read `target_new = KB_MEM[(e1, r1, e2)]`
-    - only when `target_new != e2`:
+    - if `target_new != e2`:
       - set `e2_new = target_new`
       - if `row_role` is `unused`, set `row_role = propagated_eval`
   2) Define effective subject:
     - `e2_eff = e2_new` if present else `e2`
-  3) Choose exactly one hop-2 branch:
-    - Branch A: (`row_role == "edit"` for either `swapping_strategy`)
-      - if `e2_eff != e2` on this edit row, print warning `edit_row_hop1_conflict`
-      - stop processing this
-    - Branch B: (all other rows)
-      - if `e2_eff != e2`:
-        - if `(e2_eff, r2)` in `KB_MEM_SR`, set `e3_new` from memory
-        - else if `HOP_INDEX[(e2_eff, r2)]` has at least one row_id:
-          - set `e3_new` from smallest row_id in `HOP_INDEX[(e2_eff, r2)]`
-        - else:
-          - if `row_role == propagated_eval`, set `set_unused = True`
-      - else if `(e2_eff, r2, e3)` exists in `KB_MEM`:
-        - set `e3_new` from memory
-        - if `row_role == unused`, set `row_role = propagated_eval`
-  4) Branch B outcome rule:
+  3) if `e2_eff != e2`:
+    - if `(e2_eff, r2)` in `KB_MEM_SR`, set `e3_new` from memory
+    - else if `HOP_INDEX[(e2_eff, r2)]` has at least one row_id:
+      - set `e3_new` from smallest row_id in `HOP_INDEX[(e2_eff, r2)]`
+    - else:
+      - if `row_role == propagated_eval`, set `set_unused = True`
+  4) if `(e2_eff, r2, e3)` exists in `KB_MEM`:
+    - if `row_role == edit` and 
+    - set `e3_new` from memory
+    - if `row_role == unused`, set `row_role = propagated_eval`
+  5) Branch outcome rule:
     - if `set_unused == True`, set `row_role = unused`
     - else keep current role (`propagated_eval` or `unused`)
 
@@ -401,29 +397,6 @@ def build_stage1_pair_plan(
 
   return pair_plan
 
-def _ordered_group_candidates(
-  df: pd.DataFrame,
-  row_id: int,
-  idx_group: Dict[Tuple[Any, Any], list[int]],
-) -> list[int]:
-  """Get Stage 1 candidate rows in deterministic order for a given anchor row."""
-  row = df.loc[row_id]
-  group_key = (row["r1_type"], row["r2_type"])
-  candidate_pool = idx_group.get(group_key, [])
-
-  valid_candidates: list[int] = []
-  for candidate_row_id in candidate_pool:
-    if candidate_row_id == row_id:
-      continue
-    if pd.notna(df.at[candidate_row_id, "swapped_with"]):
-      continue
-    if not is_valid_swappable_pair(df, row_id, candidate_row_id):
-      continue
-    valid_candidates.append(candidate_row_id)
-
-  valid_candidates.sort(key=lambda c: _deterministic_partner_sort_key(row_id, c))
-  return valid_candidates
-
 def _iter_group_candidates_deterministic(
   df: pd.DataFrame,
   row_i: int,
@@ -582,6 +555,9 @@ def evaluate_row_for_e3(
 
   protected_key = (e2_eff, row["r2"], row["e3"])
   if protected_key in protected_facts:
+    if df.at[row_id, "row_role"] == "edit":
+      print(f"Warning: edit row {row_id} has protected fact conflict but row_role is already edit")
+
     _set_new_target(
       df,
       row_id,
@@ -591,13 +567,14 @@ def evaluate_row_for_e3(
       row["e3_label"],
       row["e3_aliases"],
     )
-    
-    if df.at[row_id, "row_role"] == "edit":
-      print(f"Warning: edit row {row_id} has protected fact conflict but row_role is already edit")
+
     df.at[row_id, "row_role"] = "propagated_eval"
     return "propagated", e2_eff
 
   if protected_key in kb_mem:
+    if df.at[row_id, "row_role"] == "edit":
+      print(f"Warning: edit row {row_id} has hop-2 conflict but row_role is already edit")
+    
     entry = kb_mem[protected_key]
     _set_new_target(
       df,
@@ -608,8 +585,6 @@ def evaluate_row_for_e3(
       entry.get("target_label_new"),
       entry.get("target_aliases_new"),
     )
-    if df.at[row_id, "row_role"] == "edit":
-      print(f"Warning: edit row {row_id} has hop-2 conflict but row_role is already edit")
     df.at[row_id, "row_role"] = "propagated_eval"
     return "propagated", e2_eff
 
@@ -963,11 +938,132 @@ def apply_stage2b_e3(
     df.at[row_i, "swapped_with"] = selected_j
     df.at[selected_j, "swapped_with"] = row_i
 
-    protected_facts.add((row_i_data["e1"], row_i_data["r1"], row_i_data["e2"]))
-    protected_facts.add((row_j_data["e1"], row_j_data["r1"], row_j_data["e2"]))
+    protected_facts.add((row_i_data["e1"], row_i_data["r1"], e2_eff_i))
+    protected_facts.add((row_j_data["e1"], row_j_data["r1"], selected_e2_eff_j))
 
     stats["edited_pairs"] += 1
     stats["edited_rows"] += 2
+
+  return stats
+
+def apply_stage3_conflict_resolution(
+  df: pd.DataFrame,
+  kb_mem: Dict[Tuple[Any, Any, Any], Dict[str, Any]],
+  kb_mem_sr: Dict[Tuple[Any, Any], Set[Any]],
+  hop_index: Dict[Tuple[Any, Any], list[int]],
+  entity_lookup: Dict[Any, Dict[str, Any]],
+) -> Dict[str, int]:
+  """
+  Stage 3: strategy-agnostic conflict resolution from memory/index.
+  """
+  stats = {
+    "processed": 0,
+    "hop1_propagated": 0,
+    "hop2_from_memory_sr": 0,
+    "hop2_from_hop_index": 0,
+    "hop2_from_exact_memory": 0,
+    "set_unused": 0,
+    "edit_row_hop1_conflict": 0,
+  }
+
+  sorted_row_ids = sorted(df.index.tolist())
+  for row_id in tqdm(sorted_row_ids, total=len(sorted_row_ids), desc="Stage 3: resolve conflicts"):
+    stats["processed"] += 1
+    set_unused = False
+
+    row = df.loc[row_id]
+    e1 = row["e1"]
+    r1 = row["r1"]
+    e2 = row["e2"]
+    r2 = row["r2"]
+    e3 = row["e3"]
+
+    hop1_key = (e1, r1, e2)
+    if hop1_key in kb_mem:
+      if df.at[row_id, "row_role"] == "edit":
+        print(f"A Warning: edit row {row_id} has hop-1 conflict but row_role is already edit")
+      entry = kb_mem[hop1_key]
+      target_new = entry["target_new"]
+      if target_new != e2:
+        _set_new_target(
+          df,
+          row_id,
+          "e2",
+          target_new,
+          entity_lookup,
+          entry.get("target_label_new"),
+          entry.get("target_aliases_new"),
+        )
+        df.at[row_id, "row_role"] = "propagated_eval"
+        stats["hop1_propagated"] += 1
+
+    e2_eff = df.at[row_id, "e2_new"] if pd.notna(df.at[row_id, "e2_new"]) else e2
+
+    if e2_eff != e2:
+      sr_key = (e2_eff, r2)
+
+      if sr_key in kb_mem_sr and kb_mem_sr[sr_key]:
+        e3_new = sorted(kb_mem_sr[sr_key])[0]
+        e3_label_new = entity_lookup.get(e3_new, {}).get("label", pd.NA)
+        e3_aliases_new = entity_lookup.get(e3_new, {}).get("aliases", pd.NA)
+        _set_new_target(
+          df,
+          row_id,
+          "e3",
+          e3_new,
+          entity_lookup,
+          e3_label_new,
+          e3_aliases_new,
+        )
+        stats["hop2_from_memory_sr"] += 1
+      else:
+        candidate_row_ids = hop_index.get(sr_key, [])
+        if candidate_row_ids:
+          row_ref = min(candidate_row_ids)
+          e3_new, e3_label_new, e3_aliases_new = _resolve_target_from_hop_index_row(
+            df,
+            row_ref,
+            e2_eff,
+            r2,
+          )
+          if e3_new is not None:
+            _set_new_target(
+              df,
+              row_id,
+              "e3",
+              e3_new,
+              entity_lookup,
+              e3_label_new,
+              e3_aliases_new,
+            )
+            stats["hop2_from_hop_index"] += 1
+          elif df.at[row_id, "row_role"] == "propagated_eval":
+            set_unused = True
+        elif df.at[row_id, "row_role"] == "propagated_eval":
+          set_unused = True
+
+    else:
+      hop2_exact_key = (e2_eff, r2, e3)
+      if hop2_exact_key in kb_mem:
+        entry = kb_mem[hop2_exact_key]
+        if df.at[row_id, "row_role"] == "edit" and row["e3_new"] != entry["target_new"]:
+          print(f"Warning: edit row {row_id} has hop-2 exact conflict but row_role is already edit")
+          continue
+        _set_new_target(
+          df,
+          row_id,
+          "e3",
+          entry["target_new"],
+          entity_lookup,
+          entry.get("target_label_new"),
+          entry.get("target_aliases_new"),
+        )
+        df.at[row_id, "row_role"] = "propagated_eval"
+        stats["hop2_from_exact_memory"] += 1
+
+    if set_unused:
+      df.at[row_id, "row_role"] = "unused"
+      stats["set_unused"] += 1
 
   return stats
 
@@ -1029,5 +1125,23 @@ else:
     f"no_partner={stage2b_stats['no_partner']} | "
     f"same_e3_skips={stage2b_stats['same_e3_skips']}"
   )
+
+stage3_stats = apply_stage3_conflict_resolution(
+  df,
+  KB_MEM,
+  KB_MEM_SR,
+  HOP_INDEX,
+  ENTITY_LOOKUP,
+)
+print(
+  "Stage 3 complete | "
+  f"processed={stage3_stats['processed']} | "
+  f"hop1_propagated={stage3_stats['hop1_propagated']} | "
+  f"hop2_from_memory_sr={stage3_stats['hop2_from_memory_sr']} | "
+  f"hop2_from_hop_index={stage3_stats['hop2_from_hop_index']} | "
+  f"hop2_from_exact_memory={stage3_stats['hop2_from_exact_memory']} | "
+  f"set_unused={stage3_stats['set_unused']} | "
+  f"edit_row_hop1_conflict={stage3_stats['edit_row_hop1_conflict']}"
+)
 
 # %%
