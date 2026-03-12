@@ -67,7 +67,8 @@ Stage 0: Initialize output columns
       2) set `e2_eff_x = resolve_effective_subject(row_x)`
       3) if `(e2_eff_x, r2_x, e3_x)` in `PROTECTED_FACTS`:
          - this row cannot be directly edited in e3
-         - return `state = blocked`
+         - if `row_role_x` is not `edit`, set `row_role_x = propagated_eval`
+         - return `state = propagated`
       4) if `(e2_eff_x, r2_x, e3_x)` in `KB_MEM`:
          - set `e3_new_x` from exact memory entry
          - if `row_role_x` is not `edit`, set `row_role_x = propagated_eval`
@@ -139,8 +140,8 @@ Stage 2B: Apply counterfactuals when swapping_strategy == "e3"
 - Process rows in ascending index i:
   1) run `evaluate_row_for_e3(row_i)`:
     - if state is `blocked`, skip row i
-    - if state is `propagated`, set row_role_i="propagated_eval" and continue to next i
-  2) find partner candidates from `HOP_INDEX[(e2_eff_i, r2_i)]`, excluding invalid/self and requiring `e3_j != e3_i`
+    - if state is `propagated`, continue to next i
+  2) find partner candidates from IDX_GROUP[(r1_type_i, r2_type_i)] with validity constraints
   3) for each candidate j in deterministic order, run `evaluate_row_for_e3(row_j)` (same rules):
     - choose first j where state is `eligible_for_direct_edit`
   4) if no eligible j found:
@@ -581,7 +582,20 @@ def evaluate_row_for_e3(
 
   protected_key = (e2_eff, row["r2"], row["e3"])
   if protected_key in protected_facts:
-    return "blocked", e2_eff
+    _set_new_target(
+      df,
+      row_id,
+      "e3",
+      row["e3"],
+      entity_lookup,
+      row["e3_label"],
+      row["e3_aliases"],
+    )
+    
+    if df.at[row_id, "row_role"] == "edit":
+      print(f"Warning: edit row {row_id} has protected fact conflict but row_role is already edit")
+    df.at[row_id, "row_role"] = "propagated_eval"
+    return "propagated", e2_eff
 
   if protected_key in kb_mem:
     entry = kb_mem[protected_key]
@@ -594,8 +608,9 @@ def evaluate_row_for_e3(
       entry.get("target_label_new"),
       entry.get("target_aliases_new"),
     )
-    if df.at[row_id, "row_role"] != "edit":
-      df.at[row_id, "row_role"] = "propagated_eval"
+    if df.at[row_id, "row_role"] == "edit":
+      print(f"Warning: edit row {row_id} has hop-2 conflict but row_role is already edit")
+    df.at[row_id, "row_role"] = "propagated_eval"
     return "propagated", e2_eff
 
   return "eligible_for_direct_edit", e2_eff
@@ -636,10 +651,9 @@ def evaluate_row_for_e2(
       row["r2"],
     )
     if e3_new is None:
-      if df.at[row_id, "row_role"] != "edit":
-        df.at[row_id, "row_role"] = "unused"
-      else:
-        print(f"Warning: edit row {row_id} has hop-1 conflict but no hop-2 fallback")
+      if df.at[row_id, "row_role"] == "edit":
+        print(f"Warning: edit row {row_id} has hop-1 conflict but row_role is already edit")
+      df.at[row_id, "row_role"] = "unused"
       return "blocked", e2_eff
 
     _set_new_target(
@@ -652,8 +666,9 @@ def evaluate_row_for_e2(
       e3_aliases_new,
     )
 
-    if df.at[row_id, "row_role"] != "edit":
-      df.at[row_id, "row_role"] = "propagated_eval"
+    if df.at[row_id, "row_role"] == "edit":
+      print(f"Warning: edit row {row_id} has hop-1 conflict but row_role is already edit")
+    df.at[row_id, "row_role"] = "propagated_eval"
 
     return "propagated", e2_eff
 
@@ -832,6 +847,130 @@ def apply_stage2a_e2(
 
   return stats
 
+def apply_stage2b_e3(
+  df: pd.DataFrame,
+  idx_group: Dict[Tuple[Any, Any], list[int]],
+  kb_mem: Dict[Tuple[Any, Any, Any], Dict[str, Any]],
+  kb_mem_sr: Dict[Tuple[Any, Any], Set[Any]],
+  protected_facts: Set[Tuple[Any, Any, Any]],
+  entity_lookup: Dict[Any, Dict[str, Any]],
+) -> Dict[str, int]:
+  """
+  Stage 2B: apply counterfactuals for swapping_strategy == 'e3'.
+  """
+  stats = {
+    "processed": 0,
+    "blocked": 0,
+    "propagated": 0,
+    "edited_pairs": 0,
+    "edited_rows": 0,
+    "no_partner": 0,
+    "same_e3_skips": 0,
+  }
+
+  sorted_row_ids = sorted(df.index.tolist())
+  for row_i in tqdm(sorted_row_ids, total=len(sorted_row_ids), desc="Stage 2B (e3): apply swaps"):
+    stats["processed"] += 1
+
+    state_i, e2_eff_i = evaluate_row_for_e3(df, row_i, kb_mem, protected_facts, entity_lookup)
+    if state_i == "blocked":
+      stats["blocked"] += 1
+      continue
+    if state_i == "propagated":
+      stats["propagated"] += 1
+      continue
+
+    row_i_data = df.loc[row_i]
+    selected_j: Optional[int] = None
+    selected_e2_eff_j: Optional[Any] = None
+
+    for row_j in _iter_group_candidates_deterministic(df, row_i, idx_group):
+      if row_j == row_i:
+        continue
+      if pd.notna(df.at[row_j, "swapped_with"]):
+        continue
+      if not is_valid_swappable_pair(df, row_i, row_j):
+        continue
+
+      row_j_data = df.loc[row_j]
+      if row_j_data["e3"] == row_i_data["e3"]:
+        stats["same_e3_skips"] += 1
+        continue
+
+      state_j, e2_eff_j = evaluate_row_for_e3(df, row_j, kb_mem, protected_facts, entity_lookup)
+      if state_j != "eligible_for_direct_edit":
+        continue
+
+      selected_j = row_j
+      selected_e2_eff_j = e2_eff_j
+      break
+
+    if selected_j is None:
+      stats["no_partner"] += 1
+      continue
+
+    row_j_data = df.loc[selected_j]
+
+    e3_new_i = row_j_data["e3"]
+    e3_new_j = row_i_data["e3"]
+
+    _set_new_target(
+      df,
+      row_i,
+      "e3",
+      e3_new_i,
+      entity_lookup,
+      row_j_data["e3_label"],
+      row_j_data["e3_aliases"],
+    )
+    _set_new_target(
+      df,
+      selected_j,
+      "e3",
+      e3_new_j,
+      entity_lookup,
+      row_i_data["e3_label"],
+      row_i_data["e3_aliases"],
+    )
+
+    register_kb_rewrite(
+      kb_mem,
+      kb_mem_sr,
+      e2_eff_i,
+      row_i_data["r2"],
+      row_i_data["e3"],
+      e3_new_i,
+      row_j_data["e3_label"],
+      row_j_data["e3_aliases"],
+      row_i,
+      "hop2",
+    )
+    register_kb_rewrite(
+      kb_mem,
+      kb_mem_sr,
+      selected_e2_eff_j,
+      row_j_data["r2"],
+      row_j_data["e3"],
+      e3_new_j,
+      row_i_data["e3_label"],
+      row_i_data["e3_aliases"],
+      selected_j,
+      "hop2",
+    )
+
+    df.at[row_i, "row_role"] = "edit"
+    df.at[selected_j, "row_role"] = "edit"
+    df.at[row_i, "swapped_with"] = selected_j
+    df.at[selected_j, "swapped_with"] = row_i
+
+    protected_facts.add((row_i_data["e1"], row_i_data["r1"], row_i_data["e2"]))
+    protected_facts.add((row_j_data["e1"], row_j_data["r1"], row_j_data["e2"]))
+
+    stats["edited_pairs"] += 1
+    stats["edited_rows"] += 2
+
+  return stats
+
 # Stage 0: initialize runtime state
 df = initialize_stage0_columns(df)
 
@@ -872,6 +1011,23 @@ if args.swapping_strategy == "e2":
     f"pair_hop2_unresolved={stage2a_stats['pair_hop2_unresolved']}"
   )
 else:
-  print("Stage 2B pending implementation for swapping_strategy='e3'.")
+  stage2b_stats = apply_stage2b_e3(
+    df,
+    IDX_GROUP,
+    KB_MEM,
+    KB_MEM_SR,
+    PROTECTED_FACTS,
+    ENTITY_LOOKUP,
+  )
+  print(
+    "Stage 2B complete | "
+    f"processed={stage2b_stats['processed']} | "
+    f"blocked={stage2b_stats['blocked']} | "
+    f"propagated={stage2b_stats['propagated']} | "
+    f"edited_pairs={stage2b_stats['edited_pairs']} | "
+    f"edited_rows={stage2b_stats['edited_rows']} | "
+    f"no_partner={stage2b_stats['no_partner']} | "
+    f"same_e3_skips={stage2b_stats['same_e3_skips']}"
+  )
 
 # %%
