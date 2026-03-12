@@ -980,9 +980,9 @@ def apply_stage3_conflict_resolution(
 
     hop1_key = (e1, r1, e2)
     if hop1_key in kb_mem:
-      if df.at[row_id, "row_role"] == "edit":
-        print(f"A Warning: edit row {row_id} has hop-1 conflict but row_role is already edit")
       entry = kb_mem[hop1_key]
+      if df.at[row_id, "row_role"] == "edit" and row["e2_new"] != entry["target_new"]:
+        print(f"Warning: row={row_id} shouldn't have hop-1 conflict")
       target_new = entry["target_new"]
       if target_new != e2:
         _set_new_target(
@@ -1048,7 +1048,6 @@ def apply_stage3_conflict_resolution(
         entry = kb_mem[hop2_exact_key]
         if df.at[row_id, "row_role"] == "edit" and row["e3_new"] != entry["target_new"]:
           print(f"Warning: edit row {row_id} has hop-2 exact conflict but row_role is already edit")
-          continue
         _set_new_target(
           df,
           row_id,
