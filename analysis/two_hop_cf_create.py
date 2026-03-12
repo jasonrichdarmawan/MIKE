@@ -952,6 +952,7 @@ def apply_stage3_conflict_resolution(
   kb_mem_sr: Dict[Tuple[Any, Any], Set[Any]],
   hop_index: Dict[Tuple[Any, Any], list[int]],
   entity_lookup: Dict[Any, Dict[str, Any]],
+  swapping_strategy: Literal["e2", "e3"],
 ) -> Dict[str, int]:
   """
   Stage 3: strategy-agnostic conflict resolution from memory/index.
@@ -1046,7 +1047,7 @@ def apply_stage3_conflict_resolution(
       hop2_exact_key = (e2_eff, r2, e3)
       if hop2_exact_key in kb_mem:
         entry = kb_mem[hop2_exact_key]
-        if df.at[row_id, "row_role"] == "edit" and row["e3_new"] != entry["target_new"]:
+        if swapping_strategy == "e3" and df.at[row_id, "row_role"] == "edit" and row["e3_new"] != entry["target_new"]:
           print(f"Warning: edit row {row_id} has hop-2 exact conflict but row_role is already edit")
         _set_new_target(
           df,
@@ -1131,6 +1132,7 @@ stage3_stats = apply_stage3_conflict_resolution(
   KB_MEM_SR,
   HOP_INDEX,
   ENTITY_LOOKUP,
+  args.swapping_strategy,
 )
 print(
   "Stage 3 complete | "
