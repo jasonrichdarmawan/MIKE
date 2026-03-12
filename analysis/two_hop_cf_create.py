@@ -995,7 +995,8 @@ def apply_stage3_conflict_resolution(
           entry.get("target_label_new"),
           entry.get("target_aliases_new"),
         )
-        df.at[row_id, "row_role"] = "propagated_eval"
+        if df.at[row_id, "row_role"] == "unused":
+          df.at[row_id, "row_role"] = "propagated_eval"
         stats["hop1_propagated"] += 1
 
     e2_eff = df.at[row_id, "e2_new"] if pd.notna(df.at[row_id, "e2_new"]) else e2
@@ -1058,7 +1059,8 @@ def apply_stage3_conflict_resolution(
           entry.get("target_label_new"),
           entry.get("target_aliases_new"),
         )
-        df.at[row_id, "row_role"] = "propagated_eval"
+        if df.at[row_id, "row_role"] == "unused":
+          df.at[row_id, "row_role"] = "propagated_eval"
         stats["hop2_from_exact_memory"] += 1
 
     if set_unused:
@@ -1066,6 +1068,31 @@ def apply_stage3_conflict_resolution(
       stats["set_unused"] += 1
 
   return stats
+
+def apply_stage4_export(df: pd.DataFrame, output_path: str | Path) -> Dict[str, Any]:
+  """
+  Stage 4: final benchmark export.
+  - write only the full trace table to output_path
+  - report row_role statistics
+  """
+  output_path = Path(output_path)
+  output_path.parent.mkdir(parents=True, exist_ok=True)
+
+  full_df = df.sort_index()
+  edit_df = full_df[full_df["row_role"] == "edit"]
+  propagated_df = full_df[full_df["row_role"] == "propagated_eval"]
+  active_df = full_df[full_df["row_role"] != "unused"]
+
+  full_df.to_csv(output_path, index=False)
+
+  return {
+    "full_path": str(output_path),
+    "full_rows": int(len(full_df)),
+    "edit_rows": int(len(edit_df)),
+    "propagated_rows": int(len(propagated_df)),
+    "active_rows": int(len(active_df)),
+    "unused_rows": int((full_df["row_role"] == "unused").sum()),
+  }
 
 # Stage 0: initialize runtime state
 df = initialize_stage0_columns(df)
@@ -1143,6 +1170,17 @@ print(
   f"hop2_from_exact_memory={stage3_stats['hop2_from_exact_memory']} | "
   f"set_unused={stage3_stats['set_unused']} | "
   f"edit_row_hop1_conflict={stage3_stats['edit_row_hop1_conflict']}"
+)
+
+stage4_stats = apply_stage4_export(df, args.output_path)
+print(
+  "Stage 4 complete | "
+  f"full_rows={stage4_stats['full_rows']} | "
+  f"edit_rows={stage4_stats['edit_rows']} | "
+  f"propagated_rows={stage4_stats['propagated_rows']} | "
+  f"active_rows={stage4_stats['active_rows']} | "
+  f"unused_rows={stage4_stats['unused_rows']} | "
+  f"full_path={stage4_stats['full_path']}"
 )
 
 # %%
