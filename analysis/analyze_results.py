@@ -305,26 +305,6 @@ def main(args):
         plot_layer_matrix(entity_descriptions[model]["last"], "e2", f"{plots_path}/entity_description_last_e2.pdf")
         plot_layer_matrix(entity_descriptions[model]["last"], "e3", f"{plots_path}/entity_description_last_e3.pdf")
 
-    backpatching = {}
-    for model in args.models:
-        print(f"Processing {model} backpatching")
-        dataset_path = f"{args.datasets_dir}/{model}"
-        plots_path = f"{args.output_path}/{model}"
-
-        backpatching[model] = {
-            "correct": {
-                "e1": load_backpatching(f"{dataset_path}/composition_correct/activation_patching/e1_original_activation_patching_classified.csv"),
-                "last": load_backpatching(f"{dataset_path}/composition_correct/activation_patching/last_original_activation_patching_classified.csv")
-            },
-            "incorrect": {
-                "e1": load_backpatching(f"{dataset_path}/composition_incorrect/activation_patching/e1_original_activation_patching_classified.csv"),
-                "last": load_backpatching(f"{dataset_path}/composition_incorrect/activation_patching/last_original_activation_patching_classified.csv")
-            }
-        }
-        plot_layer_matrix(backpatching[model]["incorrect"]["e1"], True, f"{plots_path}/backpatching_e1.pdf")
-        plot_layer_matrix(backpatching[model]["incorrect"]["last"], True, f"{plots_path}/backpatching_last.pdf")
-        print(f"Backpatching success:")
-        print(calc_backpatching_success(layers[model]))
 
 
 if __name__ == "__main__":

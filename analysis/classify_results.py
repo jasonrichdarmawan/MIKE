@@ -294,7 +294,6 @@ def main(args):
     entity_description_layers = load_entity_description_generations(args.results_dir)
     attention_knockout_layers = load_attention_knockouts(args.results_dir)
     sublayer_projection_layers = load_sublayer_projections(args.results_dir)
-    activation_patching_layers = load_activation_patching(args.results_dir)
 
     two_hop = pd.read_csv(f"{args.results_dir}/two_hop.csv", index_col=0)
     base = two_hop[["id", "composition_correct"]]
@@ -303,8 +302,6 @@ def main(args):
         entity_description_layers["e1"]["e3"], on="id", how="left").merge(
         entity_description_layers["last"]["e2"], on="id", how="left").merge(
         entity_description_layers["last"]["e3"], on="id", how="left").merge(
-        activation_patching_layers["e1"]["original"], on="id", how="left").merge(
-        activation_patching_layers["last"]["original"], on="id", how="left").merge(
         sublayer_projection_layers["attention"]["prediction"], on="id", how="left").merge(
         sublayer_projection_layers["attention"]["e2"], on="id", how="left").merge(
         sublayer_projection_layers["mlp"]["prediction"], on="id", how="left").merge(

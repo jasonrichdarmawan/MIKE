@@ -142,10 +142,10 @@ def generate_with_patching_layer(model, tokenizer, hidden_state: Float[Tensor, "
 
     with torch.no_grad(), Trace(model, layer=target_layer, retain_output=False, edit_output=replace_hidden_state_hook):
         if do_sample:
-            generated = model.generate(**inputs, pad_token_id=tokenizer.eos_token_id, max_new_tokens=10, do_sample=True)
+            generated = model.generate(**inputs, pad_token_id=tokenizer.eos_token_id, max_new_tokens=3, do_sample=True)
         else:
             generated = model.generate(**inputs, do_sample=False, temperature=1, top_p=1, num_beams=1,
-                                       pad_token_id=tokenizer.eos_token_id, max_new_tokens=10)
+                                       pad_token_id=tokenizer.eos_token_id, max_new_tokens=3)
 
     return decode_generated(tokenizer, generated, target_prompt)
 
@@ -161,6 +161,49 @@ def generate_with_patching_same_layers(model, tokenizer, hidden_states, target_p
     return generations_by_layer
 
 
+def _generate_with_patch_and_cache(
+        model, tokenizer, hidden_state: Float[Tensor, "batch_size hidden_size"],
+        target_layer: str, x_input_ids: torch.Tensor, full_attention_mask: torch.Tensor,
+        prefix_kv, prefix_input_ids: torch.Tensor, target_prompt: list[str], do_sample: bool):
+    """
+    Generate with activation patching, reusing a precomputed prefix KV cache.
+    Reduces per-call cost from O(seq_len) to O(1) prefill since the prefix is
+    processed only once and shared across all 1024 source×target layer calls.
+
+    Uses a first_call flag instead of shape check because input_ids starts at
+    the single target token (shape[1]==1 always), so the original shape guard
+    would never fire.
+    """
+    first_call = [True]
+
+    def replace_hidden_state_hook(output):
+        hs = output[0]
+        if first_call[0]:
+            hs[:, 0, :] = hidden_state.to(hs.device)
+            first_call[0] = False
+        return (hs,) + output[1:]
+
+    # Pass full input_ids (prefix + x) so transformers 4.44.2 computes cache_position correctly.
+    # generate() slices to just the x token internally via prepare_inputs_for_generation,
+    # so the KV cache optimisation is preserved.
+    full_input_ids = torch.cat([prefix_input_ids, x_input_ids], dim=1)
+    with torch.no_grad(), Trace(model, layer=target_layer, retain_output=False,
+                                edit_output=replace_hidden_state_hook):
+        if do_sample:
+            generated = model.generate(
+                input_ids=full_input_ids, attention_mask=full_attention_mask,
+                past_key_values=prefix_kv, pad_token_id=tokenizer.eos_token_id,
+                max_new_tokens=3, do_sample=True)
+        else:
+            generated = model.generate(
+                input_ids=full_input_ids, attention_mask=full_attention_mask,
+                past_key_values=prefix_kv, pad_token_id=tokenizer.eos_token_id,
+                max_new_tokens=3, do_sample=False, temperature=1, top_p=1, num_beams=1)
+
+    # model.generate returns full_input_ids + generated tokens; decode_generated strips the prompt.
+    return decode_generated(tokenizer, generated, target_prompt)
+
+
 def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Tensor, "batch_size num_layers hidden_size"], target_prompt: list[str], target_token_str: str, do_sample: bool):
     """
     The goal is to replace the hidden representation of target_token_str in target_prompt with a hidden_state at a specific target layer with the hidden representation taken from a specific source layer.
@@ -170,18 +213,50 @@ def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Ten
     - target_token_str: "x"
     """
     layer_names = get_layer_names(model)
-    layer_count = len(get_layer_names(model))
+    layer_count = len(layer_names)
     generations = np.ndarray((layer_count, layer_count), dtype=object)
-    for source_layer in range(layer_count):
-        for target_layer in range(layer_count):
-            hidden_state = hidden_states[:, source_layer, :]
-            generations[source_layer, target_layer] = generate_with_patching_layer(model,
-                                                                                   tokenizer,
-                                                                                   hidden_state,
-                                                                                   layer_names[target_layer],
-                                                                                   target_prompt,
-                                                                                   target_token_str,
-                                                                                   do_sample)
+
+    # Optimisation: when all target prompts are identical (e.g. entity description),
+    # precompute the prefix KV cache once and reuse it across all 1024 layer calls,
+    # reducing per-call prefill from O(seq_len) to O(1).
+    if len(set(target_prompt)) == 1:
+        inputs, target_position = generate_patching_inputs(model, tokenizer, target_prompt, target_token_str)
+        x_pos = target_position[1][0].item()  # same for all (identical prompts)
+
+        if x_pos > 0:
+            prefix_input_ids = inputs['input_ids'][:, :x_pos]
+            with torch.no_grad():
+                prefix_output = model(
+                    input_ids=prefix_input_ids,
+                    attention_mask=inputs['attention_mask'][:, :x_pos],
+                    use_cache=True)
+            prefix_kv = prefix_output.past_key_values
+            x_input_ids = inputs['input_ids'][:, x_pos:x_pos + 1]
+            # Attention mask for prefix + x token only (no padding beyond x)
+            step_attention_mask = inputs['attention_mask'][:, :x_pos + 1]
+
+            for source_layer in range(layer_count):
+                for target_layer in range(layer_count):
+                    hidden_state = hidden_states[:, source_layer, :]
+                    generations[source_layer, target_layer] = _generate_with_patch_and_cache(
+                        model, tokenizer, hidden_state, layer_names[target_layer],
+                        x_input_ids, step_attention_mask, prefix_kv,
+                        prefix_input_ids, target_prompt, do_sample)
+        else:
+            # x_pos == 0 means target token not found; fall back to uncached path
+            for source_layer in range(layer_count):
+                for target_layer in range(layer_count):
+                    hidden_state = hidden_states[:, source_layer, :]
+                    generations[source_layer, target_layer] = generate_with_patching_layer(
+                        model, tokenizer, hidden_state, layer_names[target_layer],
+                        target_prompt, target_token_str, do_sample)
+    else:
+        for source_layer in range(layer_count):
+            for target_layer in range(layer_count):
+                hidden_state = hidden_states[:, source_layer, :]
+                generations[source_layer, target_layer] = generate_with_patching_layer(
+                    model, tokenizer, hidden_state, layer_names[target_layer],
+                    target_prompt, target_token_str, do_sample)
     return generations
 
 

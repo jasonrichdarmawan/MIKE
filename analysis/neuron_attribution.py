@@ -789,6 +789,7 @@ def main(args):
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
         attn_implementation="eager",
+        torch_dtype=torch.bfloat16,
     ).to(device)
     model.eval()
 
