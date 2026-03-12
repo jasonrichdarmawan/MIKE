@@ -16,16 +16,16 @@ Example:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_name",
+        '--data_dir',
         type=str,
-        help="Name of the model to analyze (e.g., gpt2, gpt2-medium, etc.)"
+        help="Path to the data directory"
     )
     args = parser.parse_args()
 
-    dataset_dir = Path("../datasets") / args.model_name
+    data_dir = Path(args.data_dir)
 
-    inconsistent_df = load_activation_patching(dataset_dir, "inconsistent")
-    incorrect_df = load_activation_patching(dataset_dir, "incorrect")
+    inconsistent_df = load_activation_patching(data_dir / "composition_inconsistent")
+    incorrect_df = load_activation_patching(data_dir / "composition_incorrect")
 
     for df, case_name in [(inconsistent_df, "inconsistent"), (incorrect_df, "incorrect")]:
         for source, target in [("e1", "original"), ("last", "original"), ("e1", "last")]:
