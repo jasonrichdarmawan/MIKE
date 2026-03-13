@@ -493,46 +493,33 @@ def _resolve_target_from_hop_index_row(
 
 def resolve_hop2_target(
   df: pd.DataFrame,
-  kb_mem: Dict[Tuple[Any, Any, Any], Dict[str, Any]],
   kb_mem_sr: Dict[Tuple[Any, Any], Set[Any]],
   hop_index: Dict[Tuple[Any, Any], list[int]],
   entity_lookup: Dict[Any, Dict[str, Any]],
   subject: Any,
   relation: Any,
-  target: Any = None,
 ) -> Tuple[Optional[Any], Optional[Any], Optional[Any]]:
   """
   Resolve hop-2 target by Stage 0 rule:
-  - if target is provided:
-    - memory-first via KB_MEM[(subject, relation, target)]
-    - partner j fallback subject, relation, target
-  - else:
-    - memory-first via KB_MEM[(subject, relation)]
-    - dataset fallback via smallest row_id in HOP_INDEX[(subject, relation)]
+  - memory-first via KB_MEM[(subject, relation)]
+  - dataset fallback via smallest row_id in HOP_INDEX[(subject, relation)]
   
   expectation: partner i and partner j hop-2 relation is the same 
   """
-  if target is not None:
-    if (subject, relation, target) in kb_mem:
-      entry = kb_mem[(subject, relation, target)]
-      return entry["target_new"], entry["target_label_new"], entry["target_aliases_new"]
-    return subject, relation, target
-  else:
-    sr_key = (subject, relation)
-    
-    if sr_key in kb_mem_sr:
-      entry = sorted(kb_mem_sr[sr_key])[0]
-      target_new = sorted(kb_mem_sr[sr_key])[0]
-      target_label_new = entity_lookup.get(target_new, {}).get("label", pd.NA)
-      target_aliases_new = entity_lookup.get(target_new, {}).get("aliases", pd.NA)
-      return target_new, target_label_new, target_aliases_new
-    
-    candidate_row_ids = hop_index.get(sr_key, [])
-    if not candidate_row_ids:
-      return None, None, None
-    
-    row_id = min(candidate_row_ids)
-    return _resolve_target_from_hop_index_row(df, row_id, subject, relation)
+  sr_key = (subject, relation)
+  
+  if sr_key in kb_mem_sr:
+    target_new = sorted(kb_mem_sr[sr_key])[0]
+    target_label_new = entity_lookup.get(target_new, {}).get("label", pd.NA)
+    target_aliases_new = entity_lookup.get(target_new, {}).get("aliases", pd.NA)
+    return target_new, target_label_new, target_aliases_new
+  
+  candidate_row_ids = hop_index.get(sr_key, [])
+  if not candidate_row_ids:
+    return None, None, None
+  
+  row_id = min(candidate_row_ids)
+  return _resolve_target_from_hop_index_row(df, row_id, subject, relation)
 
 def resolve_effective_subject(
   df: pd.DataFrame,
@@ -644,7 +631,6 @@ def evaluate_row_for_e2(
     e2_eff = entry["target_new"]
     e3_new, e3_label_new, e3_aliases_new = resolve_hop2_target(
       df,
-      kb_mem,
       kb_mem_sr,
       hop_index,
       entity_lookup,
@@ -731,30 +717,11 @@ def apply_stage2a_e2(
 
       if row_i_data["r2"] != row_j_data["r2"]:
         logging.debug(f"Row {row_i} and Row {row_j} should not have different r2 values for e2 swap")
-      e3_candidate_i = resolve_hop2_target(
-        df,
-        kb_mem,
-        kb_mem_sr,
-        hop_index,
-        entity_lookup,
-        e2_new_i,
-        row_i_data["r2"],
-        row_j_data["e3"],
-      )
-      e3_candidate_j = resolve_hop2_target(
-        df,
-        kb_mem,
-        kb_mem_sr,
-        hop_index,
-        entity_lookup,
-        e2_new_j,
-        row_j_data["r2"],
-        row_j_data["e3"],
-      )
-
-      if e3_candidate_i[0] is None and e3_candidate_j[0] is None:
-        stats["pair_hop2_unresolved"] += 1
+      if ((e2_new_i, row_i_data["r2"], row_i_data["e3"]) in kb_mem) or ((e2_new_j, row_j_data["r2"], row_j_data["e3"]) in kb_mem):
+        stats["blocked"] += 1
         continue
+      e3_candidate_i = e2_new_i, row_i_data["r2"], row_i_data["e3"]
+      e3_candidate_j = e2_new_j, row_j_data["r2"], row_j_data["e3"]
 
       selected_j = row_j
       selected_row_j_data = row_j_data
@@ -822,28 +789,26 @@ def apply_stage2a_e2(
     df.at[selected_j, "swapped_with"] = row_i
 
     e3_new_i, e3_label_new_i, e3_aliases_new_i = selected_e3_i
-    if e3_new_i is not None:
-      _set_new_target(
-        df,
-        row_i,
-        "e3",
-        e3_new_i,
-        entity_lookup,
-        e3_label_new_i,
-        e3_aliases_new_i,
-      )
+    _set_new_target(
+      df,
+      row_i,
+      "e3",
+      e3_new_i,
+      entity_lookup,
+      e3_label_new_i,
+      e3_aliases_new_i,
+    )
 
     e3_new_j, e3_label_new_j, e3_aliases_new_j = selected_e3_j
-    if e3_new_j is not None:
-      _set_new_target(
-        df,
-        selected_j,
-        "e3",
-        e3_new_j,
-        entity_lookup,
-        e3_label_new_j,
-        e3_aliases_new_j,
-      )
+    _set_new_target(
+      df,
+      selected_j,
+      "e3",
+      e3_new_j,
+      entity_lookup,
+      e3_label_new_j,
+      e3_aliases_new_j,
+    )
 
     stats["edited_pairs"] += 1
     stats["edited_rows"] += 2
