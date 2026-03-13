@@ -4,4 +4,4 @@ datasets/two_hop.csv
 datasets/gpt2
 output
 alphaedit_repo/
-results_alphaedit/
+results_alphaedit/stats/
