@@ -8,7 +8,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, GPT2LMHeadModel, \
 
 from jaxtyping import Float
 
-HF_TOKEN = "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"
+HF_TOKEN = ""
 
 
 def load_tokenizer(model_name):
