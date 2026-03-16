@@ -698,8 +698,10 @@ class _Accum:
       neuron_layer_dist.csv    — mean_count per (order, ntype, layer)
       chain_profile.csv        — mean_score per (order, ntype, layer)
       chain_mean_layer.csv     — score-weighted mean layer per (order, ntype)
-      chain_position_dist.csv  — mean_count per (order, ntype, position_type)
-                                 position_type ∈ {"e1", "e2", "last", "other"}
+      chain_position_dist.csv       — mean_count per (order, ntype, position_type)
+                                      position_type ∈ {"e1", "e2", "last", "other"}
+      chain_position_layer_dist.csv — mean_count per (order, ntype, layer, position_type)
+                                      joint breakdown for 4-stage mechanism analysis
     """
     def __init__(self):
         self.layer_rows      = []
@@ -717,6 +719,8 @@ class _Accum:
         self.wt_n         = defaultdict(int)    # total neuron count
         # (order, ntype, position_type) accumulators
         self.pos_count = defaultdict(float)     # sum of #neurons at each position type
+        # (order, ntype, layer, position_type) accumulators
+        self.pos_layer_count = defaultdict(float)  # sum of #neurons at each (layer, position)
 
     def add_neurons(self, order, ntype, neurons, pos_labels=None):
         """Register one example's neuron rows for aggregation.
@@ -750,6 +754,7 @@ class _Accum:
                 else:
                     plabel = "other"
                 self.pos_count[(order, ntype, plabel)] += 1
+                self.pos_layer_count[(order, ntype, layer_i, plabel)] += 1
         for layer_i, cnt in counts.items():
             self.count_sum[(order, ntype, layer_i)] += cnt
 
@@ -793,6 +798,14 @@ class _Accum:
             for (order, ntype, plabel), cnt in self.pos_count.items()
         ]
         pd.DataFrame(pos_rows).to_csv(output_dir / "chain_position_dist.csv", index=False)
+
+        # Joint position × layer distribution per (order, ntype, layer, position_type)
+        pos_layer_rows = [
+            {"order": order, "ntype": ntype, "layer": layer, "position": plabel,
+             "mean_count": cnt / n_examples}
+            for (order, ntype, layer, plabel), cnt in self.pos_layer_count.items()
+        ]
+        pd.DataFrame(pos_layer_rows).to_csv(output_dir / "chain_position_layer_dist.csv", index=False)
 
 
 # ── Checkpoint helpers ────────────────────────────────────────────────────────

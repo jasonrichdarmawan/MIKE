@@ -124,7 +124,7 @@ if __name__ == "__main__":
     parser.add_argument("--input-path")
     parser.add_argument("--output-path")
     parser.add_argument('--target-prompt', choices=["description", "repeat"], default="description")
-    parser.add_argument('--do-sample', action=BooleanOptionalAction, default=True)
+    parser.add_argument('--do-sample', action=BooleanOptionalAction, default=False)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
     main(parser.parse_args())
