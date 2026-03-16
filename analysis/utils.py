@@ -23,7 +23,7 @@ def load_model(model_name, device="cuda"):
         return AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype="auto",
                                                     token=token)
     else:
-        return AutoModelForCausalLM.from_pretrained(model_name, token=token).to(device)
+        return AutoModelForCausalLM.from_pretrained(model_name, token=token, torch_dtype=torch.bfloat16).to(device)
 
 
 def get_layer_names(model):

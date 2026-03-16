@@ -142,10 +142,10 @@ def generate_with_patching_layer(model, tokenizer, hidden_state: Float[Tensor, "
 
     with torch.no_grad(), Trace(model, layer=target_layer, retain_output=False, edit_output=replace_hidden_state_hook):
         if do_sample:
-            generated = model.generate(**inputs, pad_token_id=tokenizer.eos_token_id, max_new_tokens=3, do_sample=True)
+            generated = model.generate(**inputs, pad_token_id=tokenizer.eos_token_id, max_new_tokens=10, do_sample=True)
         else:
             generated = model.generate(**inputs, do_sample=False, temperature=1, top_p=1, num_beams=1,
-                                       pad_token_id=tokenizer.eos_token_id, max_new_tokens=3)
+                                       pad_token_id=tokenizer.eos_token_id, max_new_tokens=10)
 
     return decode_generated(tokenizer, generated, target_prompt)
 
@@ -193,12 +193,12 @@ def _generate_with_patch_and_cache(
             generated = model.generate(
                 input_ids=full_input_ids, attention_mask=full_attention_mask,
                 past_key_values=prefix_kv, pad_token_id=tokenizer.eos_token_id,
-                max_new_tokens=3, do_sample=True)
+                max_new_tokens=10, do_sample=True)
         else:
             generated = model.generate(
                 input_ids=full_input_ids, attention_mask=full_attention_mask,
                 past_key_values=prefix_kv, pad_token_id=tokenizer.eos_token_id,
-                max_new_tokens=3, do_sample=False, temperature=1, top_p=1, num_beams=1)
+                max_new_tokens=10, do_sample=False, temperature=1, top_p=1, num_beams=1)
 
     # model.generate returns full_input_ids + generated tokens; decode_generated strips the prompt.
     return decode_generated(tokenizer, generated, target_prompt)
@@ -235,13 +235,34 @@ def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Ten
             # Attention mask for prefix + x token only (no padding beyond x)
             step_attention_mask = inputs['attention_mask'][:, :x_pos + 1]
 
-            for source_layer in range(layer_count):
-                for target_layer in range(layer_count):
-                    hidden_state = hidden_states[:, source_layer, :]
-                    generations[source_layer, target_layer] = _generate_with_patch_and_cache(
-                        model, tokenizer, hidden_state, layer_names[target_layer],
-                        x_input_ids, step_attention_mask, prefix_kv,
-                        prefix_input_ids, target_prompt, do_sample)
+            # Optimisation: batch all source layers together for each target-layer call,
+            # reducing 1024 sequential generate() calls to 32 (one per target layer).
+            # hidden_states: (batch_size, layer_count, hidden_size)
+            # → permute → (layer_count, batch_size, hidden_size) → reshape → (layer_count*batch_size, hidden_size)
+            batch_size_local = hidden_states.shape[0]
+            hidden_dim = hidden_states.shape[2]
+            hidden_states_batched = hidden_states.permute(1, 0, 2).reshape(
+                layer_count * batch_size_local, hidden_dim)
+
+            # Replicate inputs and KV cache along the batch dimension (layer_count times).
+            # prefix_kv tensors have shape (batch, num_kv_heads, seq, head_dim).
+            x_input_ids_rep = x_input_ids.repeat(layer_count, 1)
+            step_attention_mask_rep = step_attention_mask.repeat(layer_count, 1)
+            prefix_input_ids_rep = prefix_input_ids.repeat(layer_count, 1)
+            target_prompt_rep = target_prompt * layer_count
+            prefix_kv_rep = tuple(
+                tuple(t.repeat(layer_count, 1, 1, 1) for t in layer_kv)
+                for layer_kv in prefix_kv
+            )
+
+            for target_layer in range(layer_count):
+                all_gens = _generate_with_patch_and_cache(
+                    model, tokenizer, hidden_states_batched, layer_names[target_layer],
+                    x_input_ids_rep, step_attention_mask_rep, prefix_kv_rep,
+                    prefix_input_ids_rep, target_prompt_rep, do_sample)
+                for source_layer in range(layer_count):
+                    start = source_layer * batch_size_local
+                    generations[source_layer, target_layer] = all_gens[start:start + batch_size_local]
         else:
             # x_pos == 0 means target token not found; fall back to uncached path
             for source_layer in range(layer_count):
