@@ -1,3 +1,7 @@
+"""
+This is a simple evaluation, the MCQ is not dynamic. So, make sure that no entity with citizenship "Australia" or "Japan" is included in the dataset. Otherwise, the MCQ evaluation will be flawed.
+"""
+
 # %%
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -19,17 +23,17 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 BATCH_SIZE = 16
 
-# MODEL_ID = "Qwen/Qwen3.5-4B"
-# BASE_MODEL = False
-MODEL_ID = "Qwen/Qwen3.5-4B-Base"
-BASE_MODEL = True
+MODEL_ID = "Qwen/Qwen3.5-4B"
+BASE_MODEL = False
+# MODEL_ID = "Qwen/Qwen3.5-4B-Base"
+# BASE_MODEL = True
 
 print(f"Loading {MODEL_ID}...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 model = AutoModelForCausalLM.from_pretrained(MODEL_ID, device_map="auto")
 
 # %%
-    
+
 # Single-Hop
 SINGLE_HOP_CLOZE_TEMPLATES = {
     "P27": "{e1_label}'s country of citizenship is "
@@ -39,7 +43,7 @@ SINGLE_HOP_QUESTIONS_TEMPLATES = {
 }
 SINGLE_HOP_MCQ_TEMPLATES = {
     "P27": {
-        "template": "What is the country of citizenship of {e1_label}?\nA) Australia\nB) {e2_label}\nC) United States",
+        "template": "What is the country of citizenship of {e1_label}?\nA) Australia\nB) {e2_label}\nC) Japan",
         "answers": ["B", "B) {e2_label}", "{e2_label}"],
     }
 }
@@ -53,7 +57,7 @@ ATTRIBUTE_FACT_QUESTIONS_TEMPLATES = {
 }
 ATTRIBUTE_FACT_MCQ_TEMPLATES = {
     "P27": {
-        "template": "Suppose Ellie Kemper lives in a houseboat, Keanu Reeves lives in an apartment, and {e1_label} lives in a cabin. What is the country of citizenship of the person who lives in the cabin?\nA) Australia\nB) {e2_label}\nC) United States",
+        "template": "Suppose Ellie Kemper lives in a houseboat, Keanu Reeves lives in an apartment, and {e1_label} lives in a cabin. What is the country of citizenship of the person who lives in the cabin?\nA) Australia\nB) {e2_label}\nC) Japan",
         "answers": ["B", "B) {e2_label}", "{e2_label}"],
     }
 }
@@ -104,10 +108,11 @@ def _format_prompt(prompt, tokenizer, base_model=False):
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
 
 def stage0_build_prompts(df: pd.DataFrame, base_model: bool = False):
-    df["e1_aliases"] = df["e1_aliases"].apply(ast.literal_eval)
-    df["e2_aliases"] = df["e2_aliases"].apply(ast.literal_eval)
+    for col in ["e1_aliases", "e2_aliases", "e2_label"]:
+        if col in df.columns:
+            df[col] = df[col].apply(ast.literal_eval)
     
-    df["e2_answers"] = df.apply(lambda row: [row["e2_label"]] + row["e2_aliases"], axis=1)
+    df["e2_answers"] = df.apply(lambda row: row["e2_label"] + row["e2_aliases"], axis=1)
     
     # Single-Hop Cloze
     df["e1_single_cloze_prompt"] = df.apply(lambda row: _format_prompt(SINGLE_HOP_CLOZE_TEMPLATES[row["r1"]].format(e1_label=row["e1_label"]), tokenizer, base_model=base_model), axis=1)
@@ -116,30 +121,30 @@ def stage0_build_prompts(df: pd.DataFrame, base_model: bool = False):
     df["e1_single_question_prompt"] = df.apply(lambda row: _format_prompt(SINGLE_HOP_QUESTIONS_TEMPLATES[row["r1"]].format(e1_label=row["e1_label"]), tokenizer, base_model=base_model), axis=1)
     
     # Single-Hop MCQ
-    df["e1_single_mcq_prompt"] = df.apply(lambda row: _format_prompt(SINGLE_HOP_MCQ_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"]), tokenizer, base_model=base_model), axis=1)
-    df["e1_single_mcq_answers"] = df.apply(lambda row: [answer.format(e2_label=row["e2_label"]) for answer in SINGLE_HOP_MCQ_TEMPLATES[row["r1"]]["answers"]], axis=1)
+    df["e1_single_mcq_prompt"] = df.apply(lambda row: _format_prompt(SINGLE_HOP_MCQ_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"][0]), tokenizer, base_model=base_model), axis=1)
+    df["e1_single_mcq_answers"] = df.apply(lambda row: [answer.format(e2_label=row["e2_label"][0]) for answer in SINGLE_HOP_MCQ_TEMPLATES[row["r1"]]["answers"]], axis=1)
     
     # Attribute-Fact Cloze
-    df["e1_attribute_cloze_prompt"] = df.apply(lambda row: _format_prompt(ATTRIBUTE_FACT_CLOZE_TEMPLATES[row["r1"]].format(e1_label=row["e1_label"], e2_label=row["e2_label"]), tokenizer, base_model=base_model), axis=1)
+    df["e1_attribute_cloze_prompt"] = df.apply(lambda row: _format_prompt(ATTRIBUTE_FACT_CLOZE_TEMPLATES[row["r1"]].format(e1_label=row["e1_label"], e2_label=row["e2_label"][0]), tokenizer, base_model=base_model), axis=1)
     
     # Attribute-Fact Question
-    df["e1_attribute_question_prompt"] = df.apply(lambda row: _format_prompt(ATTRIBUTE_FACT_QUESTIONS_TEMPLATES[row["r1"]].format(e1_label=row["e1_label"], e2_label=row["e2_label"]), tokenizer, base_model=base_model), axis=1)
+    df["e1_attribute_question_prompt"] = df.apply(lambda row: _format_prompt(ATTRIBUTE_FACT_QUESTIONS_TEMPLATES[row["r1"]].format(e1_label=row["e1_label"], e2_label=row["e2_label"][0]), tokenizer, base_model=base_model), axis=1)
     
     # Attribute-Fact MCQ
-    df["e1_attribute_mcq_prompt"] = df.apply(lambda row: _format_prompt(ATTRIBUTE_FACT_MCQ_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"]), tokenizer, base_model=base_model), axis=1)
-    df["e1_attribute_mcq_answers"] = df.apply(lambda row: [answer.format(e2_label=row["e2_label"]) for answer in ATTRIBUTE_FACT_MCQ_TEMPLATES[row["r1"]]["answers"]], axis=1)
+    df["e1_attribute_mcq_prompt"] = df.apply(lambda row: _format_prompt(ATTRIBUTE_FACT_MCQ_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"][0]), tokenizer, base_model=base_model), axis=1)
+    df["e1_attribute_mcq_answers"] = df.apply(lambda row: [answer.format(e2_label=row["e2_label"][0]) for answer in ATTRIBUTE_FACT_MCQ_TEMPLATES[row["r1"]]["answers"]], axis=1)
     
     # Fact-Attribute Cloze
-    df["e1_fact_cloze_prompt"] = df.apply(lambda row: _format_prompt(FACT_ATTRIBUTE_CLOZE_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"]), tokenizer, base_model=base_model), axis=1)
+    df["e1_fact_cloze_prompt"] = df.apply(lambda row: _format_prompt(FACT_ATTRIBUTE_CLOZE_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"][0]), tokenizer, base_model=base_model), axis=1)
     df["e1_fact_cloze_answers"] = df.apply(lambda row: FACT_ATTRIBUTE_CLOZE_TEMPLATES[row["r1"]]["answers"], axis=1)
     
     # Fact-Attribute Question
-    df["e1_fact_question_prompt"] = df.apply(lambda row: _format_prompt(FACT_ATTRIBUTE_QUESTIONS_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"]), tokenizer, base_model=base_model), axis=1)
+    df["e1_fact_question_prompt"] = df.apply(lambda row: _format_prompt(FACT_ATTRIBUTE_QUESTIONS_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"][0]), tokenizer, base_model=base_model), axis=1)
     df["e1_fact_question_answers"] = df.apply(lambda row: FACT_ATTRIBUTE_QUESTIONS_TEMPLATES[row["r1"]]["answers"], axis=1)
     
     # Fact-Attribute MCQ
-    df["e1_fact_mcq_prompt"] = df.apply(lambda row: _format_prompt(FACT_ATTRIBUTE_MCQ_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"]), tokenizer, base_model=base_model), axis=1)
-    df["e1_fact_mcq_answers"] = df.apply(lambda row: [answer.format(e2_label=row["e2_label"]) for answer in FACT_ATTRIBUTE_MCQ_TEMPLATES[row["r1"]]["answers"]], axis=1)
+    df["e1_fact_mcq_prompt"] = df.apply(lambda row: _format_prompt(FACT_ATTRIBUTE_MCQ_TEMPLATES[row["r1"]]["template"].format(e1_label=row["e1_label"], e2_label=row["e2_label"][0]), tokenizer, base_model=base_model), axis=1)
+    df["e1_fact_mcq_answers"] = df.apply(lambda row: [answer.format(e2_label=row["e2_label"][0]) for answer in FACT_ATTRIBUTE_MCQ_TEMPLATES[row["r1"]]["answers"]], axis=1)
     
     return df
 

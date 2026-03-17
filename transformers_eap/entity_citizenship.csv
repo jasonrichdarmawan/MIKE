@@ -1,416 +1,405 @@
 e1,e1_label,e1_aliases,r1,e2,e2_label,e2_aliases
-Q1907,Hugo Lloris,['Hugo Hadrien Dominique Lloris'],P27,Q142,France,['French Republic']
-Q1879,Corentin Martins,['Corentin da Silva Martins'],P27,Q142,France,['French Republic']
-Q1839,Laurent Blanc,['Laurent Robert Blanc'],P27,Q142,France,['French Republic']
-Q1835,Zinedine Zidane,['Zinedine Yazid Zidane'],P27,Q142,France,['French Republic']
-Q1804,Barbara,"['Andrée Olga', 'Barbara Brodi', 'Monique Andrée Serf']",P27,Q142,France,['French Republic']
-Q1785,Charles Aznavour,"['Shahnour Vaghinag Aznavourian', 'Shahnour Vaghenag Aznavourian']",P27,Q142,France,['French Republic']
-Q1716,Renaud,"['Renaud Pierre Manuel Sechan', 'Renaud Pierre Manuel Séchan', 'Renaud Sechan', 'Renaud Séchan']",P27,Q142,France,['French Republic']
-Q1646,Françoise Sagan,"['Françoise Delphine Quoirez', 'Françoise Quoirez', 'Francoise Sagan']",P27,Q142,France,['French Republic']
-Q1631,Édith Piaf,"['Edith Piaf', 'Édith Gassion', 'La môme Piaf', 'La Señora Piaf', 'The Little Sparrow']",P27,Q142,France,['French Republic']
-Q1544,Tony Garnier,['Antoine Garnier'],P27,Q142,France,['French Republic']
-Q1488,Robert Brasillach,"['Jean Servière', 'Jacques Tournebroche', 'Robert Chénier']",P27,Q142,France,['French Republic']
-Q1178,Maurice Ravel,['Maurice Joseph Ravel'],P27,Q142,France,['French Republic']
-Q853,Andrei Tarkovsky,"['Andrei Tarkovski', 'And. Arsenʹevich Tarkovskiĭ', ""Andrei Arsen'evich Tarkovskii"", ""Andreĭ Arsen'evich Tarkovskiĭ"", 'Andreĭ Arsenʹevich Tarkovskĭi', 'Andreĭ Arsenévich Tarkovskiĭ', 'Andrei Tarkovskij', ""Andreiĭ Arsen'evich Tarkovskiĭ"", 'Andrej Tarkovskij', 'Andrej Tarkovszkij', 'Andrej Tarkowskij', 'Andrey Arsenyevich Tarkovsky', 'Andrey Tarkovsky']",P27,Q142,France,['French Republic']
-Q767,Stéphane Mallarmé,"['Stephane Mallarme', 'Mallarmé', 'Etienne Mallarme', 'Etienne Mallarmé', 'Steph. Mallarme']",P27,Q142,France,['French Republic']
-Q755,Paul Verlaine,['Paul-Marie Verlaine'],P27,Q142,France,['French Republic']
-Q632,Jean Moulin,"['Max', 'Rex']",P27,Q142,France,['French Republic']
-Q539,Giuseppe Garibaldi,"['Garibaldi', 'Giuseppe Maria Garibaldi', 'Joseph-Marie Garibaldi']",P27,Q142,France,['French Republic']
-Q535,Victor Hugo,"['Victor Marie Hugo', 'Ocean Man', 'Homme océan']",P27,Q142,France,['French Republic']
-Q517,Napoleon,"['Napoléon Bonaparte', 'Napoleon I', 'The Little Corporal', 'Napoleon Bonaparte', 'Napoleon I of France', 'Emperador dels Francesos Napoleó I', 'Empereur des Français Napoléon I', 'Little Corporal', 'Napoleon Buonaparte', 'Napoleone Bonaparte', 'Napoleone Buonaparte', 'Napoleone di Buonaparte', 'Napoleone I', 'Napulione Buonaparte', 'Napulione di Buonaparte', 'the Corsican Napolean']",P27,Q142,France,['French Republic']
-Q504,Émile Zola,['Émile Édouard Charles Antoine Zola'],P27,Q142,France,['French Republic']
-Q502,Stendhal,"['Henri Beyle', 'Marie Henri Beyle']",P27,Q142,France,['French Republic']
-Q501,Charles Baudelaire,"['Baudelaire', 'Charles Pierre Baudelaire', 'Charles Pierre Baudelaire-Dufaÿs']",P27,Q142,France,['French Republic']
-Q346,Louis IX of France,"['Saint Louis', 'Louis IX', 'Louis IX the Saint', 'Saint Louis IX of France', 'Solomon of France']",P27,Q142,France,['French Republic']
-Q329,Nicolas Sarkozy,"['Sarko', 'Sarkozy', 'Nicolas Sarközy', 'Nicolas Sarközy de Nagy-Bocsa']",P27,Q142,France,['French Republic']
-Q296,Claude Monet,"['monet claude', 'Oscar Claude Monet', 'Oscar-Claude Monet', 'Monet', 'C. Monet', 'Cl. Monet', 'Claude Jean Monet', 'claude oscar monet', 'Claude Oscar Monet', 'Claude-Oscar Monet', 'Klod Mone', 'monet c.']",P27,Q142,France,['French Republic']
-Q260,Jean-François Champollion,"['Champollion', 'Jean Francois Champollion', 'Jean François Champollion', 'Jean-Francois Champollion']",P27,Q142,France,['French Republic']
-Q157,François Hollande,"['Hollande', 'Francois Hollande']",P27,Q142,France,['French Republic']
-Q10681,Alan Stivell,['Alan Cochevelou'],P27,Q142,France,['French Republic']
-Q10494,Alain Prost,['Alain Marie Pascal Prost'],P27,Q142,France,['French Republic']
-Q10287,Manuel Valls,['Manuel Carlos Valls Galfetti'],P27,Q142,France,['French Republic']
-Q9711,Honoré de Balzac,"['Balzac', 'Saint Aubin', 'Honore de Balzac', 'A. de Villerglee', 'A. de Villergleé', 'Abbee Savonati', 'Abbeé Savonati', ""Ba'erzhake"", 'Ba’erzhake', 'Balzak', 'Baruzakku', 'de. Balzac', 'H. Balzac', 'H. Balzak', 'H. de Balzac', 'H. de. Balzac', 'Honoräe de Balzac', 'Honorato Balzac', 'Honorato De Balzac', 'Honoratus de Balzac', 'Honore Balssa', 'Honoré Balssa', ""Honore de Bal'zac"", 'Honore de Balsac', 'Honoré de Balsac', 'Honoré De Balzac', 'Honore de Balzak', 'Hônôrê đơ Banzăc', 'Honore. Balzac', 'Honoré. Balzac', 'Honoree de Balzac', 'Honoree De Balzac', 'Honoreé de Balzac', 'Honoreé De Balzac', 'Honoree DeBalzac', 'Honoreé DeBalzac', 'Honoree von Balzac', 'Honoreé von Balzac', 'Honoriusz Balzac', 'Honoriusz. Balzac', 'Honoriusz. Balzak', 'Honoryusz. Balzac', 'Horace de S.- Aubin', 'Horace de Saint- Aubin', 'Horace de Saint-Aubin', 'Instituteur Matricante', 'Jeune ceelibataire', 'Jeune ceélibataire', ""Lord O'Rhoone"", ""Lord R'Hoone"", 'M. de Balzac', 'Onorato di Balzac', 'Onore Balʹzak', 'Onore Balzeak', 'Onore Balzéak', ""Onore de Bal'zak"", 'Onore de Balzak', 'Ônôrē de Balzaq', ""Onore. Bal'zak"", 'Onoreh deh Balzaḳ', 'Pa-erh-cha-kʻo', 'Pa-erh-cha-ko', 'Pa-erh-cha-kò', ""R'Hoone"", 'Saint Aubin de Poitiers', 'Un Jeune ceelibataire', 'Un Jeune ceélibataire', 'Ūnūrīh dī Balzāk']",P27,Q142,France,['French Republic']
-Q9327,Guy de Maupassant,"['Guy de Valmont', 'Henri René Albert Guy de Maupassant', 'Joseph Prunier']",P27,Q142,France,['French Republic']
-Q8927,Marion Cotillard,['Marion Cotillard'],P27,Q142,France,['French Republic']
-Q8814,Augustin-Louis Cauchy,"['Cauchy', 'Augustin Cauchy', 'Augustin Louis Cauchy']",P27,Q142,France,['French Republic']
-Q8772,Joseph Fourier,"['Baron Jean-Baptiste-Joseph Fourier', 'Jean-Baptiste Joseph Fourier']",P27,Q142,France,['French Republic']
-Q8433,Philip V of France,"['Philip the Tall', 'Philippe V']",P27,Q142,France,['French Republic']
-Q8404,John I of France,"['Jean I', 'Jean Ier le Posthume', 'John the Posthumous', 'the Posthumous']",P27,Q142,France,['French Republic']
-Q8384,Louis X of France,"['Louis the Headstrong', 'Louis the Quarreler', 'Louis the Stubborn']",P27,Q142,France,['French Republic']
-Q8298,David Guetta,"['Jack Back', 'Pierre David Guetta', 'Jack Hisbach']",P27,Q142,France,['French Republic']
-Q8058,Louis XI of France,"['Louis XI', 'Louis the Prudent']",P27,Q142,France,['French Republic']
-Q8053,Jules Hardouin-Mansart,"['Jules Hardoun Mandard', 'Jules-Hardouin Mansart', 'Jules Hardouin', 'J. H.- Mansart', 'J. H.-Mansard', 'Jacques Hardouin Mansart', 'Jules Hardouin Mansard']",P27,Q142,France,['French Republic']
-Q7855,Sébastien Loeb,"['Loeb, Sebastien', 'Sebastien Loeb']",P27,Q142,France,['French Republic']
-Q7841,Alfred Jarry,"['Alain Jans', 'Alfred-Henri Jarry']",P27,Q142,France,['French Republic']
-Q7833,Boris Vian,"['Brise', 'Vernon Sullivan', 'Baron Visi', 'Bison Ravi', 'Boris Paul Vian', 'Brisavion']",P27,Q142,France,['French Republic']
-Q7771,Louis-Philippe I,"['Louis Philippe', 'Louis-Philippe, Duke of Orleans', 'Citizen King', 'King of the French Louis Philippe', 'King of the French Louis-Philippe', 'Louis Philippe I', 'Louis Philippe, King of the French']",P27,Q142,France,['French Republic']
-Q7758,Charles X of France,"['Charles X', ""Monseigneur d'Artois""]",P27,Q142,France,['French Republic']
-Q7738,Louis XV of France,"['Louis XV', 'Louis le bien aimé', 'Louis the Beloved', 'Louis the Well beloved']",P27,Q142,France,['French Republic']
-Q7732,Louis XVI of France,"['Louis XVI', 'Louis Capet', 'Louis I of Navarre']",P27,Q142,France,['French Republic']
-Q7729,Louis Bonaparte,"['Louis I', 'Louis Napoléon Bonaparte', 'Luigi Buonaparte']",P27,Q142,France,['French Republic']
-Q7726,Joseph Bonaparte,"['Joseph of Spain', 'Giuseppe Buonaparte', 'Giuseppe di Buonaparte', 'Joseph, Prince Bonaparte']",P27,Q142,France,['French Republic']
-Q7723,Napoleon II,"['Duke of Reichstadt', 'duc de Reichstadt Napoleon II', 'Francis-Charles-Joseph, Duke of Reichstadt Bonaparte', 'Francois Charles Joseph Bonaparte', 'Francois Charles Joseph Napoleon II', 'François-Charles-Joseph Bonaparte, duc de Reichstadt', 'François-Charles-Joseph, Herzog von Reichstadt Bonaparte', 'Franz Joseph Karl, Herzog von Reichstadt Bonaparte', 'Franz, Duke of Reichstadt', 'Herzog von Reichstadt François-Charles-Joseph Bonaparte', 'His Imperial Majesty Napoleon II, By the Grace of God and the Constitution of the Republic, Emperor of the French and Co-Prince of Andorra', 'Napoléon II', 'Napoleon II of France', 'Napoléon-François-Charles-Joseph Bonaparte Reichstadt', 'Napoleoni II']",P27,Q142,France,['French Republic']
-Q7721,Napoleon III,"['Louis Napoleon', 'Napoléon III', 'Louis-Napoleon Bonaparte', 'Louis-Napoléon Bonaparte', 'Charles-Louis-Napoléan, Emperor of the French Bonaparte', 'Louis-Napoléan, Emperor of the French Bonaparte']",P27,Q142,France,['French Republic']
-Q7711,Jean-Marc Ayrault,['Jean Marc Ayrault'],P27,Q142,France,['French Republic']
-Q7504,Irène Joliot-Curie,"['Irène Curie', 'Irene Joliot-Curie']",P27,Q142,France,['French Republic']
-Q7314,Igor Stravinsky,"['Stravinsky', 'I. Strawinsky', 'Igor Fedorovich Stravinsky', 'Igor Feodorovich Stravinsky', 'Igor Fyodorovich Stravinsky', 'Igor Stravinski', 'Igor Stravinskii', 'Igor Strawinski', 'Igor Strawinskij', 'Igor Strawinsky', 'Jgor Strawinsky']",P27,Q142,France,['French Republic']
-Q7286,Émilie du Châtelet,"['Emilie du Chatelet', 'Émilie Le Tonnelier de Breteuil, marquise du Châtelet', 'Gabrielle-Emilie de Breteuil Marchioness du Chatelet', 'Gabrielle-Emilie du Châtelet-Lomont', 'Gabrielle-Émilie Le Tonnelier de Breteuil du Châtelet', 'Marquise de Châtelet', 'Marquise de Du Châtelet']",P27,Q142,France,['French Republic']
-Q7229,Mary-Anne Paulze Lavoisier,"['Lavoiser me', 'Marie Lavoisier', 'Marie-Anne Pierrette Paulze', 'Mme Lavoisier']",P27,Q142,France,['French Republic']
-Q7199,Marcel Proust,"['Proust', ""Bernard d'Algouvres"", 'Valentin Louis Georges Eugene Marcel Proust', 'Valentin Louis Georges Eugéne Marcel Proust', 'Valentin Louis Georges Eugène Marcel Proust', 'Valentin-Louis-Georges-Eugene-Marcel Proust', 'Valentin-Louis-Georges-Eugéne-Marcel Proust', 'Valentin-Louis-Georges-Eugène-Marcel Proust']",P27,Q142,France,['French Republic']
-Q7186,Marie Curie,"['Maria Curie Skłodowska', 'Maria Curie-Skłodowska', 'Maria Salomea Skłodowska', 'Maria Salomea Skłodowska-Curie', 'Maria Skłodowska']",P27,Q142,France,['French Republic']
-Q7177,Jean-Marie Le Pen,['Jean Marie Louis Le Pen'],P27,Q142,France,['French Republic']
-Q7122,Michel Audiard,"['Paul Michel Audiard', 'Pierre Michel Audiard']",P27,Q142,France,['French Republic']
-Q7104,Baron d'Holbach,"['Baron Paul Henri Thiry d’Holbach', 'Baron von Holbach', 'Paul Heinrich Holbach', 'Paul Henri Thiry d’Holbach, baron d’Holbach', ""Paul-Henri Thiry, baron d'Holbach"", ""Paul-Henri Thiry, Baron d'Holbach""]",P27,Q142,France,['French Republic']
-Q7103,Sophie Germain,['Marie-Sophie Germain'],P27,Q142,France,['French Republic']
-Q7068,Julien Offray de La Mettrie,['La Mettrie'],P27,Q142,France,['French Republic']
-Q6882,James Joyce,['James Augustine Aloysius Joyce'],P27,Q142,France,['French Republic']
-Q6682,Gustave Doré,"['Doré', 'Dore', 'G. Dore', 'G. Doré', 'G.ve Doré', 'Gustave Dore', 'Gustave-Paul Doré', 'Gustavo Doré', 'Louis Auguste Gustave Doré', 'Louis Christophe Gustave Dore', 'Louis Christophe Paul Gustave Dore', 'Louis Christophe Paul Gustave Doré', 'Paul Gustave Dore', 'Paul Gustave Doré', 'Paul Gustave Louis Christophe Dore', 'Paul Gustave Louis Christophe Doré', 'Paul-Gustave Dore']",P27,Q142,France,['French Republic']
-Q6050,Anna de Noailles,"['Anna Elisabeth de Noailles', 'Anna Elisabeth Mathieu de Noailles', 'Anna Elisabeth, comtesse de Noailles', 'Anne-Elisabeth de Noailles', 'Comtesse de Noailles', 'Princess Anna Elisabeth Bibesco-Bassaraba de Brancovan']",P27,Q142,France,['French Republic']
-Q5912,Marcel Duchamp,"['Duxiang', 'Rrose Sélavy', 'Rose Selavy', 'Rose Sélavy', 'Rrose Selavy', 'Henri Robert Marcel Duchamp', 'Henri-Robert-Marcel Duchamp', 'Marcel Duchamp- Villon', 'Marcel Duchamp-Villon', 'Marsel Dushan', 'R. Mutt']",P27,Q142,France,['French Republic']
-Q5829,Jean-Luc Mélenchon,"['Santerre', 'Jean-Luc Antoine Pierre Melenchon', 'Jean-Luc Antoine Pierre Mélenchon', 'Jean-Luc Melenchon']",P27,Q142,France,['French Republic']
-Q5819,José Bové,"['Joseph Bové', 'Jose Bove', 'Joseph Bove']",P27,Q142,France,['French Republic']
-Q5749,Pierre-Joseph Proudhon,"['P.-J. Proudhon', 'Pʹer Zhozef Prudon', 'Pʻu-lu-tung', 'Pierre Joseph Proudhon', 'Purūdon']",P27,Q142,France,['French Republic']
-Q5738,Adolphe Thiers,"['Louis Adolphe Thiers', 'Louis-Adolphe Thiers', 'Marie Joseph Louis Adolphe Thiers']",P27,Q142,France,['French Republic']
-Q5721,Philippe Pétain,"['Henri Philippe Benoni Omer Joseph Petain', 'Henri Philippe Benoni Omer Joseph Pétain', 'Marshal Petain', 'Marshal Pétain', 'Philippe Petain']",P27,Q142,France,['French Republic']
-Q5659,Conon de Béthune,['Conon de Bethune'],P27,Q142,France,['French Republic']
-Q5656,Héloïse d’Argenteuil,"['Heloise', 'Eloisa', 'Heloïse', 'Héloïse du Paraclet']",P27,Q142,France,['French Republic']
-Q5589,Henri Matisse,"['Matisse', 'Anri Matiss', 'h. matisse', 'H. Matisse', 'Henri Emile Benoit Matisse', 'Henri Emile Benoît Matisse', 'Henri-Emile-Benoit Matisse', 'Henri-Emile-Benoît Matisse', 'Henri-Émile-Benoît Matisse', 'Henri-Matisse', 'matisse h.', 'matisse henri']",P27,Q142,France,['French Republic']
-Q61833,"Meinhard III, Count of Gorizia-Tyrol",['Meinhard III'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61829,"George, Duke of Brunswick-Lüneburg","['Georg von Calenberg', 'Georg Wilhelm von Braunschweig-Lüneburg', 'Giorgio di Brunswick Lüneburg']",P27,Q183,Germany,['Federal Republic of Germany']
-Q61814,"Joachim I Nestor, Elector of Brandenburg","['Joachim I Nestor', 'Joachim I of Brandenburg', 'Joachim I, Prince-Elector of Brandenburg', 'Joachim Nestor Hohenzollern']",P27,Q183,Germany,['Federal Republic of Germany']
-Q61810,Heinrich Rubens,['Heinrich Leopold Rubens'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61799,Raphael Schäfer,['Raphael Schafer'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61796,"Albert III, Duke of Bavaria",['Albert III the Pious of Bavaria-Munich'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61795,Alfred Schwarzmann,['Karl Alfred Schwarzmann'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61794,Lothar Collatz,['Collatz'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61782,"Friedrich Ferdinand, Duke of Schleswig-Holstein","['Federico Fernando de Schleswig-Holstein', 'Frederick Ferdinand, Duke of Schleswig-Holstein-Sonderburg-Glücksburg', 'Friedrich Ferdinand']",P27,Q183,Germany,['Federal Republic of Germany']
-Q61781,Duchess Louise Charlotte of Mecklenburg-Schwerin,['Luise Charlotte Herzogin zu Mecklenburg'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61780,"Frederick Michael, Count Palatine of Zweibrücken",['Frederick Michael'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61777,Prince Georg Wilhelm of Hanover,"['Prince Georg Wilhelm Ernst August Friedrich Axel of Hanover', 'Prince Georg Wilhelm Ernst August Friedrich Axel of Hanover, Prince of Hanover', 'Prince Georg Wilhelm of Hanover, Prince of Brunswick', 'Prince George William of Hanover']",P27,Q183,Germany,['Federal Republic of Germany']
-Q61761,Pascual Jordan,['Ernest Pascual Jordan'],P27,Q183,Germany,['Federal Republic of Germany']
-Q61756,Kurt Hensel,['Kurt Wilhelm Sebastian Hensel'],P27,Q183,Germany,['Federal Republic of Germany']
-Q43666,Thomas Müller,['Thomas Muller'],P27,Q183,Germany,['Federal Republic of Germany']
-Q42747,Heinrich Böll,"['Heinrich Boll', 'Heinrich Theodor Boll', 'Heinrich Theodor Böll']",P27,Q183,Germany,['Federal Republic of Germany']
-Q42311,Sebastian Vettel,"['Vettel', 'Baby Schumi']",P27,Q183,Germany,['Federal Republic of Germany']
-Q41749,Joseph Goebbels,"['PJG', 'Goebbels']",P27,Q183,Germany,['Federal Republic of Germany']
-Q41508,Ludwig Mies van der Rohe,"['Mies van der Rohe', 'Mies', 'Liudvig Mis van der Rohe', 'Ludvig Mis van der Roė', 'Ludwig Mies', 'Ludwig Mies Van der Rohe', 'Ludwig Mies Van Der Rohe', 'Ludwig MiesvanderRohe', 'Maria Ludwig Michael Mies', 'Maria Ludwig Michael Mies van der Rohe']",P27,Q183,Germany,['Federal Republic of Germany']
-Q40791,Sandra Bullock,['Sandra Annette Bullock'],P27,Q183,Germany,['Federal Republic of Germany']
-Q38049,Herta Müller,"['H. Mueller', 'Herta Muller', 'H. Müller', 'H. Muller']",P27,Q183,Germany,['Federal Republic of Germany']
-Q35721,Annette Schwarz,['Annette Schönlaub'],P27,Q183,Germany,['Federal Republic of Germany']
-Q35698,Konrad Emil Bloch,"['Bloch', 'Bloch K', 'Bloch K.', 'Bloch K. E.', 'Bloch KE', 'K Bloch', 'K. Bloch', 'K. E. Bloch', 'Konrad Bloch', 'Konrad E Bloch', 'Konrad E. Bloch']",P27,Q183,Germany,['Federal Republic of Germany']
-Q31793,Franz Xaver Schwarz,['Franz X. Schwarz'],P27,Q183,Germany,['Federal Republic of Germany']
-Q28736,Ulrike Meyfarth,"['Ulrike Nasse', 'Ulrike Nasse-Meyfarth']",P27,Q183,Germany,['Federal Republic of Germany']
-Q28239,Gonzalo Castro,['Gonzalo Castro Randon'],P27,Q183,Germany,['Federal Republic of Germany']
-Q28085,Adolf Eichmann,"['Eichmann', 'Adolf Otto Eichmann', 'Eichmann Ottó Adolf', 'Klement Richárd']",P27,Q183,Germany,['Federal Republic of Germany']
-Q27486,Katja Ebstein,['Karin Witkiewicz'],P27,Q183,Germany,['Federal Republic of Germany']
-Q26714,Paul Deussen,['Paul Jakob Deussen'],P27,Q183,Germany,['Federal Republic of Germany']
-Q25973,Hermann Hesse,"['Hermann Karl Hesse', 'Hh. Hesse']",P27,Q183,Germany,['Federal Republic of Germany']
-Q25966,Anja Fichtel,['Anja Fichtel-Mauritz'],P27,Q183,Germany,['Federal Republic of Germany']
-Q14678,Dietrich von Hildebrand,['Dietrich Richard Alfred von Hildebrand'],P27,Q183,Germany,['Federal Republic of Germany']
-Q13894,Richard Strauss,['Richard Georg Strauss'],P27,Q183,Germany,['Federal Republic of Germany']
-Q12830,Reinhard Selten,['Reinhard Justus Reginald Selten'],P27,Q183,Germany,['Federal Republic of Germany']
-Q12658,Wilhelm Ostwald,['Wilhelm Friedrich Ostwald'],P27,Q183,Germany,['Federal Republic of Germany']
-Q11662,Steffi Graf,"['Maria Graf', 'Stefanie Maria Graf']",P27,Q183,Germany,['Federal Republic of Germany']
-Q10092,Maria Höfl-Riesch,['Maria Riesch'],P27,Q183,Germany,['Federal Republic of Germany']
-Q9671,Michael Schumacher,"['Schuey', 'Schumi']",P27,Q183,Germany,['Federal Republic of Germany']
-Q9577,Katja Seizinger,['Katja Weber'],P27,Q183,Germany,['Federal Republic of Germany']
-Q9130,Erwin Schrödinger,"['Schrödinger', 'Schrodinger', 'Erwin Rudolf Josef Alexander Schröndinger', 'Erwin Schrodinger', 'Erwin Schroedinger']",P27,Q183,Germany,['Federal Republic of Germany']
-Q8219,Uta Frith,"['Dame Uta Frith', 'Frith U', 'U Frith', 'U. Frith']",P27,Q183,Germany,['Federal Republic of Germany']
-Q7490,Clara Immerwahr,"['Clara Haber', 'Clara Helene Haber', 'Clara Helene Immerwahr']",P27,Q183,Germany,['Federal Republic of Germany']
-Q7409,Hertha Sponer,['Hertha Dorothea Elisabeth Sponer-Franck'],P27,Q183,Germany,['Federal Republic of Germany']
-Q7339,Margot Frank,['Margot Betti Frank'],P27,Q183,Germany,['Federal Republic of Germany']
-Q7337,Edith Frank-Holländer,"['Edith Frank', 'Edethias Frank']",P27,Q183,Germany,['Federal Republic of Germany']
-Q7336,Otto Heinrich Frank,['Otto H. Frank'],P27,Q183,Germany,['Federal Republic of Germany']
-Q7294,Johannes Brahms,"['Marks, G. W.', 'Brahms', 'J. Brahms']",P27,Q183,Germany,['Federal Republic of Germany']
-Q7249,Agnes Pockels,['Agnes Luise Wilhelmine Pockels'],P27,Q183,Germany,['Federal Republic of Germany']
-Q7231,Rosa Luxemburg,"['Róża Luksemburg', 'Rozalia Luxenburg', 'Red Rosa Luxemburg']",P27,Q183,Germany,['Federal Republic of Germany']
-Q6969,Stefan Raab,"['Joe Steam', 'Stefan Konrad Raab']",P27,Q183,Germany,['Federal Republic of Germany']
-Q6541,Heino,['Heinz Georg Kramm'],P27,Q183,Germany,['Federal Republic of Germany']
-Q6538,Günter Grass,"['Gunter Grass', 'Günter Graß', 'Günter Wilhelm Grass', 'Günter Wilhelm Graß']",P27,Q183,Germany,['Federal Republic of Germany']
-Q5354,Ernst Mayr,"['E. Mayr', 'E. W. Mayr', 'Ernst Walter Mayr']",P27,Q183,Germany,['Federal Republic of Germany']
-Q5327,Adolf Butenandt,['Adolf Friedrich Johann Butenandt'],P27,Q183,Germany,['Federal Republic of Germany']
-Q5117,Eugen Polanski,['Bogusław Eugeniusz Polański'],P27,Q183,Germany,['Federal Republic of Germany']
-Q4517,Bernard Katz,"['Bernhard Katz', 'Professor Sir Bernard Katz', 'Sir Bernard Katz']",P27,Q183,Germany,['Federal Republic of Germany']
-Q4462,Joachim Löw,['Jogi Löw'],P27,Q183,Germany,['Federal Republic of Germany']
-Q4457,Franz Beckenbauer,['Der Kaiser'],P27,Q183,Germany,['Federal Republic of Germany']
-Q3374,Anne-Sophie Mutter,['Anne Sophie Mutter'],P27,Q183,Germany,['Federal Republic of Germany']
-Q3234,Jochen Rindt,['Karl Jochen Rindt'],P27,Q183,Germany,['Federal Republic of Germany']
-Q2677,Wilhelm II,"['William II', 'Wilhelm II.', 'Kaiser Wilhelm II', 'Emperor Willlam', 'Frederick William Victor Albert of Prussia', 'Friedrich Wilhelm Emperor William II', 'Friedrich Wilhelm Viktor Albert von Hohenzollern', 'Friedrich Wilhelm Viktor Albrecht von Preußen', 'German Emperor Wilhelm II', 'Wilhelm II of Germany', 'Wilhelm II, German Emperor']",P27,Q183,Germany,['Federal Republic of Germany']
-Q2667,Paul von Hindenburg,"['Hindenburg', 'von Hindenburg']",P27,Q183,Germany,['Federal Republic of Germany']
-Q2602,Egon Krenz,['Egon Rudi Ernst Krenz'],P27,Q183,Germany,['Federal Republic of Germany']
-Q2594,Theodor Heuss,['Theodor Heusz'],P27,Q183,Germany,['Federal Republic of Germany']
-Q2573,Gustav Heinemann,['Gustav W. Heinemann'],P27,Q183,Germany,['Federal Republic of Germany']
-Q2518,Helmut Kohl,"['Kohl', 'Dr. Helmut Kohl', 'Helmut Josef Michael Kohl']",P27,Q183,Germany,['Federal Republic of Germany']
-Q2516,Helmut Schmidt,"['H. Schmidt', 'Helmut Heinrich Waldemar Schmidt', 'Schmidt, Helmut Heinrich Waldemar']",P27,Q183,Germany,['Federal Republic of Germany']
-Q2494,Benedict XVI,"['Pope Benedict XVI', 'Josef Ratzinger', 'Benedetto XVI', 'Benedictus XVI', 'Joseph Alois Ratzinger', 'Pope Benedictus XVI', 'Pope Emeritus Benedict XVI']",P27,Q183,Germany,['Federal Republic of Germany']
-Q2492,Konrad Adenauer,['Konrad Hermann Joseph Adenauer'],P27,Q183,Germany,['Federal Republic of Germany']
-Q1743,Björn Otto,['Bjoern Otto'],P27,Q183,Germany,['Federal Republic of Germany']
-Q937,Albert Einstein,['A.Einsten'],P27,Q183,Germany,['Federal Republic of Germany']
-Q567,Angela Merkel,['leader of the free world'],P27,Q183,Germany,['Federal Republic of Germany']
-Q22755,Silvio Gesell,['Johann Silvio Gesell'],P27,Q183,Germany,['Federal Republic of Germany']
-Q22675,Tom Wlaschiha,['Thomas Wlaschiha'],P27,Q183,Germany,['Federal Republic of Germany']
-Q21163,Ferdinand Tönnies,"['F. Tönnies', 'Ferdinand Toennies', 'Tonnies', 'Ferdinand Tonnies', 'Julia v. Egge-Weichling', 'Julius Tönnies', 'Krito', 'Normannus']",P27,Q183,Germany,['Federal Republic of Germany']
-Q21088,Zedd,['Anton Zaslavski'],P27,Q183,Germany,['Federal Republic of Germany']
-Q20235,Franzl Lang,"['Franz Lang', 'Jodler-Franzl', 'Yodelking']",P27,Q183,Germany,['Federal Republic of Germany']
-Q19504,Fritz Lang,"['Friedrich Christian Anton ""Fritz"" Lang', 'Friedrich Christian Anton Lang', 'Fritz Lang (1890–1976)']",P27,Q183,Germany,['Federal Republic of Germany']
-Q18806,Franz Mehring,['Franz Erdmann Mehring'],P27,Q183,Germany,['Federal Republic of Germany']
-Q16019,Wolfgang Schäuble,"['Wolfgang Schaeuble', 'Wolfgang Schauble']",P27,Q183,Germany,['Federal Republic of Germany']
-Q15981,Robert Schuman,"['Jean-Baptiste Nicolas Robert Schuman', 'Venerable Robert Schuman']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44647,Otfried Preußler,"['Hannes Hauser', 'Otfried Preussler']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44634,Nico,"['Christa Nico', 'Christa Päffgen', 'Nico Otzak', 'Nico Päffgen']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44620,Franz Josef Strauß,['Franz Josef Strauss'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44597,Feodor Felix Konrad Lynen,['Feodor Lynen'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44584,Hans Magnus Enzensberger,['Andreas Thalmayr'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44540,Oskar Maria Graf,['Oskar Graf-Berg'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44507,Edmund Stoiber,['Edmund Rüdiger Rudi Stoiber'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44464,Rudi Völler,"['El Bobo', 'Völler', 'Rudolf Völler', 'Tante Käthe']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44393,Ludwig III of Bavaria,"['Ludwig III', 'Ludwig III.']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44340,Uli Hoeneß,"['Ulrich Hoeness', 'Ulrich Hoeneß']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44286,Rudolf Mössbauer,['Rudolf Ludwig Mössbauer'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44131,Werner Herzog,"['Werner Herzog Stipetić', 'Werner Stipetić']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44086,Carl Orff,['Karl Orff'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44068,Dirk Nowitzki,"['Dirk Werner Nowitzki', 'Dirkules', 'German Wunderkind']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44040,Richard David Precht,"['Richard D. Precht', 'Richard Precht']",P27,Q183,Germany,['Federal Republic of Germany']
-Q45766,Mario Gómez,['Mario Gómez García'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45520,Oliver Riedel,"['El Babo Alemán', 'Oliver ""Ollie"" Riedel', 'Ollie Riedel', 'Pelón de Brazzers']",P27,Q183,Germany,['Federal Republic of Germany']
-Q45255,Karl Valentin,"['Valentin Fey', 'Valentin Ludwig Fey']",P27,Q183,Germany,['Federal Republic of Germany']
-Q45239,Franz Xaver Kroetz,['Franz-Xaver Kroetz'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45221,Herbert Achternbusch,['Herbert Schild'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45201,Rainer Woelki,['Rainer Maria Woelki'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45195,"Duke Albrecht, Duke of Bavaria","['Albrecht Luitpold Ferdinand Michael', 'Albrecht Luitpold Ferdinand Michael, Duke of Bavaria, of Franconia and in Swabia, Count Palatine of the Rhine']",P27,Q183,Germany,['Federal Republic of Germany']
-Q45160,Michael von Faulhaber,['Michael Cardinal von Faulhaber'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45158,Gerhard Ludwig Müller,['Gerhard Ludwig Cardinal Müller'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45129,Julius Döpfner,['Julius August Cardinal Döpfner'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45070,Christoph Schlingensief,"['Christof Schlingensief', 'Christoph Maria Schlingensief']",P27,Q183,Germany,['Federal Republic of Germany']
-Q45066,Joachim Meisner,['Joachim Cardinal Meisner'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45060,Joseph Höffner,['Joseph Cardinal Höffner'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45049,Georg Sterzinsky,['Georg Maximilian Sterzinsky'],P27,Q183,Germany,['Federal Republic of Germany']
-Q45019,Karl Lehmann,"['Kardinal Lehmann', 'Karl Cardinal Lehmann', 'Karl Kardinal Lehmann']",P27,Q183,Germany,['Federal Republic of Germany']
-Q45006,Q45006,"['Stuck', 'Franz von Stuck', 'f. stuck', 'f. v. stuck', 'f. von stuck', 'fr. v. stuck', 'fr. von stuck', 'Frans von Stuck', 'Franz Ritter von Stuck', 'franz stuck', 'Franz Stuck Ritter von', 'franz v. stuck', 'Franz Von Stuck', 'franz von, M. stuck', 'franz von, prof. stuck', 'Franz, Ritter von Stuck', 'prof. f. stuck', 'prof. franz stuck', 'professor franz stuck', 'professor franz v. stuck', 'professor franz von stuck', 'stuck franz', 'stuck franz von', 'von stuck']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44951,Rainer Bonhof,"['Bonhof, Rainer']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44893,"Rupprecht, Crown Prince of Bavaria",['Rupprecht'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44858,Bernd Hölzenbein,['Bernd Holzenbein'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44834,Thomas Kraft,"['Kraft, Thomas']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44820,Georg Schwarzenbeck,"['Hans-Georg Schwarzenbeck', 'Katsche']",P27,Q183,Germany,['Federal Republic of Germany']
-Q44815,Giovane Élber,['Giovane Elber'],P27,Q183,Germany,['Federal Republic of Germany']
-Q44736,Loriot,"['Vicco von Bülow', 'Bernhard Victor Christoph Carl von Bülow', 'Bernhard-Viktor Christoph-Carl von Bülow', 'Vicco Von Bülow', ""Wum's Gesang""]",P27,Q183,Germany,['Federal Republic of Germany']
-Q313694,Stephen Hunt,['Stephen Patrick Hunt'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q313454,Jan Łukasiewicz,['Jan Lukasiewicz'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q313077,John Banville,"['Benjamin Black', 'William John Banville']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q313063,Brendan Behan,"['Brendan Francis Aidan Behan', 'Francis Behan']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q311970,Brian McFadden,['Brian Nicholas McFadden'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q311966,Roger Casement,"['Roger David Casement', 'Ruairi Daithi Mac Easmainn', 'Ruairí Dáithí Mac Easmainn', 'Ruairí Mac Easmainn', 'Sir Roger Casement']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q311964,Damien Rice,['Damien George Rice'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q311467,Ronan Keating,['Ronan Patrick John Keating'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q310994,Patrick Hillery,"['Patrick John ""Paddy"" Hillery', 'Patrick John Hillery']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q310225,Pat Cox,['Patrick Cox'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q306351,John O'Shea,"[""John Francis O'Shea""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q298930,Phil Lynott,"['Philip Lynott', 'Philip Parris Lynott']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q298908,Patrick McGoohan,"['Patrick Joseph MacGoohan', 'Patrick Joseph McGoohan', 'Patrick MacGoohan']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q298559,Johnny Logan,"['Seán Patrick Michael Sherrard', ""Seán Patrick Michael Sherrard O'Hagan"", 'Sean Sherrard']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q297964,Shane Long,['Shane Patrick Long'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q297552,Tom Morello,"['The Nightwatchman', 'El flipante guitarrista calvo con un pitch shifter', 'Thomas Baptist Morello', 'Thomas Morello']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q296616,Gabriel Byrne,['Gabriel James Byrne'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q296603,Kevin Doyle,['Kevin Edward Doyle'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q296332,Sean St Ledger,['Sean Patrick St Ledger-Hall'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q290666,Barry Fitzgerald,['William Joseph Shields'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q284784,James McClean,['James Joseph McClean'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q283227,Brian Friel,"['Bernard Patrick Friel', 'Brian Patrick Friel']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q272401,Jean Kennedy Smith,"['Jean Kennedy', 'Jean Smith', 'Jean Ann Kennedy', 'Jean Ann Kennedy Smith', 'Jean Ann Smith', 'Kennedy, Jean Ann, 1928-2020']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q272303,Jane Wilde,"['Jane Francesca Agnes Elgee', 'Lady Wilde', 'Jane Elgee', 'Jane Francesca Agnes Wilde', 'Jane Francesca Agnes, Lady Wilde', 'Jane Francesca Elgee', 'Speranza, John Fanshawe Ellis']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q264891,Andrea Corr,['Andrea Jane Corr'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q263951,Mark Lawrenson,['Mark Thomas Lawrenson'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q262699,Katie Taylor,"['KT', 'Simply the Best', 'The Bray Bomber']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q254838,Samantha Mumba,"['Samantha Ruth Prapu', 'Samantha Tamania Anne Cecilia Mumba']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q253440,Katie McGrath,"['Katherine McGrath', 'Katherine ""Katie"" McGrath']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q373940,"Sir Henry Wilson, 1st Baronet","['Henry Wilson', 'Henry Hughes Wilson', 'Sir Henry Wilson']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q372394,Martin McDonagh,['Martin Faranan McDonagh'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q371002,Packie Bonner,"['Pat Bonner', 'Patrick Joseph Bonner']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q369933,Luke Kelly,['Lúcás Ó Ceallaigh'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q368803,Anthony Pilkington,['Anthony Neil James Pilkington'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q368264,Charles Villiers Stanford,"['Karel Drofnatski', 'Sir Charles Villiers Stanford']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q363525,Stuart Townsend,['Stuart Peter Townsend'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q362406,Ronnie Drew,"['Joseph Ronald Augustine Drew', 'Joseph Ronald Drew']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q358032,Aidan Gillen,['Aidan Murphy'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q356455,Saint Malachy,"['Mael Maedoc Ua Morgair', 'Máel Máedóc Ua Morgair', 'Malachia O’Morgair', 'Malachy', 'St. Malachia O’Morgair', 'St. Malachy']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q356428,Darren O'Shaughnessy,"['D. B. Shan', 'Darren Dash', 'Darren Shan']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q356404,Lee Carsley,['Lee Kevin Carsley'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q342826,John Aldridge,['John William Aldridge'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q335838,Turlough O'Carolan,"['Toirdhealbhach O Cearbhallain', 'Toirdhealbhach Ó Cearbhalláin', ""Torlogh O'Carolan""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q335013,"David Beatty, 1st Earl Beatty","['David Beatty', 'Admiral of the Fleet David Richard Beatty, 1st Earl Beatty', 'David Richard Beatty']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q333735,Charles Haughey,"['Charles J. Haughey', 'Charles James Haughey', 'Charlie Haughey', 'Cathal Ó hEochaidh', 'Cathal Séamas Ó hEochaidh']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q333701,John Bruton,['John Gerard Bruton'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q333148,Richard Steele,['Sir Richard Steele'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q332483,George Galloway,"['Gorgeous George', 'Galloway George']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q331922,Rory Gallagher,['William Rory Gallagher'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q331908,Stephen Kelly,['Stephen Michael Kelly'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q327203,Seán T. O'Kelly,"[""Sean T. O'Ceallaigh"", ""Séan T. O'Kelly""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q320604,"Michael Morris, 3rd Baron Killanin","['Michael Morris', 'Baron Killanin', 'Lord Killanin']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q320224,Nicky Byrne,['Nicholas Bernard James Adam Byrne'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q244395,Seán MacBride,['Sean MacBride'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q241502,Richard Dunne,['Richard Patrick Dunne'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q239540,"Augusta, Lady Gregory","['Lady Gregory', 'Isabella Augusta Gregory', 'Isabella Augusta Persse Gregory', 'Lady (Isabella) Augusta Gregory']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q239354,Dymphna,['Davnet'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q238941,Moya Brennan,"['Maire Brennan', 'Máire Brennan', 'Maire Ni Bhraonain', 'Máire Ní Bhraonáin', 'Moira Brennan']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q238070,Sara Allgood,"['Sally Allgood', 'Sara Ellen Allgood', 'Sarah Ellen Allgood']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q237951,Douglas Hyde,"['An Craoibhin Aoibhinn', 'An Craoibhín Aoibhinn', 'Douglas Ross Hyde', 'Dubhghlas de hÍde']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q237615,Dana Rosemary Scallon,"['Dana', 'Dana Scallon']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q237586,Michelle Smith,['Michelle Smith de Bruin'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q237541,Veronica Guerin,['Veronica Guerin Turley'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q236396,Geraldine Fitzgerald,['Geraldine Mary Fitzgerald'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q235572,Geraldine Somerville,['Geraldine Margaret Agnew-Somerville'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q235308,Elizabeth Bowen,"['Elisabeth Bowen', 'Elizabeth (Dorothea Cole) Bowen']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q235143,Sharon Corr,['Sharon Helga Corr'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q5396,Louis Blériot,"['Louis Bleriot', 'Louis Charles Joseph Bleriot', 'Louis Charles Joseph Blériot']",P27,Q142,France,['French Republic']
-Q5233,François-Édouard Picot,"['François Edouard Picot', 'Picot', 'Francois Edouard Picot', 'Francois Eduard Picot', 'François Eduard Picot', 'François-Edouard Picot']",P27,Q142,France,['French Republic']
-Q5172,Jean Bodel,['Bodel'],P27,Q142,France,['French Republic']
-Q4724,Le Corbusier,"['Corbu', 'Corbusier', 'Corb', 'Charles Jeanneret', 'Charles Edouard Jeanneret', 'Charles Édouard Jeanneret', 'Charles Edouard Jeanneret- Gris', 'Charles Edouard Jeanneret-Gris', 'Charles Édouard Jeanneret-Gris', 'Charles Edouard Jenneret', 'Charles-Edouard Jeanneret', 'Charles-Édouard Jeanneret', 'Charles-Edouard Jeanneret-Gris', 'Corbusier Le', 'Edouard Jeanneret', 'Édouard Le Corbusier', 'Kebiyi', 'Le Corbusier (Charles-Édouard Jeanneret)', 'Le Corbusier Jeanneret', 'Le Corbusier-Saugnier', 'Le Korbi︠u︡zʹe']",P27,Q142,France,['French Republic']
-Q4700,Claude Debussy,"['Debussy', 'A. Cl. Debussy', 'Achille Claude Debussy', 'Achille-Claude', 'Achille-Claude Debussy', 'C. Debussy', 'Claude Achille Debussy', 'Claude-Achille Debussy']",P27,Q142,France,['French Republic']
-Q4605,Sarah Bernhardt,['Rosine Bernard Bernhardt'],P27,Q142,France,['French Republic']
-Q4510,Bertran de Born,['Bertrand Born'],P27,Q142,France,['French Republic']
-Q4344,Arnaut Daniel,"['Arnaut Danièl', 'Arnaut Daniel de Riberac']",P27,Q142,France,['French Republic']
-Q4323,Albert of Aix,"['Alberic of Aix-la-Chapelle', 'Albert of Aachen', 'Albert of Aix-la-Chapelle']",P27,Q142,France,['French Republic']
-Q4302,Chrétien de Troyes,"['Chrétien', 'Chrestien de Troye', 'Chretien de Troyes']",P27,Q142,France,['French Republic']
-Q4261,Michel Platini,"['Michel Francois Platini', 'Michel François Platini']",P27,Q142,France,['French Republic']
-Q4247,Rodolphe Töpffer,"['Rodolphe Toepffer', 'rodolphe topffer', 'Rodolphe Topffer', 'Rudolf Töpffer', 'Rudolphe Töpffer']",P27,Q142,France,['French Republic']
-Q18413,Louis de Beaufront,['Louis Chevreux'],P27,Q142,France,['French Republic']
-Q18410,Maryse Bastié,"['Marie-Louise Bombec', 'Maryse Bastie']",P27,Q142,France,['French Republic']
-Q18143,Gao Xingjian,"['Hành Kiện Cao', 'Hsing-chien Kao', 'Xingjian Gao']",P27,Q142,France,['French Republic']
-Q17577,Joseph Gallieni,['Joseph Simon Gallieni'],P27,Q142,France,['French Republic']
-Q16409,Tristan Tzara,"['Tristan', 'Rosenstock Tristan Samuel', 'S. Samyro', 'Samuel Rosenstock', 'Samy Rosenstock', 'Tr. Tzara', 'Tristan Ruia', 'Tristan Samuel Rosenstock']",P27,Q142,France,['French Republic']
-Q15981,Robert Schuman,"['Jean-Baptiste Nicolas Robert Schuman', 'Venerable Robert Schuman']",P27,Q142,France,['French Republic']
-Q14524,Charles Messier,"['Messier', 'Charles Joseph Messier']",P27,Q142,France,['French Republic']
-Q13515,Frédéric Bastiat,"['Claude Frédéric Bastiat', 'Frederic Bastiat']",P27,Q142,France,['French Republic']
-Q13513,Jean-Baptiste Say,['Jean Baptiste Say'],P27,Q142,France,['French Republic']
-Q13509,Léon Walras,['Leon Walras'],P27,Q142,France,['French Republic']
-Q13494,Jean-Pierre Papin,['Jean-Pierre Roger Guillaume Papin'],P27,Q142,France,['French Republic']
-Q13488,Grégory Coupet,['Gregory Coupet'],P27,Q142,France,['French Republic']
-Q13484,Laurent Fignon,['Laurent Patrick Fignon'],P27,Q142,France,['French Republic']
-Q13308,Samuel Umtiti,"['Samuel Um Titi', 'Samuel Yves Um Titi', 'Samuel Yves Umtiti']",P27,Q142,France,['French Republic']
-Q13306,Alexandre Lacazette,['Alexandre Armand Lacazette'],P27,Q142,France,['French Republic']
-Q13055,Rémy Vercoutre,"['Remy Rene Paul Vercoutre', 'Rémy René Paul Vercoutre', 'Remy Vercoutre']",P27,Q142,France,['French Republic']
-Q13054,Steed Malbranque,['Steed Claude Malbranque'],P27,Q142,France,['French Republic']
-Q12969,Jacques Cheminade,['Jacques Guy Cheminade'],P27,Q142,France,['French Republic']
-Q12963,François Bayrou,"['Francois Bayrou', 'Francois Rene Jean Lucien Bayrou', 'François René Jean Lucien Bayrou']",P27,Q142,France,['French Republic']
-Q12957,Raymond Barre,['Raymond Octave Joseph Barre'],P27,Q142,France,['French Republic']
-Q12956,Gérard Collomb,['Gerard Collomb'],P27,Q142,France,['French Republic']
-Q12950,Alain Poher,['Alain Émile Louis Marie Poher'],P27,Q142,France,['French Republic']
-Q12942,Arlette Laguiller,['Arlette Yvonne Laguiller'],P27,Q142,France,['French Republic']
-Q12940,Jacques Chaban-Delmas,"['Jacques Delmas', 'Chaban']",P27,Q142,France,['French Republic']
-Q12932,Olivier Besancenot,"['Olivier Christophe Besancenot', 'Oliver Besancenot']",P27,Q142,France,['French Republic']
-Q12718,Auguste Comte,"['August Comte', 'Isidore Auguste Marie François Xavier Comte']",P27,Q142,France,['French Republic']
-Q12688,Jean Jaurès,"['Auguste Marie Joseph Jean Leon Jaures', 'Auguste Marie Joseph Jean Léon Jaurès', 'Jan Jores', 'Jean Jaures', 'Jean Leon Jaures', 'Jean Léon Jaurès']",P27,Q142,France,['French Republic']
-Q12680,Paul Doumer,"['Joseph Athanase Doumer', 'Joseph Athanase Gaston Paul Doumer']",P27,Q142,France,['French Republic']
-Q12160,Rémi Garde,"['Remi Garde', 'Remi Marie Francois Garde', 'Rémi Marie François Garde']",P27,Q142,France,['French Republic']
-Q12091,Henry Dunant,"['Jean Henri Dunant', 'Anrī Dyunan', 'Errikos D̲ynan', 'Henri Dunant', 'J. Henry Dunant', 'Jean Henry Dunant', 'Jean-Henri Dunant', 'Sodabeh Dunant']",P27,Q142,France,['French Republic']
-Q11966,Bafétimbi Gomis,['Bafetimbi Gomis'],P27,Q142,France,['French Republic']
-Q11485,Jean-Claude Killy,['Killy'],P27,Q142,France,['French Republic']
-Q27820,Lucien Gaudin,['Lucien Alphonse Paul Gaudin'],P27,Q142,France,['French Republic']
-Q27764,Louis Antoine de Saint-Just,['Louis Florelle de Saint-Just'],P27,Q142,France,['French Republic']
-Q27649,Jérôme Rothen,"['Jerome Rene Marcel Rothen', 'Jérôme René Marcel Rothen', 'Jerome Rothen']",P27,Q142,France,['French Republic']
-Q27645,Mikhail Bakunin,"['A. M. Bakunin', 'Bakunin', 'Michail Alexandrovich Bakunin', 'Mikhail Aleksandrovich Bakunin', 'Mikhail Alexandrovich Bakunin', 'Michael Bakunin']",P27,Q142,France,['French Republic']
-Q27528,Sambou Yatabaré,['Sambou Yatabare'],P27,Q142,France,['French Republic']
-Q27523,Mehdi Mostefa,['Mehdi Mostefa Sbaa'],P27,Q142,France,['French Republic']
-Q27476,Florian Thauvin,['Florian Tristan Mariano Thauvin'],P27,Q142,France,['French Republic']
-Q26522,Mbaye Niang,"[""M'Baye Babacar Niang"", ""M'Baye Hamady Niang""]",P27,Q142,France,['French Republic']
-Q26456,Rashi,"['Rabbi Shlomo Yischak', 'Shlomo ben Yischak', 'Shlomo Yitzchaki']",P27,Q142,France,['French Republic']
-Q26451,Albert Taillandier,['Albert Philippe Taillandier'],P27,Q142,France,['French Republic']
-Q26408,Pierre Bonnard,"['Bonnard', 'bonnard p.', 'p. bonnard', ""P'er Bonnar"", 'Pierre Eugene Frederic Bonnard', 'Pierre Eugène Frédéric Bonnard']",P27,Q142,France,['French Republic']
-Q23844,George Clooney,['George Timothy Clooney'],P27,Q142,France,['French Republic']
-Q23842,Jean Gabin,['Jean Gabin Alexis Moncorgé'],P27,Q142,France,['French Republic']
-Q23441,Octave Mirbeau,"['Mirbeau', 'Octave Henri Marie Mirbeau']",P27,Q142,France,['French Republic']
-Q23380,Jean-Auguste-Dominique Ingres,"['Ingres', 'Dominique Ingres', 'ingres jean auguste dominique', 'ingres jean-auguste', 'J. A. D. Ingres', 'J.-A.-D. Ingres', 'J.-August Ingres', 'j.a.d. ingres', 'J.A.D. Ingres', 'JAD Ingres', 'jean aug. d. ingres', 'Jean aug. dom. ingres', 'Jean August Dominique Ingres', 'Jean Auguste Ingres', 'Jean Dominique Auguste Ingres', 'Jean Ingres', 'Jean-Auguste Dominique Ingres', 'Jean-Dominique Ingres', 'Zhan Ogi︠u︡st Dominik Ėngr']",P27,Q142,France,['French Republic']
-Q22662,Maurice René Fréchet,"['Maurice Frechet', 'Maurice Fréchet', 'Maurice Rene Frechet', 'René Maurice Fréchet']",P27,Q142,France,['French Republic']
-Q20951,Élisée Reclus,"['Elisee Reclus', 'Elisée Reclus', 'Elisha Reclus', 'Élysée Reclus', 'Jacques Elisee', 'Jacques Elisée', 'Jacques Élisée Reclus', 'Jean Jacques Élisée Reclus']",P27,Q142,France,['French Republic']
-Q20882,Gustave Eiffel,['Alexandre Gustave Eiffel'],P27,Q142,France,['French Republic']
-Q20721,Luigi Cherubini,"['Cherubini', 'Louis-Charles-Zenobi-Salvador-Marie Cherubini', 'Luigi Maria Cherubini', 'Maria Luigi Carlo Zenobio Salvatore Cherubini', 'Marie Louis Charles Zanobi Salvador Cherubini']",P27,Q142,France,['French Republic']
-Q20710,Jean-Martin Charcot,"['Charcot', 'Jean Martin Charcot']",P27,Q142,France,['French Republic']
-Q19054,Matteo Bandello,['Bandello'],P27,Q142,France,['French Republic']
-Q19007,Philip Hurepel,"['Philip I', 'Philip I of Boulogne', 'Philip I, Count of Boulogne']",P27,Q142,France,['French Republic']
-Q18962,Adrien Rabiot,"['Adrien Thibault Marie Rabiot', 'Adrien Rabiot-Provost']",P27,Q142,France,['French Republic']
-Q18832,Sławomir Mrożek,['Sławomir Mrozek'],P27,Q142,France,['French Republic']
-Q18443,Maurice de Broglie,['Louis-César-Victor-Maurice de Broglie'],P27,Q142,France,['French Republic']
-Q18436,Émile Boirac,['Emile Boirac'],P27,Q142,France,['French Republic']
-Q18434,Léon Blum,"['Leon Blum', 'André Léon Blum']",P27,Q142,France,['French Republic']
-Q18425,Marcellin Berthelot,"['Pierre Eugène Berthelot', 'Pierre Eugene Marcellin Berthelot', 'Pierre Eugène Marcellin Berthelot']",P27,Q142,France,['French Republic']
-Q234553,Eimear Quinn,['Eimear Mary Rose Quinn'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q234436,Ninette de Valois,"['Dame Ninette de Valois', 'Edris Connell']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q229276,Maureen O'Hara,['Maureen FitzSimons Blair'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q228603,Saoirse Ronan,['Saoirse Úna Ronan'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q223161,Aphex Twin,"['Richard James', 'The Dice Man', 'GAK', 'Richard D. James', 'AFX', 'Blue Calx', 'Bradley Strider', 'Brian Tregaskin', 'Caustic Window', 'PBoD', 'Phonic Boy on Dope', 'Phonic Boy On Dope', 'Polygon Window', 'Power-Pill', 'Q-Chastic', 'Ricardo Jamiro', 'Rutchkfard Games', 'Smojphace', 'Soit - P.P.', 'Soit-P.P.', 'The Tuss', 'user18081971', 'user48736353001']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q222039,Sheamus,['Stephen Farrelly'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q221222,Darron Gibson,['Darron Thomas Daniel Gibson'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q220010,Glen Hansard,['Glen James Hansard'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q217495,Iris Murdoch,"['Dame Iris Murdoch', 'Jean Iris Murdoch']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q216608,Bob Geldof,['Robert Frederick Zenon Geldof'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q215812,Shay Given,"['Seamus John James Given', 'Séamus John James Given']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q215369,Stephen Gately,['Stephen Patrick David Gately'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q214309,Sam Neill,['Nigel John Dermot Neill'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q213567,Jonathan Rhys Meyers,"[""Jonathan Michael Francis O'Keeffe""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q212993,Benedict Anderson,"[""Benedict R. O'G. Anderson"", ""Benedict Richard O'Gorman Anderson"", ""Richard Benedict O'Gorman Anderson""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q211730,Evanna Lynch,['Evanna Patricia Lynch'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q210755,Richard Keogh,['Richard John Keogh'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q209641,John le Carré,"['David Cornwell', 'David John Moore Cornwell', 'John le Carre']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q207458,Mischa Barton,['Mischa Anne Marsden Barton'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q206856,Angela Lansbury,"['Angela Brigid Lansbury', 'Ángela Lansbury', 'Dame Angela Brigid Lansbury']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q203545,Michael Gambon,"['Michael John Gambon', 'Sir Michael Gambon', 'Sir Michael John Gambon']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q200355,Olivia Wilde,"['Olivia Jane Cockburn', 'Olivia Jane Wilde']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q193982,Sinéad O'Connor,"['Magda Davitt', 'Mother Bernadette Mary', 'Shuhada Sadaqat', ""Shuhada' Davitt"", ""Shuhada' Sadaqat"", ""Sinéad Marie Bernadette O'Connor"", 'Sinéad Marie Bernadette O’Connor', ""Sinead O'Connor""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q192971,Damien Duff,['Damien Anthony Duff'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q192533,Mark Carney,['Mark Joseph Carney'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q188632,Roy Keane,['Roy Maurice Keane'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q188214,Mary Robinson,"['Mary Bourke', 'Her Excellency Mary Robinson', 'Maire Bean Mhic Roibin', 'Máire Bean Mhic Róibín', 'Máire Mhic Róibín', 'Máire Treasa Úna Mhic Róibín', 'Mary Therese Winifred Bourke', 'Mary Therese Winifred Robinson']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q185272,Brian Cowen,['Brian Bernard Cowen'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q184612,Robbie Keane,['Robert David Keane'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q184572,Martin Sheen,"['Ramón Gerard Antonio Estévez', 'Ramon Gerardo Antonio Estevez', 'Ramón Gerardo Antonio Estévez']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q183631,Ernest Walton,['Ernest Thomas Sinton Walton'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q180936,Saint Gall,"['Gallus', 'Gallen']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q178237,Chris de Burgh,['Christopher John Davison'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q178225,Edna O'Brien,"[""Josephine Edna O'Brien""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q174662,Mary McAleese,['Mary Patricia McAleese'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q173347,Éamon de Valera,['Eamon de Valera'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q173175,Eddie Jordan,"['Edmund Jordan', 'Edmund Patrick Jordan']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q172217,Joe Kelly,['Joseph Michael Kelly'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q172035,Colin Farrell,['Colin James Farrell'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q171635,Derek Daly,['Derek Patrick Daly'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q171581,Ralph Firman,['Ralph David Firman Jr.'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q166389,Daniel Day-Lewis,"['Daniel Michael Blake Day-Lewis', 'Sir Daniel Michael Blake Day-Lewis']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q161154,Lola Montez,"['Lola Montes', 'Lola Montez', 'Countess of Landsfeld', 'Elizabeth Rosanna Gilbert']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q158995,Joey O'Brien,"[""Joseph Martin O'Brien""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q155907,"Sir George Stokes, 1st Baronet","['George Stokes', 'Sir George Gabriel Stokes', 'Sir George Gabriel Stokes, 1st Baronet', 'Sir George Stokes']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q154550,Bertie Ahern,['Patrick Bartholomew Ahern'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q152690,Maeve Binchy,['Maeve Binchy Snell'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q151795,Danny O'Donoghue,"[""Daniel John Mark Luke O'Donoghue"", ""Daniel John O'Donoghue"", ""Daniel O'Donoghue""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q150332,John Egan,['John Patrick Egan'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q132026,David O'Leary,"[""David Anthony O'Leary""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q121615,Bobby Sands,"['Robert Gerard Sands', 'Roibeard Gearóid Ó Seachnasaigh']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q120132,Adomnán,"['Adamnan', 'Adomnan', 'St. Adamnan']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q118942,Frank Stapleton,"['Francis Anthony Stapleton', 'Francis Stapleton']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q113916,Stephen Ireland,['Stephen James Ireland'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q106775,Richard Harris,"['Richard John Harris', 'Richard St John Francis Harris', 'Richard St John Harris']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q106662,John Lydon,"['John Joseph Lydon', 'Johnny Rotten']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q103876,Peter O'Toole,"[""Peter Seamus Lorcan O'Toole"", ""Peter Seamus O'Toole""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q93356,Seamus Heaney,['Seamus Justin Heaney'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q76139,Gerry Adams,['Gerard Adams'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q73612,Fiona Shaw,"['Fiona Wilson', 'Fiona Mary Shaw', 'Fiona Mary Wilson']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q73506,Roddy Doyle,"['Ruaidhri O Duill', 'Ruaidhrí Ó Dúill']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q73176,Anne Enright,['Anne Teresa Enright'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q58444,Liam Neeson,['William John Neeson'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q57689,Martin McGuinness,"['James Martin Pacelli McGuinness', 'James Martin Pacellill McGuinness', 'John Martin McGuinness', 'Mairtin Mag Aonghusa', 'Máirtín Mag Aonghusa']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q57276,Michael D. Higgins,"['Michael Higgins', 'Michael Daniel Higgins', 'Mícheál Dónal Ó hUigínn', 'Mícheál Ó hUigínn', 'President Higgins', 'President Michael D. Higgins', 'President Michael Daniel Higgins', 'President Michael Higgins']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q57147,Michael Fassbender,['Fassy'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q55428,Neil Jordan,['Neil Patrick Jordan'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q46779,Willoughby James Hamilton,"['Willoughby Hamilton', 'Willoby Hamilton', 'Willoby James Hamilton']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q45538,Robbie Brady,"['Robert ""Robbie"" Brady']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q42229,Mel Gibson,"['Mel Colm-Cille Gerard Gibson', 'Mel Columcille Gerard Gibson']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q40132,Jonas Armstrong,['William Jonas Armstrong'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q38257,Enya,"['Eithne Ni Bhraonain', 'Eithne Ní Bhraonáin', 'Eithne Padraigin Ni Bhraonain', 'Eithne Pádraigín Ní Bhraonáin', 'Enya Brennan', 'Enya Patricia Brennan']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q37327,Samuel Beckett,"['Sam Beckett', 'Andrew Belis', 'Sa-miao-erh Pei-kʻo-tʻe', 'Samuel Barclay Beckett', 'Samuel Beḳeṭ']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q36184,Bram Stoker,['Abraham Stoker'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q30875,Oscar Wilde,"[""Oscar Fingal O'Flahertie Wills Wilde"", ""Oscar Fingal O'Fflahertie Wills Wilde"", ""Oscar O'Fflahertie Wills Wilde"", ""Oscar O'Flahertie Wills Wilde""]",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q29495,Jonny Evans,['Jonathan Grant Evans'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q24591,Rosanna Davison,"['Miss World 2003', 'Rosanna Diane Davison']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q19185,George Bernard Shaw,"['Bernard Shaw', 'G. Bernard Shaw', 'G.B. Shaw']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q19154,Graham Norton,"['Graham Walker', 'Graham William Walker']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q17520,Kathleen Antonelli,"['Kathleen McNulty Mauchly Antonelli', 'Kathleen Rita Antonelli', 'Kay Antonelli']",P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
-Q6882,James Joyce,['James Augustine Aloysius Joyce'],P27,Q27,Ireland,"['Republic of Ireland', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire']"
+Q10092,Maria Höfl-Riesch,['Maria Riesch'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q103876,Peter O'Toole,"[""Peter Seamus Lorcan O'Toole"", ""Peter Seamus O'Toole""]",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q106662,John Lydon,"['John Joseph Lydon', 'Johnny Rotten']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q106775,Richard Harris,"['Richard John Harris', 'Richard St John Francis Harris', 'Richard St John Harris']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q113916,Stephen Ireland,['Stephen James Ireland'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q11485,Jean-Claude Killy,['Killy'],P27,['Q142'],['France'],['French Republic']
+Q11662,Steffi Graf,"['Stefanie Maria Graf', 'Maria Graf']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q1178,Maurice Ravel,['Maurice Joseph Ravel'],P27,['Q142'],['France'],['French Republic']
+Q118942,Frank Stapleton,"['Francis Anthony Stapleton', 'Francis Stapleton']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q11966,Bafétimbi Gomis,['Bafetimbi Gomis'],P27,"['Q142', 'Q1041']","['France', 'Senegal']","['French Republic', 'Republic of Senegal']"
+Q120132,Adomnán,"['Adamnan', 'Adomnan', 'St. Adamnan']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q12091,Henry Dunant,"['Jean Henri Dunant', 'Anrī Dyunan', 'Errikos D̲ynan', 'Henri Dunant', 'J. Henry Dunant', 'Jean Henry Dunant', 'Jean-Henri Dunant', 'Sodabeh Dunant']",P27,"['Q39', 'Q142']","['Switzerland', 'France']","['Swiss', 'Confoederatio Helvetica', 'Swiss Confederation', 'French Republic']"
+Q12160,Rémi Garde,"['Remi Garde', 'Remi Marie Francois Garde', 'Rémi Marie François Garde']",P27,['Q142'],['France'],['French Republic']
+Q121615,Bobby Sands,"['Robert Gerard Sands', 'Roibeard Gearóid Ó Seachnasaigh']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q12658,Wilhelm Ostwald,['Wilhelm Friedrich Ostwald'],P27,"['Q183', 'Q34266']","['Germany', 'Russian Empire']","['Federal Republic of Germany', 'Russia', 'Tsarist Russia', 'Rusia', 'Rossia', 'Empire of Russia', 'Imperial Russia', 'Moscovy', 'Moscovy or Russia', 'Russia or Moscovy']"
+Q12680,Paul Doumer,"['Joseph Athanase Doumer', 'Joseph Athanase Gaston Paul Doumer']",P27,['Q142'],['France'],['French Republic']
+Q12688,Jean Jaurès,"['Auguste Marie Joseph Jean Leon Jaures', 'Auguste Marie Joseph Jean Léon Jaurès', 'Jan Jores', 'Jean Jaures', 'Jean Leon Jaures', 'Jean Léon Jaurès']",P27,['Q142'],['France'],['French Republic']
+Q12718,Auguste Comte,"['August Comte', 'Isidore Auguste Marie François Xavier Comte']",P27,['Q142'],['France'],['French Republic']
+Q12830,Reinhard Selten,['Reinhard Justus Reginald Selten'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q12932,Olivier Besancenot,"['Olivier Christophe Besancenot', 'Oliver Besancenot']",P27,['Q142'],['France'],['French Republic']
+Q12940,Jacques Chaban-Delmas,"['Jacques Delmas', 'Chaban']",P27,['Q142'],['France'],['French Republic']
+Q12942,Arlette Laguiller,['Arlette Yvonne Laguiller'],P27,['Q142'],['France'],['French Republic']
+Q12950,Alain Poher,['Alain Émile Louis Marie Poher'],P27,['Q142'],['France'],['French Republic']
+Q12956,Gérard Collomb,['Gerard Collomb'],P27,['Q142'],['France'],['French Republic']
+Q12957,Raymond Barre,['Raymond Octave Joseph Barre'],P27,['Q142'],['France'],['French Republic']
+Q12963,François Bayrou,"['Francois Bayrou', 'Francois Rene Jean Lucien Bayrou', 'François René Jean Lucien Bayrou']",P27,['Q142'],['France'],['French Republic']
+Q12969,Jacques Cheminade,['Jacques Guy Cheminade'],P27,"['Q142', 'Q414']","['France', 'Argentina']","['French Republic', 'Argentine Republic', 'Republic of Argentina', 'Republica Argentina']"
+Q13054,Steed Malbranque,['Steed Claude Malbranque'],P27,"['Q31', 'Q142']","['Belgium', 'France']","['Kingdom of Belgium', 'French Republic']"
+Q13055,Rémy Vercoutre,"['Remy Rene Paul Vercoutre', 'Rémy René Paul Vercoutre', 'Remy Vercoutre']",P27,['Q142'],['France'],['French Republic']
+Q132026,David O'Leary,"[""David Anthony O'Leary""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q13306,Alexandre Lacazette,['Alexandre Armand Lacazette'],P27,['Q142'],['France'],['French Republic']
+Q13308,Samuel Umtiti,"['Samuel Um Titi', 'Samuel Yves Um Titi', 'Samuel Yves Umtiti']",P27,"['Q142', 'Q1009']","['France', 'Cameroon']","['French Republic', 'Republic of Cameroon']"
+Q13484,Laurent Fignon,['Laurent Patrick Fignon'],P27,['Q142'],['France'],['French Republic']
+Q13488,Grégory Coupet,['Gregory Coupet'],P27,['Q142'],['France'],['French Republic']
+Q13494,Jean-Pierre Papin,['Jean-Pierre Roger Guillaume Papin'],P27,['Q142'],['France'],['French Republic']
+Q13509,Léon Walras,['Leon Walras'],P27,['Q142'],['France'],['French Republic']
+Q13513,Jean-Baptiste Say,['Jean Baptiste Say'],P27,['Q142'],['France'],['French Republic']
+Q13515,Frédéric Bastiat,"['Claude Frédéric Bastiat', 'Frederic Bastiat']",P27,['Q142'],['France'],['French Republic']
+Q14524,Charles Messier,"['Messier', 'Charles Joseph Messier']",P27,['Q142'],['France'],['French Republic']
+Q1488,Robert Brasillach,"['Jean Servière', 'Jacques Tournebroche', 'Robert Chénier']",P27,['Q142'],['France'],['French Republic']
+Q150332,John Egan,['John Patrick Egan'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q151795,Danny O'Donoghue,"[""Daniel John Mark Luke O'Donoghue"", ""Daniel John O'Donoghue"", ""Daniel O'Donoghue""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q152690,Maeve Binchy,['Maeve Binchy Snell'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q1544,Tony Garnier,['Antoine Garnier'],P27,['Q142'],['France'],['French Republic']
+Q154550,Bertie Ahern,['Patrick Bartholomew Ahern'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q155907,"Sir George Stokes, 1st Baronet","['Sir George Gabriel Stokes', 'Sir George Gabriel Stokes, 1st Baronet', 'Sir George Stokes', 'George Stokes']",P27,"['Q27', 'Q174193']","['Ireland', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q157,François Hollande,"['Hollande', 'Francois Hollande']",P27,['Q142'],['France'],['French Republic']
+Q158995,Joey O'Brien,"[""Joseph Martin O'Brien""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q15981,Robert Schuman,"['Jean-Baptiste Nicolas Robert Schuman', 'Venerable Robert Schuman']",P27,"['Q142', 'Q183']","['France', 'Germany']","['French Republic', 'Federal Republic of Germany']"
+Q16019,Wolfgang Schäuble,"['Wolfgang Schaeuble', 'Wolfgang Schauble']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q161154,Lola Montez,"['Lola Montes', 'Lola Montez', 'Countess of Landsfeld', 'Elizabeth Rosanna Gilbert']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q1631,Édith Piaf,"['Edith Piaf', 'Édith Gassion', 'La môme Piaf', 'La Señora Piaf', 'The Little Sparrow']",P27,['Q142'],['France'],['French Republic']
+Q16409,Tristan Tzara,"['Tristan', 'Rosenstock Tristan Samuel', 'S. Samyro', 'Samuel Rosenstock', 'Samy Rosenstock', 'Tr. Tzara', 'Tristan Ruia', 'Tristan Samuel Rosenstock']",P27,"['Q142', 'Q218']","['France', 'Romania']","['French Republic', 'Roumania', 'ro', 'Rumania', 'România']"
+Q1646,Françoise Sagan,"['Françoise Delphine Quoirez', 'Françoise Quoirez', 'Francoise Sagan']",P27,['Q142'],['France'],['French Republic']
+Q166389,Daniel Day-Lewis,"['Daniel Michael Blake Day-Lewis', 'Sir Daniel Michael Blake Day-Lewis']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q171581,Ralph Firman,['Ralph David Firman Jr.'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q1716,Renaud,"['Renaud Pierre Manuel Sechan', 'Renaud Pierre Manuel Séchan', 'Renaud Sechan', 'Renaud Séchan']",P27,['Q142'],['France'],['French Republic']
+Q171635,Derek Daly,['Derek Patrick Daly'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q172035,Colin Farrell,['Colin James Farrell'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q172217,Joe Kelly,['Joseph Michael Kelly'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q173175,Eddie Jordan,"['Edmund Jordan', 'Edmund Patrick Jordan']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q173347,Éamon de Valera,['Eamon de Valera'],P27,"['Q27', 'Q30', 'Q31747']","['Ireland', 'United States', 'Irish Free State']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Saorstát Éireann']"
+Q1743,Björn Otto,['Bjoern Otto'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q174662,Mary McAleese,['Mary Patricia McAleese'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q17520,Kathleen Antonelli,"['Kathleen McNulty Mauchly Antonelli', 'Kathleen Rita Antonelli', 'Kay Antonelli']",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q17577,Joseph Gallieni,['Joseph Simon Gallieni'],P27,['Q142'],['France'],['French Republic']
+Q178225,Edna O'Brien,"[""Josephine Edna O'Brien""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q178237,Chris de Burgh,['Christopher John Davison'],P27,"['Q27', 'Q145', 'Q414']","['Ireland', 'United Kingdom', 'Argentina']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'Argentine Republic', 'Republic of Argentina', 'Republica Argentina']"
+Q1785,Charles Aznavour,"['Shahnour Vaghenag Aznavourian', 'Shahnour Vaghinag Aznavourian']",P27,"['Q142', 'Q399']","['France', 'Armenia']","['French Republic', 'Hayastan', 'Hayastani Hanrapetut’yun', 'Republic of Armenia', 'Հայաստան']"
+Q1804,Barbara,"['Andrée Olga', 'Barbara Brodi', 'Monique Andrée Serf']",P27,['Q142'],['France'],['French Republic']
+Q180936,Saint Gall,"['Gallus', 'Gallen']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q18143,Gao Xingjian,"['Hành Kiện Cao', 'Hsing-chien Kao', 'Xingjian Gao']",P27,"['Q142', 'Q148']","['France', ""People's Republic of China""]","['French Republic', 'China', 'RPC', 'cn', 'Red China', 'Communist China', 'China PR', 'P.R.C.', 'PR China', 'The PRC']"
+Q1835,Zinedine Zidane,['Zinedine Yazid Zidane'],P27,['Q142'],['France'],['French Republic']
+Q183631,Ernest Walton,['Ernest Thomas Sinton Walton'],P27,"['Q27', 'Q31747', 'Q174193']","['Ireland', 'Irish Free State', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Saorstát Éireann', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q1839,Laurent Blanc,['Laurent Robert Blanc'],P27,['Q142'],['France'],['French Republic']
+Q18410,Maryse Bastié,"['Marie-Louise Bombec', 'Maryse Bastie']",P27,['Q142'],['France'],['French Republic']
+Q18413,Louis de Beaufront,['Louis Chevreux'],P27,['Q142'],['France'],['French Republic']
+Q18425,Marcellin Berthelot,"['Pierre Eugène Berthelot', 'Pierre Eugene Marcellin Berthelot', 'Pierre Eugène Marcellin Berthelot']",P27,['Q142'],['France'],['French Republic']
+Q18434,Léon Blum,"['Leon Blum', 'André Léon Blum']",P27,['Q142'],['France'],['French Republic']
+Q18436,Émile Boirac,['Emile Boirac'],P27,['Q142'],['France'],['French Republic']
+Q18443,Maurice de Broglie,['Louis-César-Victor-Maurice de Broglie'],P27,['Q142'],['France'],['French Republic']
+Q184572,Martin Sheen,"['Ramón Gerard Antonio Estévez', 'Ramon Gerardo Antonio Estevez', 'Ramón Gerardo Antonio Estévez']",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q184612,Robbie Keane,['Robert David Keane'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q185272,Brian Cowen,['Brian Bernard Cowen'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q1879,Corentin Martins,['Corentin da Silva Martins'],P27,"['Q45', 'Q142']","['Portugal', 'France']","['PRT', 'POR', 'Portuguese Republic', 'French Republic']"
+Q18806,Franz Mehring,['Franz Erdmann Mehring'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q188214,Mary Robinson,"['Mary Bourke', 'Her Excellency Mary Robinson', 'Maire Bean Mhic Roibin', 'Máire Bean Mhic Róibín', 'Máire Mhic Róibín', 'Máire Treasa Úna Mhic Róibín', 'Mary Therese Winifred Bourke', 'Mary Therese Winifred Robinson']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q18832,Sławomir Mrożek,['Sławomir Mrozek'],P27,"['Q36', 'Q142']","['Poland', 'France']","['Republic of Poland', 'French Republic']"
+Q188632,Roy Keane,['Roy Maurice Keane'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q18962,Adrien Rabiot,"['Adrien Thibault Marie Rabiot', 'Adrien Rabiot-Provost']",P27,['Q142'],['France'],['French Republic']
+Q19007,Philip Hurepel,"['Philip I', 'Philip I of Boulogne', 'Philip I, Count of Boulogne']",P27,['Q142'],['France'],['French Republic']
+Q19054,Matteo Bandello,['Bandello'],P27,['Q142'],['France'],['French Republic']
+Q1907,Hugo Lloris,['Hugo Hadrien Dominique Lloris'],P27,['Q142'],['France'],['French Republic']
+Q1911,Olivier Giroud,['Olivier Jonathan Giroud'],P27,['Q142'],['France'],['French Republic']
+Q1912,Karim Benzema,['Karim Mostafa Benzema'],P27,['Q142'],['France'],['French Republic']
+Q1913,Florent Malouda,['Florent Johan Malouda'],P27,['Q142'],['France'],['French Republic']
+Q19154,Graham Norton,"['Graham Walker', 'Graham William Walker']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q1916,Patrice Evra,['Patrice Latyr Evra'],P27,"['Q142', 'Q1041']","['France', 'Senegal']","['French Republic', 'Republic of Senegal']"
+Q1917,Philippe Mexès,['Philippe Mexes'],P27,['Q142'],['France'],['French Republic']
+Q1918,Franck Ribéry,"['Franck Henry Pierre Ribery', 'Franck Henry Pierre Ribéry', 'Franck Ribery']",P27,['Q142'],['France'],['French Republic']
+Q19185,George Bernard Shaw,"['Bernard Shaw', 'G. Bernard Shaw', 'G.B. Shaw']",P27,"['Q27', 'Q145', 'Q174193']","['Ireland', 'United Kingdom', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q1922,Anthony Réveillère,"['Anthony Guy Marie Reveillere', 'Anthony Guy Marie Réveillère', 'Anthony Reveillere']",P27,['Q142'],['France'],['French Republic']
+Q1923,Jérémy Ménez,['Jeremy Menez'],P27,['Q142'],['France'],['French Republic']
+Q1924,Steve Mandanda,['Steve Mandanda Mpidi'],P27,"['Q142', 'Q974']","['France', 'Democratic Republic of the Congo']","['French Republic', 'Congo (Kinshasa)', 'Congo-Kinshasa', 'Dem. Rep. Congo', 'Dem. Republic of Congo', 'Dem. Republic of the Congo', 'Democratic Republic of Congo', 'DR Congo', 'Congo', 'Zaire', 'DRC', 'D.R.C.', 'COD', 'cd']"
+Q1925,Yann M'Vila,"[""Yann Gerard M'Vila"", ""Yann Gérard M'Vila""]",P27,"['Q142', 'Q971']","['France', 'Republic of the Congo']","['French Republic', 'Congo', 'CGO', 'cg', 'Congo (Brazzaville)', 'Congo Republic', 'Congo-Brazzaville', 'Rep. Congo', 'Republic of Congo', 'Republique du Congo', 'République du Congo']"
+Q192533,Mark Carney,['Mark Joseph Carney'],P27,"['Q16', 'Q27', 'Q145']","['Canada', 'Ireland', 'United Kingdom']","['Can', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q1929,Gaël Clichy,"['Gael Clichy', 'Gael Dimitri Clichy', 'Gaël Dimitri Clichy']",P27,['Q142'],['France'],['French Republic']
+Q192971,Damien Duff,['Damien Anthony Duff'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q1931,Cédric Carrasso,"['Cedric Carrasso', 'Cedric Pascal Regis Carrasso', 'Cédric Pascal Régis Carrasso']",P27,['Q142'],['France'],['French Republic']
+Q1934,Sidney Govou,['Sidney Rodrigue Noukpo Govou'],P27,['Q142'],['France'],['French Republic']
+Q1935,Eric Abidal,"['Éric Abidal', 'Eric Sylvain Abidal']",P27,['Q142'],['France'],['French Republic']
+Q1936,Djibril Cissé,['Djibril Cisse'],P27,"['Q142', 'Q1008']","['France', 'Ivory Coast']","['French Republic', ""Côte d'Ivoire"", 'ci', 'CIV', ""Cote d'Ivoire"", ""Cote d'lvoire"", 'Côte d’Ivoire', 'Cote Ivoire', ""Cote-d'Ivoire"", ""Côte-d'Ivoire"", ""Republic of Cote d'Ivoire"", ""Republic of Côte d'Ivoire"", 'Republic of Ivory Coast', 'Republic of the Ivory Coast', 'The Ivory Coast']"
+Q1937,William Gallas,['William Eric Gallas'],P27,['Q142'],['France'],['French Republic']
+Q1939,Nicolas Anelka,"['Nicolas Sebastien Anelka', 'Nicolas Sébastien Anelka']",P27,['Q142'],['France'],['French Republic']
+Q193982,Sinéad O'Connor,"['Magda Davitt', 'Mother Bernadette Mary', 'Shuhada Sadaqat', ""Shuhada' Davitt"", ""Shuhada' Sadaqat"", ""Sinéad Marie Bernadette O'Connor"", 'Sinéad Marie Bernadette O’Connor', ""Sinead O'Connor""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q1940,André-Pierre Gignac,"['Andre-Pierre Gignac', 'Andre-Pierre Christian Gignac', 'André-Pierre Christian Gignac']",P27,['Q142'],['France'],['French Republic']
+Q1942,Sébastien Squillaci,"['Sebastien Jean-Baptiste Squillaci', 'Sébastien Jean-Baptiste Squillaci', 'Sebastien Squillaci']",P27,['Q142'],['France'],['French Republic']
+Q1943,Abou Diaby,['Vassiriki Abou Diaby'],P27,"['Q142', 'Q1008']","['France', 'Ivory Coast']","['French Republic', ""Côte d'Ivoire"", 'ci', 'CIV', ""Cote d'Ivoire"", ""Cote d'lvoire"", 'Côte d’Ivoire', 'Cote Ivoire', ""Cote-d'Ivoire"", ""Côte-d'Ivoire"", ""Republic of Cote d'Ivoire"", ""Republic of Côte d'Ivoire"", 'Republic of Ivory Coast', 'Republic of the Ivory Coast', 'The Ivory Coast']"
+Q1944,Jérémy Toulalan,['Jeremy Toulalan'],P27,['Q142'],['France'],['French Republic']
+Q19504,Fritz Lang,"['Friedrich Christian Anton ""Fritz"" Lang', 'Friedrich Christian Anton Lang', 'Fritz Lang (1890–1976)']",P27,"['Q30', 'Q40', 'Q183']","['United States', 'Austria', 'Germany']","['America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Republic of Austria', 'Federal Republic of Germany']"
+Q200355,Olivia Wilde,"['Olivia Jane Cockburn', 'Olivia Jane Wilde']",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q20235,Franzl Lang,"['Franz Lang', 'Jodler-Franzl', 'Yodelking']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q203545,Michael Gambon,"['Michael John Gambon', 'Sir Michael Gambon', 'Sir Michael John Gambon']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q2038,François Mitterrand,['François Marie Adrien Maurice Mitterrand'],P27,['Q142'],['France'],['French Republic']
+Q2042,Charles de Gaulle,['General Charles Andre Joseph Marie de Gaulle'],P27,['Q142'],['France'],['French Republic']
+Q206856,Angela Lansbury,"['Angela Brigid Lansbury', 'Ángela Lansbury', 'Dame Angela Brigid Lansbury']",P27,"['Q27', 'Q30', 'Q145']","['Ireland', 'United States', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q20710,Jean-Martin Charcot,"['Charcot', 'Jean Martin Charcot']",P27,['Q142'],['France'],['French Republic']
+Q20721,Luigi Cherubini,"['Cherubini', 'Louis-Charles-Zenobi-Salvador-Marie Cherubini', 'Luigi Maria Cherubini', 'Maria Luigi Carlo Zenobio Salvatore Cherubini', 'Marie Louis Charles Zanobi Salvador Cherubini']",P27,"['Q142', 'Q145', 'Q154849']","['France', 'United Kingdom', 'Grand Duchy of Tuscany']","['French Republic', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'Granducato di Toscana']"
+Q207458,Mischa Barton,['Mischa Anne Marsden Barton'],P27,"['Q27', 'Q30', 'Q145']","['Ireland', 'United States', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q209641,John le Carré,"['David Cornwell', 'David John Moore Cornwell', 'John le Carre']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q210755,Richard Keogh,['Richard John Keogh'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q21088,Zedd,['Anton Zaslavski'],P27,"['Q159', 'Q183']","['Russia', 'Germany']","['Federation of Russia', 'Russian Federation', 'Federal Republic of Germany']"
+Q21163,Ferdinand Tönnies,"['F. Tönnies', 'Ferdinand Toennies', 'Tonnies', 'Ferdinand Tonnies', 'Julia v. Egge-Weichling', 'Julius Tönnies', 'Krito', 'Normannus']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q211730,Evanna Lynch,['Evanna Patricia Lynch'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q2124,Valéry Giscard d'Estaing,"['VGE', ""Giscard d'Estaing"", 'Giscard', ""Valéry Marie René Georges Giscard d'Estaing""]",P27,['Q142'],['France'],['French Republic']
+Q212993,Benedict Anderson,"[""Benedict R. O'G. Anderson"", ""Benedict Richard O'Gorman Anderson"", ""Richard Benedict O'Gorman Anderson""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q213567,Jonathan Rhys Meyers,"[""Jonathan Michael Francis O'Keeffe""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q214309,Sam Neill,['Nigel John Dermot Neill'],P27,"['Q27', 'Q145', 'Q664']","['Ireland', 'United Kingdom', 'New Zealand']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'nz', 'Dominion of New Zealand', 'Aotearoa New Zealand']"
+Q215369,Stephen Gately,['Stephen Patrick David Gately'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q2190,Coluche,['Michel Gerard Joseph Colucci'],P27,['Q142'],['France'],['French Republic']
+Q22675,Tom Wlaschiha,['Thomas Wlaschiha'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q22755,Silvio Gesell,['Johann Silvio Gesell'],P27,"['Q31', 'Q183']","['Belgium', 'Germany']","['Kingdom of Belgium', 'Federal Republic of Germany']"
+Q24591,Rosanna Davison,"['Miss World 2003', 'Rosanna Diane Davison']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q2492,Konrad Adenauer,['Konrad Hermann Joseph Adenauer'],P27,"['Q183', 'Q27306']",['Germany'],['Federal Republic of Germany']
+Q2494,Benedict XVI,"['Pope Benedict XVI', 'Josef Ratzinger', 'Benedetto XVI', 'Benedictus XVI', 'Joseph Alois Ratzinger', 'Pope Benedictus XVI', 'Pope Emeritus Benedict XVI']",P27,"['Q38', 'Q183', 'Q237']","['Italy', 'Germany', 'Vatican City']","['Italia', 'Italian Republic', 'Republic of Italy', 'Federal Republic of Germany', 'vat', 'Vatican', 'The Vatican', 'Holy See', 'Papal State', 'Città del Vaticano', 'Civitas Vaticana', 'State of Vatican City', 'Stato della Città del Vaticano', 'Status Civitatis Vaticanae', 'va', 'Vatican City State']"
+Q2516,Helmut Schmidt,"['H. Schmidt', 'Helmut Heinrich Waldemar Schmidt', 'Schmidt, Helmut Heinrich Waldemar']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q2518,Helmut Kohl,"['Dr. Helmut Kohl', 'Helmut Josef Michael Kohl', 'Kohl']",P27,"['Q183', 'Q7318', 'Q41304', 'Q713750']","['Germany', 'Nazi Germany', 'Weimar Republic', 'West Germany']","['Federal Republic of Germany', 'Third Reich', 'German Reich', 'Greater German Reich', ""Hitler's Third Reich"", 'Thousand-Year Reich', 'Germany', ""German People's State"", 'German Republic', 'Republic of Germany', 'Weimar Germany', 'BR Dtld.', 'Federal Republic of Germany (1949–1990)', 'history of West Germany from 1949 to 1990', 'West-Deutschland']"
+Q253440,Katie McGrath,"['Katherine McGrath', 'Katherine ""Katie"" McGrath']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q254838,Samantha Mumba,"['Samantha Ruth Prapu', 'Samantha Tamania Anne Cecilia Mumba']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q2573,Gustav Heinemann,['Gustav W. Heinemann'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q2594,Theodor Heuss,['Theodor Heusz'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q260,Jean-François Champollion,"['Champollion', 'Jean Francois Champollion', 'Jean François Champollion', 'Jean-Francois Champollion']",P27,['Q142'],['France'],['French Republic']
+Q2602,Egon Krenz,['Egon Rudi Ernst Krenz'],P27,"['Q183', 'Q16957']","['Germany', 'German Democratic Republic']","['Federal Republic of Germany', 'East Germany', 'DDR', 'GDR', 'Communist Germany', 'Deutsche Demokratische Republik']"
+Q262699,Katie Taylor,"['KT', 'Simply the Best', 'The Bray Bomber']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q263951,Mark Lawrenson,['Mark Thomas Lawrenson'],P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q264891,Andrea Corr,['Andrea Jane Corr'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q2667,Paul von Hindenburg,"['Hindenburg', 'von Hindenburg']",P27,"['Q183', 'Q27306']",['Germany'],['Federal Republic of Germany']
+Q2677,Wilhelm II,"['William II', 'Wilhelm II.', 'Kaiser Wilhelm II', 'Emperor Willlam', 'Frederick William Victor Albert of Prussia', 'Friedrich Wilhelm Emperor William II', 'Friedrich Wilhelm Viktor Albert von Hohenzollern', 'Friedrich Wilhelm Viktor Albrecht von Preußen', 'German Emperor Wilhelm II', 'Wilhelm II of Germany', 'Wilhelm II, German Emperor']",P27,"['Q183', 'Q27306', 'Q43287']","['Germany', 'German Empire']","['Federal Republic of Germany', 'German Reich', 'Imperial Germany', 'Deutsches Kaiserreich', 'Second Reich']"
+Q272303,Jane Wilde,"['Jane Francesca Agnes Elgee', 'Lady Wilde', 'Jane Elgee', 'Jane Francesca Agnes Wilde', 'Jane Francesca Agnes, Lady Wilde', 'Jane Francesca Elgee', 'Speranza, John Fanshawe Ellis']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q272401,Jean Kennedy Smith,"['Jean Kennedy', 'Jean Smith', 'Jean Ann Kennedy', 'Jean Ann Kennedy Smith', 'Jean Ann Smith', 'Kennedy, Jean Ann, 1928-2020']",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q2737,Louis de Funès,"['Louis de Funes', 'Louis Germain David de Funes de Galarza', 'Louis Germain David de Funès de Galarza']",P27,['Q142'],['France'],['French Republic']
+Q2750,Bourvil,"['Andre Bourvil', 'André Bourvil', 'Andre Robert Raimbourg']",P27,['Q142'],['France'],['French Republic']
+Q283227,Brian Friel,"['Bernard Patrick Friel', 'Brian Patrick Friel']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q28463,Bérénice Marlohe,['Bérénice Lim Marlohe'],P27,['Q142'],['France'],['French Republic']
+Q284784,James McClean,['James Joseph McClean'],P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q28487,Bérénice Bejo,['Berenice Bejo'],P27,"['Q142', 'Q414']","['France', 'Argentina']","['French Republic', 'Argentine Republic', 'Republic of Argentina', 'Republica Argentina']"
+Q28495,"Francis, Duke of Guise","['Francis Guise', 'Francis de Lorraine II', 'Francis I, Duke of Guise', 'François de Lorraine Guise', 'François I, Duke of Guise', 'Prince of Joinville']",P27,['Q142'],['France'],['French Republic']
+Q28556,Michel Hazanavicius,['Michel Hazanavičius'],P27,['Q142'],['France'],['French Republic']
+Q28937,Alexis Clairaut,['Alexis Claude Clairaut'],P27,['Q142'],['France'],['French Republic']
+Q29002,Félix Tisserand,"['F. Tisserand', 'Felix Tisserand', 'François Félix Tisserand']",P27,['Q142'],['France'],['French Republic']
+Q290666,Barry Fitzgerald,['William Joseph Shields'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q29073,Gaétan Vestris,"['Gaetan Vestris', 'Gaëtan Vestris', 'Gaetano Apoline Balthazar Vestris', 'Gaetano Apolline Baldassarre Vestris']",P27,['Q142'],['France'],['French Republic']
+Q2908,Antoine de Saint-Exupéry,"['Saint-Exupéry', 'Saint-Exupery', 'Antoine de Saint-Exupery', 'Antoine de St. Exupery', 'Antoine Marie Roger, Vicomte de Saint-Exupéry']",P27,['Q142'],['France'],['French Republic']
+Q29495,Jonny Evans,['Jonathan Grant Evans'],P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q29571,Jeanne Villepreux-Power,"['Jeanne Villepreux', 'Jeannette Villepreux Power', 'Mrs James Power']",P27,['Q142'],['France'],['French Republic']
+Q296,Claude Monet,"['monet claude', 'Oscar Claude Monet', 'Oscar-Claude Monet', 'Monet', 'C. Monet', 'Cl. Monet', 'Claude Jean Monet', 'claude oscar monet', 'Claude Oscar Monet', 'Claude-Oscar Monet', 'Klod Mone', 'monet c.']",P27,['Q142'],['France'],['French Republic']
+Q296332,Sean St Ledger,['Sean Patrick St Ledger-Hall'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q296603,Kevin Doyle,['Kevin Edward Doyle'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q296616,Gabriel Byrne,['Gabriel James Byrne'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q297552,Tom Morello,"['The Nightwatchman', 'El flipante guitarrista calvo con un pitch shifter', 'Thomas Baptist Morello', 'Thomas Morello']",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q297964,Shane Long,['Shane Patrick Long'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q298559,Johnny Logan,"['Seán Patrick Michael Sherrard', ""Seán Patrick Michael Sherrard O'Hagan"", 'Sean Sherrard']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q298908,Patrick McGoohan,"['Patrick Joseph MacGoohan', 'Patrick Joseph McGoohan', 'Patrick MacGoohan']",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q298930,Phil Lynott,"['Philip Lynott', 'Philip Parris Lynott']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q30449,Avril Lavigne,['Avril Ramona Lavigne'],P27,"['Q16', 'Q142']","['Canada', 'France']","['Can', 'French Republic']"
+Q3048,Charles Maurras,"['Pierre Garnier', 'Pellisson', 'Charles Marie Photius Maurras', 'Le Maître de Martigues', 'Le Martégal', 'Léon Rameau', 'maître de Martigues', 'Octave Martin']",P27,['Q142'],['France'],['French Republic']
+Q306351,John O'Shea,"[""John Francis O'Shea""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q30755,Auguste Rodin,"['Rodan', 'a. rodin', 'aug. rodin', 'august rodin', 'e. rodin', 'François Auguste René Rodin', 'Lo-tan', 'Ogi︠u︡st Roden', 'René François Auguste Rodin', 'Roden Rone Fransua Ogyust', 'rodin', 'rodin a.', 'rodin auguste']",P27,['Q142'],['France'],['French Republic']
+Q30875,Oscar Wilde,"[""Oscar Fingal O'Flahertie Wills Wilde"", ""Oscar Fingal O'Fflahertie Wills Wilde"", ""Oscar O'Fflahertie Wills Wilde"", ""Oscar O'Flahertie Wills Wilde""]",P27,"['Q27', 'Q142', 'Q145', 'Q174193']","['Ireland', 'France', 'United Kingdom', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'French Republic', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q310225,Pat Cox,['Patrick Cox'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q310994,Patrick Hillery,"['Patrick John ""Paddy"" Hillery', 'Patrick John Hillery']",P27,"['Q27', 'Q31747']","['Ireland', 'Irish Free State']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Saorstát Éireann']"
+Q311467,Ronan Keating,['Ronan Patrick John Keating'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q311964,Damien Rice,['Damien George Rice'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q311966,Roger Casement,"['Roger David Casement', 'Ruairi Daithi Mac Easmainn', 'Ruairí Dáithí Mac Easmainn', 'Ruairí Mac Easmainn', 'Sir Roger Casement']",P27,"['Q27', 'Q174193']","['Ireland', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q311970,Brian McFadden,['Brian Nicholas McFadden'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q31258,Henri Murger,"['Henry Murger', 'Henri Mürger', 'Louis-Henri Murger']",P27,['Q142'],['France'],['French Republic']
+Q313063,Brendan Behan,"['Brendan Francis Aidan Behan', 'Francis Behan']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q313077,John Banville,"['Benjamin Black', 'William John Banville']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q313454,Jan Łukasiewicz,['Jan Lukasiewicz'],P27,"['Q27', 'Q28513', 'Q207272']","['Ireland', 'Austria–Hungary', 'Second Polish Republic']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Austria', 'Austria Hungary', 'Austria-Hungary', 'Austro-Hungarian Empire', 'Austro-Hungarian Monarchy', 'Dual Monarchy', 'Monarchy of Austria-Hungary', 'The Kingdoms and Lands Represented in the Imperial Council and the Lands of the Holy Hungarian Crown of St. Stephen', 'Monarchy of Austria–Hungary', 'II Rzeczpospolita']"
+Q31353,Adèle Haenel,['Adele Haenel'],P27,['Q142'],['France'],['French Republic']
+Q313694,Stephen Hunt,['Stephen Patrick Hunt'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q314917,Daniel O'Connell,"[""O'Connell, Daniel"", ""Danial O'Connell"", 'Daniel O’Connell', 'Dónal Ó Conaill', 'Dónall Ó Conaill']",P27,"['Q27', 'Q174193']","['Ireland', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q315170,Seán O'Casey,"[""Sean O'Casey""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q315855,Robert Sheehan,"['Rob', 'Robert Michael Sheehan', 'Rozzy']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q316367,Francis Hutcheson,"['Frances Hutcheson', 'Franciscus Hutcheson', 'Franciscus Hutchesonius', 'Franciscus Hutchinson', 'Franz Hutcheson']",P27,"['Q27', 'Q161885']","['Ireland', 'Kingdom of Great Britain']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'UK', 'GB', 'UKGB', 'United Kingdom of Great Britain']"
+Q316698,Glenn Whelan,['Glenn David Whelan'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q316704,Keith Andrews,['Keith Joseph Andrews'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q316709,Steve Coogan,['Stephen John Coogan'],P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q316717,Steve Staunton,"['Stephen ""Steve"" Staunton', 'Stephen Staunton']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q316719,Rory Delap,['Rory John Delap'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q316724,Séamus Coleman,['Seamus Coleman'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q316935,Paul McShane,['Paul David McShane'],P27,"['Q27', 'Q189']","['Ireland', 'Iceland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Ysland', 'Icelandic republic', 'Isl.', 'Republic of Iceland']"
+Q31760,Jussiê Ferreira Vieira,['Jussiê'],P27,"['Q142', 'Q155']","['France', 'Brazil']","['French Republic', 'Brasil', 'Federative Republic of Brazil']"
+Q31775,Yoan Gouffran,['Yoan Patrick Gouffran'],P27,['Q142'],['France'],['French Republic']
+Q31777,Matthieu Chalmé,['Matthieu Chalme'],P27,['Q142'],['France'],['French Republic']
+Q317807,Denis Irwin,['Joseph Denis Irwin'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q31783,Grégory Sertic,['Gregory Sertic'],P27,['Q142'],['France'],['French Republic']
+Q31792,Landry Nguémo,"[""Landry Joel Tsafack N'Guémo"", ""Landry N'Guemo""]",P27,"['Q142', 'Q1009']","['France', 'Cameroon']","['French Republic', 'Republic of Cameroon']"
+Q31803,Lamine Sané,"['Lamine Sane', 'Ludovic Sane', 'Ludovic Sané']",P27,"['Q142', 'Q1041']","['France', 'Senegal']","['French Republic', 'Republic of Senegal']"
+Q318155,Devon Murray,['Devon Michael Murray'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q31907,Benoît Trémoulinas,['Benoit Tremoulinas'],P27,['Q142'],['France'],['French Republic']
+Q319653,Columbanus,"['Columban', 'Saint Columbanus', 'St Columban']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q320224,Nicky Byrne,['Nicholas Bernard James Adam Byrne'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q32055,Bernard Arnault,['Bernard Jean Étienne Arnault'],P27,['Q142'],['France'],['French Republic']
+Q320604,"Michael Morris, 3rd Baron Killanin","['Michael Morris', 'Baron Killanin', 'Lord Killanin']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q32091,Henri Saivet,"['Henri Gregoire Saivet', 'Henri Grégoire Saivet']",P27,"['Q142', 'Q1041']","['France', 'Senegal']","['French Republic', 'Republic of Senegal']"
+Q3234,Jochen Rindt,['Karl Jochen Rindt'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q32439,Stéphane Audran,"['Colette Suzanne Dacheville', 'Stephane Audran']",P27,['Q142'],['France'],['French Republic']
+Q327203,Seán T. O'Kelly,"[""Sean T. O'Ceallaigh"", ""Séan T. O'Kelly""]",P27,"['Q27', 'Q31747', 'Q174193', 'Q1140152']","['Ireland', 'Irish Free State', 'United Kingdom of Great Britain and Ireland', 'Irish Republic']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Saorstát Éireann', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI', 'Poblacht na hÉireann', 'Saorstat Éireann']"
+Q329,Nicolas Sarkozy,"['Sarko', 'Sarkozy', 'Nicolas Sarközy', 'Nicolas Sarközy de Nagy-Bocsa']",P27,['Q142'],['France'],['French Republic']
+Q33188,Marie Jeanne of Savoy,"['de Savoie-Nemours, Duchesse de Savoie Marie-Jeanne-Baptiste', 'Duchesse de Savoie Marie-Jeanne-Baptiste Savoie-Nemours', 'Marie Jeanne Baptiste de Savoie', 'Marie Jeanne Baptiste of Savoy-Nemours']",P27,['Q142'],['France'],['French Republic']
+Q331908,Stephen Kelly,['Stephen Michael Kelly'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q331922,Rory Gallagher,['William Rory Gallagher'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q332483,George Galloway,"['Gorgeous George', 'Galloway George']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q333148,Richard Steele,['Sir Richard Steele'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q333701,John Bruton,['John Gerard Bruton'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q333735,Charles Haughey,"['Charles J. Haughey', 'Charles James Haughey', 'Charlie Haughey', 'Cathal Ó hEochaidh', 'Cathal Séamas Ó hEochaidh']",P27,"['Q27', 'Q31747']","['Ireland', 'Irish Free State']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Saorstát Éireann']"
+Q33477,Eugène Delacroix,"['Ferdinand Victor Eugène Delacroix', 'Delacroix', 'Eugene Delacroix', 'Ferdinand Victor Eugene Delacroix', 'Ferdinand-Eugene-Victor Delacroix', 'Ferdinand-Eugène-Victor Delacroix', 'Ferdinand-Victor-Eugene Delacroix', 'Ferdinand-Victor-Eugène Delacroix']",P27,['Q142'],['France'],['French Republic']
+Q335013,"David Beatty, 1st Earl Beatty","['David Beatty', 'Admiral of the Fleet David Richard Beatty, 1st Earl Beatty', 'David Richard Beatty']",P27,"['Q27', 'Q145', 'Q174193']","['Ireland', 'United Kingdom', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q33528,Anselme Gaëtan Desmarest,['Desmarest'],P27,['Q142'],['France'],['French Republic']
+Q335838,Turlough O'Carolan,"['Toirdhealbhach O Cearbhallain', 'Toirdhealbhach Ó Cearbhalláin', ""Torlogh O'Carolan""]",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q3374,Anne-Sophie Mutter,['Anne Sophie Mutter'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q33756,Lucien Mérignac,['Lucien Merignac'],P27,['Q142'],['France'],['French Republic']
+Q33758,Marcel Jacques Boulenger,['Marcel Jacques Amand Romain Boulenger'],P27,['Q142'],['France'],['French Republic']
+Q33977,Jules Verne,"['Jules Gabriel Verne', 'Julius Verne']",P27,['Q142'],['France'],['French Republic']
+Q33978,Robert Delaunay,"['Delaunay', 'Robert Delaunay (1885-1941)', 'Robert Delaunay II', 'Robert II Delaunay', 'Robert Victor Félix Delaunay']",P27,['Q142'],['France'],['French Republic']
+Q34013,Georges Seurat,"['Seurat', 'g. seurat', 'geo seurat', 'geo. seurat', 'George Pierre Seurat', 'Georges Pierre Seurat', 'georges seurat', 'Georges-Pierre Seurat', 'Hsiu-la', 'seurat geo.', 'Zhorzh Sera']",P27,['Q142'],['France'],['French Republic']
+Q342826,John Aldridge,['John William Aldridge'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q34428,Philip II of France,"['Philip II', 'Philippe II', 'Philip Augustus']",P27,['Q142'],['France'],['French Republic']
+Q346,Louis IX of France,"['Saint Louis', 'Louis IX', 'Louis IX the Saint', 'Saint Louis IX of France', 'Solomon of France']",P27,['Q142'],['France'],['French Republic']
+Q34618,Gustave Courbet,"['Jean Désiré Gustave Courbet', 'Courbet', 'G. Courbet', 'Gi︠u︡stav Kurbe', 'Gust. Courbet', 'Gustav Courbet', 'Jean Desire Gustave Courbet', 'Jean-Desire-Gustave Courbet', 'Jean-Désiré-Gustave Courbet']",P27,['Q142'],['France'],['French Republic']
+Q34670,Albert Camus,['Camus'],P27,['Q142'],['France'],['French Republic']
+Q35548,Paul Cézanne,"['Cezanne', 'Cézanne', 'cezanne paul', 'p. cezanne', 'P. Sezanas', 'Paul Cezanne', 'Pol Sezan', 'Polʹ Sezann']",P27,['Q142'],['France'],['French Republic']
+Q356404,Lee Carsley,['Lee Kevin Carsley'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q356428,Darren O'Shaughnessy,"['D. B. Shan', 'Darren Dash', 'Darren Shan']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q356455,Saint Malachy,"['Mael Maedoc Ua Morgair', 'Máel Máedóc Ua Morgair', 'Malachia O’Morgair', 'Malachy', 'St. Malachia O’Morgair', 'St. Malachy']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q358032,Aidan Gillen,['Aidan Murphy'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q36184,Bram Stoker,['Abraham Stoker'],P27,"['Q27', 'Q174193']","['Ireland', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q362406,Ronnie Drew,"['Joseph Ronald Augustine Drew', 'Joseph Ronald Drew']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q36268,Brigitte Bardot,"['BB', 'B.B.', 'Brigitte Anne Marie Bardot', 'Brigitte Anne-Marie Bardot']",P27,['Q142'],['France'],['French Republic']
+Q363525,Stuart Townsend,['Stuart Peter Townsend'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q368264,Charles Villiers Stanford,"['Karel Drofnatski', 'Sir Charles Villiers Stanford']",P27,"['Q27', 'Q145', 'Q174193']","['Ireland', 'United Kingdom', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q368803,Anthony Pilkington,['Anthony Neil James Pilkington'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q369933,Luke Kelly,['Lúcás Ó Ceallaigh'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q371002,Packie Bonner,"['Pat Bonner', 'Patrick Joseph Bonner']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q372394,Martin McDonagh,['Martin Faranan McDonagh'],P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q37327,Samuel Beckett,"['Sam Beckett', 'Andrew Belis', 'Sa-miao-erh Pei-kʻo-tʻe', 'Samuel Barclay Beckett', 'Samuel Beḳeṭ']",P27,"['Q27', 'Q142']","['Ireland', 'France']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'French Republic']"
+Q373940,"Sir Henry Wilson, 1st Baronet","['Henry Wilson', 'Henry Hughes Wilson', 'Sir Henry Wilson']",P27,"['Q27', 'Q174193']","['Ireland', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q375046,Nicolas Roche,['Nico Roche'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q37693,Paul Gauguin,"['Gauguin', 'Eugene Henri Paul Gauguin', 'Eugène Henri Paul Gauguin', 'Eugene Henry Paul Gauguin', 'Eugène Henry Paul Gauguin', 'Eugene-Henri Gauguin', 'Eugene-Henri-Paul Gauguin', 'Eugène-Henri-Paul Gauguin', 'gauguin paul', 'Kao-keng', 'P. gaugin', 'p. gauguin', 'Pablo Gauguin', 'Paul Eugene Henri Gauguin', 'Paul Eugène Henri Gauguin', 'Paul Gaugin', 'Polʹ Gogen']",P27,['Q142'],['France'],['French Republic']
+Q380182,Albert Reynolds,['Albert Martin Reynolds'],P27,"['Q27', 'Q31747']","['Ireland', 'Irish Free State']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Saorstát Éireann']"
+Q380894,Cearbhall Ó Dálaigh,['Cearbhall O Dalaigh'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q3816,George Sand,"['Georges Sand', 'A.A.L. Dudevant-Dupin', 'Amandine Lucile Aurore Dupin', 'Amandine-Aaurore-Lucile Dudevant', 'Amandine-Aaurore-Lucile Dupin', 'Amandine-Aurore-Lucile Dudevant', 'Amantine Lucile Aurore Dupin', 'Aurore Amantine Lucile Dupin', 'Aurore Amantine Lucile Sand', 'Baroness Dudevant', 'George nee Dupin Sand', 'Jules Sand', 'Lucie Dudevant', 'Lucile Aurore Dupin', 'Mrs. George Sand']",P27,['Q142'],['France'],['French Republic']
+Q381667,Pádraig Harrington,"['Padraig Harrington', 'Pádraig Peter Harrington']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q381681,Jack Lynch,"['John Mary Lynch', 'Seán Ó Loingsigh']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q381690,John A. Costello,['John Aloysius Costello'],P27,"['Q31747', 'Q27']","['Irish Free State', 'Ireland']","['Saorstát Éireann', 'Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q38257,Enya,"['Eithne Ni Bhraonain', 'Eithne Ní Bhraonáin', 'Eithne Padraigin Ni Bhraonain', 'Eithne Pádraigín Ní Bhraonáin', 'Enya Brennan', 'Enya Patricia Brennan']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q38337,Alexandre Dumas,"['Alexandre Dumas père', 'Alexandre Dumas Davy de la Pailleterie', 'Alexandre Dumas pere', 'Alexandre Dumas, father', 'Alexandre Dumas, père', 'Alexandre Dumas, the Elder', 'Dumas Davy de la Pailleterie']",P27,['Q142'],['France'],['French Republic']
+Q38785,Mikhail Larionov,"['Mikhail Fedorovich Larionov', 'Michail Fiodorovich Larionov', 'Larionov', 'Michail Fjodorovitsch Larionoff', 'Michail Larionow', 'Michel Larionov', 'Michel Larionow', 'Mihaijl Fedorivic Larionov', 'Mihaijl Fedorovic Larionov', 'Mihail Fjodorovics Larionov', 'Mihajl Fedorovič Larionov', 'Mikhail Fedorovich Larinov', 'Mikhail Fedorovich Larionioff', 'Mikhail Fjodorowitsch Larionoff', 'Mikhail Fyodorovich Larionov', 'Mikhail Larionow', 'Mikhail Larjonov']",P27,"['Q142', 'Q34266']","['France', 'Russian Empire']","['French Republic', 'Russia', 'Tsarist Russia', 'Rusia', 'Rossia', 'Empire of Russia', 'Imperial Russia', 'Moscovy', 'Moscovy or Russia', 'Russia or Moscovy']"
+Q39015,Harlem Désir,['Harlem Desir'],P27,['Q142'],['France'],['French Republic']
+Q39319,Jean Françaix,['Jean René Désiré Françaix'],P27,['Q142'],['France'],['French Republic']
+Q39607,Antoine Lavoisier,"['Lavoisier', 'Antoine Laurent de Lavoisier', 'Antoine Laurent Lavoisier', 'Antoine-Laurent de Lavoisier']",P27,['Q142'],['France'],['French Republic']
+Q40132,Jonas Armstrong,['William Jonas Armstrong'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q4128,Louis Aragon,"['Aragon', 'Louis Andrieux', 'Albert de Routisie', 'Arnaud de Saint Romain', 'François la Colère', 'François La Colère', 'Témoin des martyrs']",P27,['Q142'],['France'],['French Republic']
+Q42229,Mel Gibson,"['Mel Colm-Cille Gerard Gibson', 'Mel Columcille Gerard Gibson']",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q437925,Mick McCarthy,['Michael Joseph McCarthy'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q437944,Dan O'Herlihy,"[""Daniel O'Herlihy""]",P27,"['Q27', 'Q30']","['Ireland', 'United States']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica']"
+Q438129,Eileen Gray,"['Eileen Kathleen Moray Gray', 'Eileen Moray Smith', 'Kathleen Eileen Gray', 'Kathleen Eileen Moray Gray', 'Kathleen Eileen Moray Smith']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q44040,Richard David Precht,"['Richard D. Precht', 'Richard Precht']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44068,Dirk Nowitzki,"['Dirk Werner Nowitzki', 'Dirkules', 'German Wunderkind']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q440816,Seán Brady,"['Sean Brady', 'Sean Baptist Brady', 'Seán Baptist Brady']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q44086,Carl Orff,['Karl Orff'],P27,"['Q183', 'Q1206012']","['Germany', 'German Reich']","['Federal Republic of Germany', 'Germany', 'German Empire', 'German Realm', 'Imperial Germany']"
+Q44131,Werner Herzog,"['Werner Herzog Stipetić', 'Werner Stipetić']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q441702,David Connolly,['David James Connolly'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q44286,Rudolf Mössbauer,['Rudolf Ludwig Mössbauer'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44340,Uli Hoeneß,"['Ulrich Hoeness', 'Ulrich Hoeneß']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44393,Ludwig III of Bavaria,"['Ludwig III', 'Ludwig III.']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q444329,Johnny Giles,['Michael John Giles'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q444563,Paddy Kenny,"['Patrick Kenny', 'Patrick Joseph Kenny']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q444601,Maud Gonne,"['Edith Maud Gonne MacBride', 'Edith Maud MacBride', 'Maud Gonne MacBride', 'Maud MacBride', 'Edith Maud Gonne']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q444616,Maria Doyle Kennedy,['Maria Josephine Doyle Kennedy'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q44464,Rudi Völler,"['El Bobo', 'Völler', 'Rudolf Völler', 'Tante Käthe']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44507,Edmund Stoiber,['Edmund Rüdiger Rudi Stoiber'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44540,Oskar Maria Graf,['Oskar Graf-Berg'],P27,"['Q30', 'Q183']","['United States', 'Germany']","['America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Federal Republic of Germany']"
+Q4457,Franz Beckenbauer,['Der Kaiser'],P27,"['Q183', 'Q713750']","['Germany', 'West Germany']","['Federal Republic of Germany', 'BR Dtld.', 'Federal Republic of Germany (1949–1990)', 'history of West Germany from 1949 to 1990', 'West-Deutschland']"
+Q44584,Hans Magnus Enzensberger,['Andreas Thalmayr'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44597,Feodor Felix Konrad Lynen,['Feodor Lynen'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q4462,Joachim Löw,['Jogi Löw'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44620,Franz Josef Strauß,['Franz Josef Strauss'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44634,Nico,"['Christa Nico', 'Christa Päffgen', 'Nico Otzak', 'Nico Päffgen']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44647,Otfried Preußler,"['Hannes Hauser', 'Otfried Preussler']",P27,"['Q183', 'Q7318', 'Q140359', 'Q713750']","['Germany', 'Nazi Germany', 'First Czechoslovak Republic', 'West Germany']","['Federal Republic of Germany', 'Third Reich', 'German Reich', 'Greater German Reich', ""Hitler's Third Reich"", 'Thousand-Year Reich', 'Československá republika', 'BR Dtld.', 'Federal Republic of Germany (1949–1990)', 'history of West Germany from 1949 to 1990', 'West-Deutschland']"
+Q44736,Loriot,"['Vicco von Bülow', 'Bernhard Victor Christoph Carl von Bülow', 'Bernhard-Viktor Christoph-Carl von Bülow', 'Vicco Von Bülow', ""Wum's Gesang""]",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44815,Giovane Élber,['Giovane Elber'],P27,"['Q155', 'Q183']","['Brazil', 'Germany']","['Brasil', 'Federative Republic of Brazil', 'Federal Republic of Germany']"
+Q44820,Georg Schwarzenbeck,"['Hans-Georg Schwarzenbeck', 'Katsche']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44834,Thomas Kraft,"['Kraft, Thomas']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44858,Bernd Hölzenbein,['Bernd Holzenbein'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44893,"Rupprecht, Crown Prince of Bavaria",['Rupprecht'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q44951,Rainer Bonhof,"['Bonhof, Rainer']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45006,Q45006,"['Stuck', 'Franz von Stuck', 'f. stuck', 'f. v. stuck', 'f. von stuck', 'fr. v. stuck', 'fr. von stuck', 'Frans von Stuck', 'Franz Ritter von Stuck', 'franz stuck', 'Franz Stuck Ritter von', 'franz v. stuck', 'Franz Von Stuck', 'franz von, M. stuck', 'franz von, prof. stuck', 'Franz, Ritter von Stuck', 'prof. f. stuck', 'prof. franz stuck', 'professor franz stuck', 'professor franz v. stuck', 'professor franz von stuck', 'stuck franz', 'stuck franz von', 'von stuck']",P27,"['Q183', 'Q154195']","['Germany', 'Kingdom of Bavaria']","['Federal Republic of Germany', 'Bavaria', 'Kinereich Baiern', 'Kinereich Bayern', 'Königreich Baiern', 'Königreich Bayern']"
+Q45019,Karl Lehmann,"['Kardinal Lehmann', 'Karl Cardinal Lehmann', 'Karl Kardinal Lehmann']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45049,Georg Sterzinsky,['Georg Maximilian Sterzinsky'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45060,Joseph Höffner,['Joseph Cardinal Höffner'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45066,Joachim Meisner,['Joachim Cardinal Meisner'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45070,Christoph Schlingensief,"['Christof Schlingensief', 'Christoph Maria Schlingensief']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45129,Julius Döpfner,['Julius August Cardinal Döpfner'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45158,Gerhard Ludwig Müller,['Gerhard Ludwig Cardinal Müller'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45160,Michael von Faulhaber,['Michael Cardinal von Faulhaber'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q4517,Bernard Katz,"['Bernhard Katz', 'Professor Sir Bernard Katz', 'Sir Bernard Katz']",P27,"['Q145', 'Q183', 'Q174193']","['United Kingdom', 'Germany', 'United Kingdom of Great Britain and Ireland']","['Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'Federal Republic of Germany', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q45195,"Duke Albrecht, Duke of Bavaria","['Albrecht Luitpold Ferdinand Michael', 'Albrecht Luitpold Ferdinand Michael, Duke of Bavaria, of Franconia and in Swabia, Count Palatine of the Rhine']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45201,Rainer Woelki,['Rainer Maria Woelki'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45221,Herbert Achternbusch,['Herbert Schild'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45239,Franz Xaver Kroetz,['Franz-Xaver Kroetz'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45255,Karl Valentin,"['Valentin Fey', 'Valentin Ludwig Fey']",P27,"['Q183', 'Q7318', 'Q41304', 'Q43287']","['Germany', 'Nazi Germany', 'Weimar Republic', 'German Empire']","['Federal Republic of Germany', 'Third Reich', 'German Reich', 'Greater German Reich', ""Hitler's Third Reich"", 'Thousand-Year Reich', 'Germany', ""German People's State"", 'German Republic', 'Republic of Germany', 'Weimar Germany', 'Imperial Germany', 'Deutsches Kaiserreich', 'Second Reich']"
+Q45520,Oliver Riedel,"['El Babo Alemán', 'Oliver ""Ollie"" Riedel', 'Ollie Riedel', 'Pelón de Brazzers']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q45538,Robbie Brady,"['Robert ""Robbie"" Brady']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q45766,Mario Gómez,['Mario Gómez García'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q46779,Willoughby James Hamilton,"['Willoughby Hamilton', 'Willoby Hamilton', 'Willoby James Hamilton']",P27,"['Q27', 'Q145', 'Q174193']","['Ireland', 'United Kingdom', 'United Kingdom of Great Britain and Ireland']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'United Kingdom', 'Great Britain and Ireland', 'UKGBI']"
+Q501,Charles Baudelaire,"['Charles Pierre Baudelaire', 'Charles Pierre Baudelaire-Dufaÿs', 'Baudelaire']",P27,['Q142'],['France'],['French Republic']
+Q502,Stendhal,"['Henri Beyle', 'Marie Henri Beyle']",P27,['Q142'],['France'],['French Republic']
+Q504,Émile Zola,['Émile Édouard Charles Antoine Zola'],P27,['Q142'],['France'],['French Republic']
+Q5117,Eugen Polanski,['Bogusław Eugeniusz Polański'],P27,"['Q36', 'Q183']","['Poland', 'Germany']","['Republic of Poland', 'Federal Republic of Germany']"
+Q517,Napoleon,"['Napoléon Bonaparte', 'Napoleon I', 'The Little Corporal', 'Napoleon Bonaparte', 'Napoleon I of France', 'Emperador dels Francesos Napoleó I', 'Empereur des Français Napoléon I', 'Little Corporal', 'Napoleon Buonaparte', 'Napoleone Bonaparte', 'Napoleone Buonaparte', 'Napoleone di Buonaparte', 'Napoleone I', 'Napulione Buonaparte', 'Napulione di Buonaparte', 'the Corsican Napolean']",P27,['Q142'],['France'],['French Republic']
+Q5327,Adolf Butenandt,['Adolf Friedrich Johann Butenandt'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q535,Victor Hugo,"['Victor Marie Hugo', 'Ocean Man', 'Homme océan']",P27,['Q142'],['France'],['French Republic']
+Q5354,Ernst Mayr,"['E. Mayr', 'E. W. Mayr', 'Ernst Walter Mayr']",P27,"['Q30', 'Q183']","['United States', 'Germany']","['America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Federal Republic of Germany']"
+Q539,Giuseppe Garibaldi,"['Garibaldi', 'Giuseppe Maria Garibaldi', 'Joseph-Marie Garibaldi']",P27,"['Q142', 'Q419', 'Q162192', 'Q172579', 'Q2577303']","['France', 'Peru', 'Riograndense Republic', 'Kingdom of Italy']","['French Republic', 'per', 'pe', 'Republic of Peru', 'Republica del Peru', 'República del Perú', 'Piratini Republic', 'Republic of Piratini', 'Italy', 'Regno d’Italia']"
+Q55428,Neil Jordan,['Neil Patrick Jordan'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q567,Angela Merkel,['leader of the free world'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q57147,Michael Fassbender,['Fassy'],P27,"['Q27', 'Q183', 'Q713750']","['Ireland', 'Germany', 'West Germany']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Federal Republic of Germany', 'BR Dtld.', 'Federal Republic of Germany (1949–1990)', 'history of West Germany from 1949 to 1990', 'West-Deutschland']"
+Q57276,Michael D. Higgins,"['Michael Higgins', 'Michael Daniel Higgins', 'Mícheál Dónal Ó hUigínn', 'Mícheál Ó hUigínn', 'President Higgins', 'President Michael D. Higgins', 'President Michael Daniel Higgins', 'President Michael Higgins']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q57689,Martin McGuinness,"['James Martin Pacelli McGuinness', 'James Martin Pacellill McGuinness', 'John Martin McGuinness', 'Mairtin Mag Aonghusa', 'Máirtín Mag Aonghusa']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q58444,Liam Neeson,['William John Neeson'],P27,"['Q27', 'Q30', 'Q145']","['Ireland', 'United States', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q62020,Nicolaus von Below,['Georg Ludwig Heinrich Nicolaus von Below'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62050,Willi Graf,['Wilhelm Graf'],P27,"['Q183', 'Q1206012']","['Germany', 'German Reich']","['Federal Republic of Germany', 'Germany', 'German Empire', 'German Realm', 'Imperial Germany']"
+Q62053,Karoline von Günderrode,"['Karoline von Günderode', 'Karoline Friederike Louise Maximiliane von Günderrode']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62067,Gerda Christian,['Gerda Daranowski'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62078,Jupp Kapellmann,"['Hans-Josef ""Jupp"" Kapellmann', 'Josef Kapellmann']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62081,Alfred Eisenstaedt,"['Alfred Eisenstadt', 'Alfred Eisenstaett', 'Eisie']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62084,Franz Schlegelberger,['Louis Rudolph Franz Schlegelberger'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62085,Joachim Sauer,"['Sauer', 'J. Sauer']",P27,"['Q183', 'Q16957']","['Germany', 'German Democratic Republic']","['Federal Republic of Germany', 'East Germany', 'DDR', 'GDR', 'Communist Germany', 'Deutsche Demokratische Republik']"
+Q62087,Otto Meissner,"['Otto Meißner', 'Otto Lebrecht Eduard Daniel Meissner']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62090,Werner Naumann,"['Naumann, Werner Hugo Robert', 'W. H. R. Naumann', 'W. Naumann', 'Werner Hugo Robert Naumman']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62093,David McAllister,['David James McAllister'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62098,Hansi Müller,['Hans Peter Müller'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62104,Anne Christine of Sulzbach,"['Anna Christine Luise von Pfalz-Sulzbach', 'Countess Palatine Anne Christine of Sulzbach']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62106,Hans von Salmuth,"['Hans Eberhard Kurt Freiherr von Salmuth', 'Hans Eberhard Kurt von Salmuth']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62117,Otto Henry,"['Otto Heinrich', 'Ottheinrich von der Pfalz', 'Ottheinrich von Pfalz-Neuburg', 'Otto Heinrich Kurfürst von der Pfalz']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62129,"Frederick Augustus II, Grand Duke of Oldenburg","['Frederick Augustus II', 'Friedrich August von Oldenburg']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62137,Franz Xaver Gabelsberger,['Franz Xavier Gabelsberger'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62168,"Eberhard I, Duke of Württemberg","['Eberhard I.', 'Eberhard V (I) Herzog von Württemberg']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62171,Frederick III of the Palatinate,"['Federico III el Piadoso', 'Frederick III of Simmern']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62174,Hilde Krahwinkel Sperling,"['Hilde Krahwinkel', 'Hilde Sperling']",P27,"['Q183', 'Q756617']","['Germany', 'Kingdom of Denmark']","['Federal Republic of Germany', 'Denmark', 'Danish Realm', 'Danmarkar Ríki', 'Danmarkip Naalagaaffik', 'Danmarks Rige', 'Kongeriget Danmark', 'Kongsríki Danmarkar', 'Kunngeqarfik Danmarki', 'Realm of Denmark', 'Danish Commonwealth']"
+Q62193,Eike Immel,['Eike Heinrich Immel'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62206,Egon Bahr,['Egon Karl-Heinz Bahr'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62231,"Frederick VII, Margrave of Baden-Durlach",['Friedrich VII. Magnus von Baden-Durlach'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62258,John Henry Mackay,"['Sagitta', 'Henry Mackay']",P27,"['Q145', 'Q183']","['United Kingdom', 'Germany']","['Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK', 'Federal Republic of Germany']"
+Q62259,"Christian August of Holstein-Gottorp, Prince of Eutin",['Christian August of Holstein-Gottorp-Eutin'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q62263,Prince Ludwig Ferdinand of Bavaria,"['Ludwig Ferdinand', 'Prince Ludwig Ferdinand Maria Karl Heinrich Adalbert Franz Philipp Andreas Konstantin of Bavaria']",P27,"['Q29', 'Q183']","['Spain', 'Germany']","['Kingdom of Spain', 'Federal Republic of Germany']"
+Q632,Jean Moulin,"['Max', 'Rex']",P27,['Q142'],['France'],['French Republic']
+Q6538,Günter Grass,"['Gunter Grass', 'Günter Graß', 'Günter Wilhelm Grass', 'Günter Wilhelm Graß']",P27,"['Q183', 'Q216173']",['Germany'],['Federal Republic of Germany']
+Q6541,Heino,['Heinz Georg Kramm'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q6882,James Joyce,['James Augustine Aloysius Joyce'],P27,"['Q27', 'Q142', 'Q145']","['Ireland', 'France', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'French Republic', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q6969,Stefan Raab,"['Joe Steam', 'Stefan Konrad Raab']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q7231,Rosa Luxemburg,"['Róża Luksemburg', 'Rozalia Luxenburg', 'Red Rosa Luxemburg']",P27,"['Q183', 'Q34266']","['Germany', 'Russian Empire']","['Federal Republic of Germany', 'Russia', 'Tsarist Russia', 'Rusia', 'Rossia', 'Empire of Russia', 'Imperial Russia', 'Moscovy', 'Moscovy or Russia', 'Russia or Moscovy']"
+Q7249,Agnes Pockels,['Agnes Luise Wilhelmine Pockels'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q7294,Johannes Brahms,"['Brahms', 'J. Brahms', 'Marks, G. W.']",P27,"['Q183', 'Q1055']","['Germany', 'Hamburg']","['Federal Republic of Germany', 'Free and Hanseatic City of Hamburg', 'Hamburg, Freie und Hansestadt', 'Hamburg, Germany']"
+Q73176,Anne Enright,['Anne Teresa Enright'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q7336,Otto Heinrich Frank,['Otto H. Frank'],P27,"['Q39', 'Q183']","['Switzerland', 'Germany']","['Swiss', 'Confoederatio Helvetica', 'Swiss Confederation', 'Federal Republic of Germany']"
+Q7337,Edith Frank-Holländer,"['Edith Frank', 'Edethias Frank']",P27,"['Q183', 'Q29999']","['Germany', 'Kingdom of the Netherlands']","['Federal Republic of Germany', 'Netherlands', 'the Netherlands', 'Nederlanden']"
+Q7339,Margot Frank,['Margot Betti Frank'],P27,"['Q183', 'Q29999', 'Q41304']","['Germany', 'Kingdom of the Netherlands', 'Weimar Republic']","['Federal Republic of Germany', 'Netherlands', 'the Netherlands', 'Nederlanden', 'Germany', 'German Reich', ""German People's State"", 'German Republic', 'Republic of Germany', 'Weimar Germany']"
+Q73506,Roddy Doyle,"['Ruaidhri O Duill', 'Ruaidhrí Ó Dúill']",P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q73612,Fiona Shaw,"['Fiona Wilson', 'Fiona Mary Shaw', 'Fiona Mary Wilson']",P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q7409,Hertha Sponer,['Hertha Dorothea Elisabeth Sponer-Franck'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q7490,Clara Immerwahr,"['Clara Haber', 'Clara Helene Haber', 'Clara Helene Immerwahr']",P27,"['Q183', 'Q27306']",['Germany'],['Federal Republic of Germany']
+Q755,Paul Verlaine,['Paul-Marie Verlaine'],P27,['Q142'],['France'],['French Republic']
+Q76139,Gerry Adams,['Gerard Adams'],P27,"['Q27', 'Q145']","['Ireland', 'United Kingdom']","['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland', 'Great Britain', 'the United Kingdom of Great Britain and Northern Ireland', 'G B', 'Great Britain and Northern Ireland', 'U K', 'United Kingdom of Great Britain and Northern Ireland', 'the UK']"
+Q767,Stéphane Mallarmé,"['Stephane Mallarme', 'Mallarmé', 'Etienne Mallarme', 'Etienne Mallarmé', 'Steph. Mallarme']",P27,['Q142'],['France'],['French Republic']
+Q8219,Uta Frith,"['Dame Uta Frith', 'Frith U', 'U Frith', 'U. Frith']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q853,Andrei Tarkovsky,"['Andrei Tarkovski', 'And. Arsenʹevich Tarkovskiĭ', ""Andrei Arsen'evich Tarkovskii"", ""Andreĭ Arsen'evich Tarkovskiĭ"", 'Andreĭ Arsenʹevich Tarkovskĭi', 'Andreĭ Arsenévich Tarkovskiĭ', 'Andrei Tarkovskij', ""Andreiĭ Arsen'evich Tarkovskiĭ"", 'Andrej Tarkovskij', 'Andrej Tarkovszkij', 'Andrej Tarkowskij', 'Andrey Arsenyevich Tarkovsky', 'Andrey Tarkovsky']",P27,"['Q38', 'Q142', 'Q15180']","['Italy', 'France', 'Soviet Union']","['Italia', 'Italian Republic', 'Republic of Italy', 'French Republic', 'CCCP', 'U.S.S.R.', 'Union of Soviet Socialist Republics', 'USSR', 'the Soviet Union', 'SU', 'URS', 'Soviets', 'The Soviets', 'the Union of Soviet Socialist Republics', 'The USSR', 'U.S.S.R']"
+Q9130,Erwin Schrödinger,"['Schrödinger', 'Schrodinger', 'Erwin Rudolf Josef Alexander Schröndinger', 'Erwin Schrodinger', 'Erwin Schroedinger']",P27,"['Q183', 'Q7318', 'Q533534']","['Germany', 'Nazi Germany', 'Cisleithania']","['Federal Republic of Germany', 'Third Reich', 'German Reich', 'Greater German Reich', ""Hitler's Third Reich"", 'Thousand-Year Reich', 'Austrian Lands', 'The Kingdoms and Lands Represented in the Imperial Council']"
+Q93356,Seamus Heaney,['Seamus Justin Heaney'],P27,['Q27'],['Ireland'],"['Hibernia', 'Southern Ireland', 'Irish Republic', 'Éire', 'Republic of Ireland']"
+Q937,Albert Einstein,['A.Einsten'],P27,"['Q30', 'Q39', 'Q183', 'Q41304', 'Q159631', 'Q223050', 'Q533534']","['United States', 'Switzerland', 'Germany', 'Weimar Republic', 'Kingdom of Württemberg', 'statelessness', 'Cisleithania']","['America', 'the United States', 'United States of America', 'the States', 'the U.S.', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the United States of America', 'the US', 'the US of A', 'the US of America', 'U. S.', 'U. S. A.', 'U.S. of America', 'US of A', 'US of America', 'the USA', 'Murica', 'U.S.A.', 'U.S.', 'Merica', 'Swiss', 'Confoederatio Helvetica', 'Swiss Confederation', 'Federal Republic of Germany', 'Germany', 'German Reich', ""German People's State"", 'German Republic', 'Republic of Germany', 'Weimar Germany', 'Württemberg', 'stateless', 'Austrian Lands', 'The Kingdoms and Lands Represented in the Imperial Council']"
+Q9577,Katja Seizinger,['Katja Weber'],P27,['Q183'],['Germany'],['Federal Republic of Germany']
+Q9671,Michael Schumacher,"['Schumi', 'Schuey']",P27,['Q183'],['Germany'],['Federal Republic of Germany']
