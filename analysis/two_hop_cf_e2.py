@@ -44,7 +44,7 @@ e2_info = (
 # Main loop
 # generate counterfactual e2 values
 
-groups = df.groupby(["e1", "r1", "e2"])
+groups = df.groupby(["e1", "r1", "e2"], sort=False)
 
 rows = []
 
@@ -90,6 +90,16 @@ for (E, R, b), g in groups:
 
     # copy() used so original df is not modified
     g = g.copy()
+    
+    # first in group should be edit row
+    edit_id = g.iloc[0]["id"]
+
+    # all other rows are propagated rows
+    g["propagated_from"] = edit_id
+    g["row_type"] = "propagated_eval"
+    g.loc[g["id"] == edit_id, "propagated_from"] = pd.NA
+    g.loc[g["id"] == edit_id, "row_type"] = "edit"
+
     g["e2_new"] = best_B
 
     info = e2_info.get(best_B, {"e2_label": None, "e2_aliases": None, "e2_type": None})
@@ -142,6 +152,36 @@ def add_e3_new():
 
 add_e3_new()
 
+# %%
+
+# mark rows with no e2_new or no e3_new (for propagated rows) as invalid
+result.loc[result["e2_new"].isna(), "row_type"] = "invalid"
+result.loc[
+    (result["row_type"] == "propagated_eval") & result["e3_new"].isna(),
+    "row_type"
+] = "invalid"
+
+# seperate valid and invalid into two dataframes to help with putting invalid at the end
+valid = result[result["row_type"] != "invalid"].copy()
+invalid = result[result["row_type"] == "invalid"].copy()
+
+# sort by edit (only valid)
+valid["sort_group"] = valid["propagated_from"].fillna(valid["id"])
+valid["is_edit"] = valid["row_type"] == "edit"
+
+# sort by group first
+# is is_edit is True it comes earliest in the group
+# maintain id order for other rows
+valid = valid.sort_values(
+    by=["sort_group", "is_edit", "id"],
+    ascending=[True, False, True]
+)
+
+result = pd.concat([valid, invalid], ignore_index=True)
+
+# remove helper columns
+result.drop(columns=["sort_group", "is_edit"], errors="ignore", inplace=True)
+
 # %% 
 # Basic tests to verify the quality of the generated counterfactuals
 
@@ -161,21 +201,61 @@ def test_knowledge_consistency():
     group_check = result.groupby(["e1","r1","e2"])["e2_new"].nunique()
     assert (group_check > 1).sum() == 0
 
+def test_e2_type_consistency():
+    """Verify that e2_new_type == e2_type for all non-null e2_new rows"""
+    mask = result["e2_new"].notna()
+    inconsistent = result.loc[mask & (result["e2_new_type"] != result["e2_type"])]
+    assert len(inconsistent) == 0
+
+def no_invalid_edit_rows():
+    """check if there are any invalid rows with row_type == edit"""
+    assert ((result["row_type"] == "edit") & (result["e2_new"].isna())).sum() == 0
+    missing_e3_edit = result[
+        (result["row_type"] == "edit") & (result["e3_new"].isna())
+    ]
+    print(f"{len(missing_e3_edit)} edit rows with missing e3_new values")
+
 def test_all():
     test_no_overlap()
     test_valid_r2()
     test_knowledge_consistency()
+    test_e2_type_consistency()
+    no_invalid_edit_rows()
 
 test_all()
 
 
 # %%
 # Stats about dataset
-print(f"len(df): {len(df)}")
-print(f"len(result): {len(result)}")
-print(f"Counterfactuals with e2_new generated: {result['e2_new'].notna().sum()}")
-print(f"Counterfactuals with e3_new generated: {result['e3_new'].notna().sum()}")
+original_count = len(df)
+e2_new_count = result["e2_new"].notna().sum()
+e3_new_count = result["e3_new"].notna().sum()
 
+print(f"len(df): {original_count}")
+# for some rows no B exists that match condition so such rows are dropped
+# That is why len(result) is smaller than len(df)
+print(f"len(result): {len(result)}")
+
+print(f"Counterfactuals with e2_new generated: {e2_new_count}")
+print(f"Number of rows wihtout e2_new: {original_count - e2_new_count}")
+
+print(f"Counterfactuals with e3_new generated: {e3_new_count}")
+print(f"Number of rows without e3_new: {original_count - e3_new_count}")
+
+# %%
+# find edit rows with no propagated rows
+
+# all edit ids
+edit_ids = set(result.loc[result["row_type"] == "edit", "id"])
+
+# all ids that are used as sources for propagation
+used_ids = set(result["propagated_from"].dropna())
+
+# edits with NO propagation
+no_propagation = edit_ids - used_ids
+
+print(f"Edit rows with no propagation: {len(no_propagation)}")
+print(f"Number of usable rows = {e3_new_count - len(no_propagation)}")
 
 # %%
 # Inspect overrepresentation of e2 and e3 values
@@ -186,27 +266,11 @@ print(f"Unique values in e2_new: {result['e2_new'].nunique()}")
 print(f"Unique values in e3: {result['e3'].nunique()}")
 print(f"Unique values in e3_new: {result['e3_new'].nunique()}")
 
-# %%
-def test_e2_type_consistency():
-    """Verify that e2_new_type == e2_type for all non-null e2_new rows"""
-    mask = result["e2_new"].notna()
-    inconsistent = result.loc[mask & (result["e2_new_type"] != result["e2_type"])]
-    return inconsistent
-
-inconsistancies = test_e2_type_consistency()
-print(len(inconsistancies))
-
-# pd.set_option('display.max_columns', None)
-# inconsistancies.head()
-
 
 # %%
 def save_file():
-    # sort to ensure original order is maintained
-    result.sort_index(inplace=True)
-
     # format and save the result
-    result.drop("Unnamed: 0", axis=1, inplace=True)
+    result.drop("Unnamed: 0", errors="ignore", axis=1, inplace=True)
     result.to_csv("../datasets/two_hop_cf_e2.csv")
 
 save_file()
