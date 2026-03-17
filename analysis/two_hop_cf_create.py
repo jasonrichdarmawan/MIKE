@@ -720,8 +720,12 @@ def apply_stage2a_e2(
       if ((e2_new_i, row_i_data["r2"], row_i_data["e3"]) in kb_mem) or ((e2_new_j, row_j_data["r2"], row_j_data["e3"]) in kb_mem):
         stats["blocked"] += 1
         continue
-      e3_candidate_i = e2_new_i, row_i_data["r2"], row_i_data["e3"]
-      e3_candidate_j = e2_new_j, row_j_data["r2"], row_j_data["e3"]
+      # e3_candidate_i = e2_new_i, row_i_data["r2"], row_j_data["e3"]
+      # e3_candidate_j = e2_new_j, row_j_data["r2"], row_i_data["e3"]
+
+      e3_candidate_i = row_j_data["e3"], row_j_data["e3_label"], row_j_data["e3_aliases"]
+      e3_candidate_j = row_i_data["e3"], row_i_data["e3_label"], row_i_data["e3_aliases"]
+
 
       selected_j = row_j
       selected_row_j_data = row_j_data
@@ -1098,6 +1102,7 @@ def apply_stage4_export(df: pd.DataFrame, output_path: str | Path) -> Dict[str, 
     "propagated_rows": int(len(propagated_df)),
     "active_rows": int(len(active_df)),
     "unused_rows": int((full_df["row_role"] == "unused").sum()),
+    "df_new": full_df,
   }
 
 # Stage 0: initialize runtime state
@@ -1191,3 +1196,146 @@ print(
 )
 
 # %%
+result = stage4_stats["df_new"]
+
+# %%
+# ================================
+# 📊 ANALYSIS + VALIDATION SUITE
+# ================================
+
+def analysis_summary(df, result):
+    print("="*60)
+    print("📊 DATASET SUMMARY")
+    print("="*60)
+
+    print(f"Original rows: {len(df)}")
+    print(f"Result rows:   {len(result)}")
+    print()
+
+    print("---- Counterfactual Coverage ----")
+    print(f"Rows with e2_new: {result['e2_new'].notna().sum()}")
+    print(f"Rows without e2_new: {result['e2_new'].isna().sum()}")
+
+    print(f"Rows with e3_new: {result['e3_new'].notna().sum()}")
+    print(f"Rows without e3_new: {result['e3_new'].isna().sum()}")
+    print()
+
+    print("---- Row Type Breakdown ----")
+    print(result["row_role"].value_counts(dropna=False))
+    print()
+
+    print("---- Uniqueness ----")
+    print(f"Unique e2: {result['e2'].nunique()}")
+    print(f"Unique e2_new: {result['e2_new'].nunique()}")
+
+    print(f"Unique e3: {result['e3'].nunique()}")
+    print(f"Unique e3_new: {result['e3_new'].nunique()}")
+    print()
+
+    print("="*60)
+analysis_summary(df, result)
+
+
+# %%
+# check overlap
+mask = result["e2_new"].notna()
+inconsistent = result.loc[mask & (result["e2_new"] == result["e2"])]
+print("e2_new overlap:", len(inconsistent))
+
+mask = result["e3_new"].notna()
+inconsistent = result.loc[mask & (result["e3_new"] == result["e3"])]
+print("e3_new overlap:", len(inconsistent))
+
+inconsistent[["source_prompt","e1_label", "e2_label", "e3_label","e2_label_new" ,"e3_label_new", "row_role"]].head()
+
+# %%
+def test_knowledge_consistency():
+  """check if there are multiple e2_new values for the same (e1, r1, e2) group"""
+  group_check = result.groupby(["e1","r1","e2"])["e2_new"].nunique()
+  assert (group_check > 1).sum() == 0
+
+test_knowledge_consistency()
+
+# %%
+# %%
+def find_invalid_r2_rows(df, result):
+    """
+    Return rows where (e2_new, r2, e3_new) is NOT in original dataset
+    """
+
+    valid_knowledge = set(zip(df["e2"], df["r2"], df["e3"]))
+
+    mask = result["e2_new"].notna() & result["e3_new"].notna()
+
+    invalid_mask = result.loc[mask].apply(
+        lambda r: (r["e2_new"], r["r2"], r["e3_new"]) not in valid_knowledge,
+        axis=1
+    )
+
+    invalid_rows = result.loc[mask].loc[invalid_mask]
+
+    print(f"Invalid rows (violating knowledge): {len(invalid_rows)}")
+
+    return invalid_rows
+
+
+
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', None)
+
+invalid_rows = find_invalid_r2_rows(df, result)
+invalid_rows[
+  ["source_prompt","e1_label", "e2_label", "e3_label","e2_label_new" ,"e3_label_new", "row_role", "swapped_with"]
+]
+
+# %%
+original_count = len(df)
+e2_new_count = result["e2_new"].notna().sum()
+e3_new_count = result["e3_new"].notna().sum()
+
+print(f"len(df): {original_count}")
+# for some rows no B exists that match condition so such rows are dropped
+# That is why len(result) is smaller than len(df)
+print(f"len(result): {len(result)}")
+
+print(f"Counterfactuals with e2_new generated: {e2_new_count}")
+print(f"Number of rows wihtout e2_new: {original_count - e2_new_count}")
+
+print(f"Counterfactuals with e3_new generated: {e3_new_count}")
+print(f"Number of rows without e3_new: {original_count - e3_new_count}")
+
+# %%
+# %%
+def count_consecutive_edit_rows(result):
+    """
+    Count how many edit rows are immediately followed by another edit row.
+    """
+
+    # reset index to ensure sequential access
+    df_seq = result.reset_index(drop=True)
+
+    count = 0
+    indices = []
+
+    for i in range(len(df_seq) - 1):
+        if df_seq.loc[i, "row_role"] == "edit" and df_seq.loc[i+1, "row_role"] == "edit":
+            count += 1
+            indices.append(i)
+
+    return count
+
+
+# run
+print(f" Consecutive edit rows: {count_consecutive_edit_rows(result)}")
+
+# %%
+def no_invalid_edit_rows():
+    """check if there are any invalid rows with row_type == edit"""
+    assert ((result["row_role"] == "edit") & (result["e2_new"].isna())).sum() == 0
+    missing_e3_edit = result[
+        (result["row_role"] == "edit") & (result["e3_new"].isna())
+    ]
+    print(f"{len(missing_e3_edit)} edit rows with missing e3_new values")
+
+no_invalid_edit_rows()
