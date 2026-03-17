@@ -65,19 +65,19 @@ ATTRIBUTE_FACT_MCQ_TEMPLATES = {
 # Fact-Attribute
 FACT_ATTRIBUTE_CLOZE_TEMPLATES = {
     "P27": {
-        "template": "In a book about different countries, Australia is mentioned on page 6, {e2_label} is mentioned on page 12, and United States is mentioned on page 18. {e1_label}'s country of citizenship is listed on page ",
+        "template": "In a book about different countries, Australia is mentioned on page 6, {e2_label} is mentioned on page 12, and Japan is mentioned on page 18. {e1_label}'s country of citizenship is listed on page ",
         "answers": ["12"],
     }
 }
 FACT_ATTRIBUTE_QUESTIONS_TEMPLATES = {
     "P27": {
-        "template": "In a book about different countries, Australia is mentioned on page 6, {e2_label} is mentioned on page 12, and United States is mentioned on page 18. On which page is {e1_label}'s country of citizenship listed?",
+        "template": "In a book about different countries, Australia is mentioned on page 6, {e2_label} is mentioned on page 12, and Japan is mentioned on page 18. On which page is {e1_label}'s country of citizenship listed?",
         "answers": ["12"],
     }
 }
 FACT_ATTRIBUTE_MCQ_TEMPLATES = {
     "P27": {
-        "template": "In a book about different countries, Australia is mentioned on page 6, {e2_label} is mentioned on page 12, and United States is mentioned on page 18. On which page is {e1_label}'s country of citizenship listed?\nA) 6\nB) 12\nC) 18",
+        "template": "In a book about different countries, Australia is mentioned on page 6, {e2_label} is mentioned on page 12, and Japan is mentioned on page 18. On which page is {e1_label}'s country of citizenship listed?\nA) 6\nB) 12\nC) 18",
         "answers": ["B", "B) 12", "12"],
     }
 }
