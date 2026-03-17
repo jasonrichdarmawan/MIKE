@@ -23,10 +23,10 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 BATCH_SIZE = 16
 
-MODEL_ID = "Qwen/Qwen3.5-4B"
-BASE_MODEL = False
-# MODEL_ID = "Qwen/Qwen3.5-4B-Base"
-# BASE_MODEL = True
+# MODEL_ID = "Qwen/Qwen3.5-4B"
+# BASE_MODEL = False
+MODEL_ID = "Qwen/Qwen3.5-4B-Base"
+BASE_MODEL = True
 
 print(f"Loading {MODEL_ID}...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -172,11 +172,27 @@ def stage1_evaluate(rows, indices, model, tokenizer, prompt_col, answers_col, re
 
     predictions = tokenizer.batch_decode(generated[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
     
-    tmpl = "{}</answer>" if base_model else "<answer>{}</answer>"
-    correct = [
-        any(re.search(re.escape(tmpl.format(ans)), prediction, re.IGNORECASE) for ans in answers) 
-        for prediction, answers in zip(predictions, rows[answers_col])
-    ]
+    def _extract_answer_text(prediction, base_model):
+        if base_model:
+            m = re.search(r"(.*?)</answer>", prediction, re.IGNORECASE | re.DOTALL)
+            text = m.group(1) if m else prediction
+        else:
+            m = re.search(r"<answer>(.*?)</answer>", prediction, re.IGNORECASE | re.DOTALL)
+            text = m.group(1) if m else prediction
+        return text.strip()
+
+    correct = []
+    for prediction, answers in zip(predictions, rows[answers_col]):
+        text = _extract_answer_text(prediction, base_model).lower()
+        matched = False
+        for ans in answers:
+            a = ans.strip().lower()
+            if not a:
+                continue
+            if a in text or text.startswith(a) or text == a:
+                matched = True
+                break
+        correct.append(matched)
     
     tqdm.write(f"Index: {indices[0]}")
     tqdm.write(f"{'=' * 100}\nPrompt: \n{rows[prompt_col][0]}\n{'-' * 100}")
