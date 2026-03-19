@@ -840,22 +840,24 @@ def apply_stage5_sorting(df: pd.DataFrame) -> pd.DataFrame:
 def apply_stage6_export(df: pd.DataFrame, output_path: str | Path) -> Dict[str, Any]:
   """
   Stage 6: final benchmark export.
-  - write only the full trace table to output_path
-  - report row_role statistics
   """
   output_path = Path(output_path)
   output_path.parent.mkdir(parents=True, exist_ok=True)
 
+  # remove unused rows in-place so downstream code operates only on active rows
+  inactive_df = df[df["row_role"] == "unused"]
+  if len(inactive_df) > 0:
+    df.drop(index=inactive_df.index, inplace=True)
+
   edit_df = df[df["row_role"] == "edit"]
   propagated_df = df[df["row_role"] == "propagated_eval"]
-  active_df = df[df["row_role"] != "unused"]
-  inactive_df = df[df["row_role"] == "unused"]
+  # after dropping, active_df is the current dataframe
+  active_df = df
 
-  df.to_csv(output_path, index=False)
+  active_df.to_csv(output_path, index=False)
 
   return {
-    "full_path": str(output_path),
-    "full_rows": len(df),
+    "output_path": str(output_path),
     "edit_rows": len(edit_df),
     "propagated_rows": len(propagated_df),
     "active_rows": len(active_df),
@@ -945,11 +947,11 @@ print(f"Stage 4 complete | {output}")
 # %%
 # Stage 5: sort rows for export so propagated rows follow edits and unused are last
 
-df2 = apply_stage5_sorting(df)
+df = apply_stage5_sorting(df)
 print(f"Stage 5 complete")
 
 cols = ["id", "row_role", "propagated_from"]
-df2[cols].head(20)
+df[cols].head(20)
 
 # %%
 
