@@ -1,10 +1,6 @@
 # %%
 
 import sys
-sys.argv = ["", "--input_path", "../datasets/Qwen/Qwen3.5-4B-Base/two_hop_cf_e2.csv"]
-
-# %%
-
 import logging
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
