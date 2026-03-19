@@ -62,6 +62,21 @@ pip install zhipuai sniffio
 ## 📚Analyze
 Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
 
+- Constructing counterfactual benchmark from Two Hop [1] dataset:
+  - Run `analysis/two_hop_cf_create.py` to create the counterfactual benchmark. It will generate `datasets/two_hop_cf_{swapping_strategy}.csv`.
+    `--swapping_strategy`: The swapping strategy to generate counterfactuals, either swapping `e2` values or swapping `e3` values.
+    ```bash
+    python analysis/two_hop_cf_create.py --input_path datasets/two_hop.csv --swapping_strategy e2
+    ```
+  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop_{swapping_strategy}.csv` dataset. It will generate `datasets/{model_name}/two_hop_cf_{swapping_strategy}.csv` file. Use it for the subsequent experiments.
+    ```bash
+    python analysis/evaluate_dataset.py Qwen/Qwen3.5-4B --input-path datasets/two_hop_cf_e2.csv
+    ```
+  - Run `analysis/create_benchmark_cf.py` to create valid counterfactual benchmark. It will generate `datasets/{model_name}/two_hop_cf_benchmark_{swapping_strategy}.csv`
+    ```bash
+    python analysis/create_benchmark_cf.py --input_path datasets/Qwen/Qwen3.5-4B-Base/two_hop_cf_e3.csv
+    ```
+
 - Constructing MQuAKE for multi-lingual knowledge editing benchmark:
   - Copy `datasets/MQuAKE-CF-3k-v2-cake.json` to `datasets/MQuAKE-CF-3k-v2-clke.json`
   - Run `analysis/llm_translate.py` to translate
@@ -77,11 +92,11 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
   ```
 
 - E. Biran et al. [1]:
-  - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/composition_{correct/incorrect/inconsistent}/two_hop.csv` files. Use it to do back-patching experiments.
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
     ```bash
-    python analysis/evaluate_dataset.py gpt2 --input_path datasets/two_hop.csv --output_path datasets/gpt2/two_hop.csv
+    python analysis/evaluate_dataset.py gpt2 --input-path datasets/two_hop.csv --output-path datasets/gpt2/two_hop.csv
     ```
+  - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/composition_{correct/incorrect/inconsistent}/two_hop.csv` files. Use it to do back-patching experiments.
   - Run `analysis/generate_entity_description.py` to do Patchscopes entity description experiments.
     <details>
       <summary>GPT2 example</summary>

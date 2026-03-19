@@ -96,9 +96,6 @@ def main(args):
 
     [1] Biran et al., "Hopping Too Late: Exploring the Limitations of Large Language Models on Multi-Hop Queries," in EMNLP 2024
     """
-    print(args)
-    if not args.input_path:
-        args.input_path = "../datasets/two_hop.csv"
     dataset = pd.read_csv(args.input_path, index_col=0)
     dataset = Dataset.from_pandas(dataset, preserve_index=False)
     dataset = dataset.map(get_answers, fn_kwargs={"key": "e2"})
@@ -120,26 +117,50 @@ def main(args):
     dataset = dataset.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size,
                           fn_kwargs={"model": model, "tokenizer": tokenizer})
 
-    dataset_path = Path(f"..datasets/{args.model_name}/two_hop.csv")
+    dataset_path = Path(args.input_path)
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
     dataset = dataset.to_pandas()
     dataset = dataset.drop(["e2_answers", "e3_answers"], axis=1)
     dataset = dataset.reset_index(drop=True)
 
-    if not args.output_path:
-        args.output_path = f"../datasets/{args.model_name}/two_hop.csv"
     output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     dataset.to_csv(output_path)
 
 
-if __name__ == "__main__":
+def parse_args():
+    BASE_MODELS = [
+        "gpt2", "meta-llama/Llama-2-7b-hf", "meta-llama/Llama-2-13b-hf",
+        "meta-llama/Meta-Llama-3-8B", "meta-llama/Meta-Llama-3-70B",
+        "Qwen/Qwen3.5-4B-Base"
+    ]
+    CHAT_MODELS = [
+        "Qwen/Qwen2.5-7B-Instruct", "meta-llama/Meta-Llama-3-8B-Instruct",
+        "Qwen/Qwen3.5-4B"
+    ]
+    
+    MODELS = BASE_MODELS + CHAT_MODELS
+    
     parser = ArgumentParser()
-    parser.add_argument("model_name", choices=[
-        "gpt2", "Qwen/Qwen2.5-7B-Instruct",
-        "meta-llama/Llama-2-7b-hf", "meta-llama/Llama-2-13b-hf","meta-llama/Meta-Llama-3-8B-Instruct",
-        "meta-llama/Meta-Llama-3-8B", "meta-llama/Meta-Llama-3-70B"])
+    parser.add_argument("model_name", choices=MODELS)
     parser.add_argument("--input-path")
     parser.add_argument("--output-path")
     parser.add_argument("--batch-size", type=int, default=32)
-    main(parser.parse_args())
+    args = parser.parse_args()
+    
+    args.base_model = True if args.model_name in BASE_MODELS else False
+    if not args.base_model:
+        raise NotImplementedError("Chat models are not supported yet.")
+
+    if not args.input_path:
+        args.input_path = "datasets/two_hop.csv"
+    if not args.output_path:
+        filename = args.input_path.split("/")[-1]
+        folder_path = "/".join(args.input_path.split("/")[:-1])
+        args.output_path = f"{folder_path}/{args.model_name}/{filename}"
+    
+    return args
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)

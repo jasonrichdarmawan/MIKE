@@ -8,8 +8,9 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, GPT2LMHeadModel, \
 
 from jaxtyping import Float
 
-HF_TOKEN = ""
+import os
 
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 def load_tokenizer(model_name):
     tokenizer = AutoTokenizer.from_pretrained(model_name, token=HF_TOKEN)
@@ -120,14 +121,15 @@ def check_answer_in_pred(pred: str, answers: list[str]):
 
 
 def generate_and_test_answers(model, tokenizer, task: str, prompts: list[str], ids: list[int], answers: list[list[str]]):
+    tokenizer.padding_side = "left"
     inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
     with torch.no_grad():
         generated = model.generate(**inputs, do_sample=False, temperature=1, top_p=1, num_beams=1,
                                    pad_token_id=tokenizer.eos_token_id, max_new_tokens=10) # shape (batch_size, seq_len)
     predictions = decode_generated(tokenizer, generated, prompts) # list of str, len=batch_size
-    for prompt, id, pred, a in zip(prompts, ids, predictions, answers):
-        print(f"Task: {task}\nId: {id}\nPrompt: {prompt}\nPrediction: {pred}\nAnswers: {a}\nResults: {check_answer_in_pred(pred, a)}")
-        print("-----------------------------------")
+    prompt = tokenizer.decode([t for t in inputs.input_ids[0] if t != tokenizer.pad_token_id], skip_special_tokens=False)
+    print(f"Task: {task}\nid: {ids[0]}\nPrompt: {prompt}\nPrediction: {predictions[0]}\nAnswers: {answers[0]}\nResults: {check_answer_in_pred(predictions[0], answers[0])}")
+    print("-----------------------------------")
     return [check_answer_in_pred(p, a) for p, a in zip(predictions, answers)]
 
 
