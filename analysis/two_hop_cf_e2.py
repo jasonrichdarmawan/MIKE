@@ -44,11 +44,22 @@ e2_info = (
 # Main loop
 # generate counterfactual e2 values
 
+
+import random
+from tqdm import tqdm
+
+# Set random seed for reproducibility
+RANDOM_SEED = 67
+random.seed(RANDOM_SEED)
+
 groups = df.groupby(["e1", "r1", "e2"], sort=False)
 
 rows = []
 
-for (E, R, b), g in groups:
+group_best_count = []
+
+# for (E, R, b), g in groups:
+for (E, R, b), g in tqdm(groups, desc="Generating counterfactuals"):
 
     # record r2 values in GROUP
     R2_vals_in_group = set(g["r2"])
@@ -63,7 +74,7 @@ for (E, R, b), g in groups:
         if e2_info.get(B, {}).get("e2_type") == orig_type
     ]
 
-    best_B = None
+    best_Bs = []
     best_score = -1
 
     for B in candidates:
@@ -79,11 +90,20 @@ for (E, R, b), g in groups:
         # TODO: find a fix? or see if this matters at all.
         score = len(R2_vals_in_group & R3_vals_for_B)
 
-        # for two entities with equal scores the later one gets priority
-        # because of "">=" so score is biased to later entities 
-        if score >= best_score:
+        # collect all Bs with the highest score
+        if score > best_score:
             best_score = score
-            best_B = B
+            best_Bs = [B]
+        elif score == best_score:
+            best_Bs.append(B)
+    
+    # all Bs with highest scores collected in best_Bs array
+    # randomly choose one from best_Bs with given seed
+    if not best_Bs:
+        best_B = None
+    else:
+        group_best_count.append(((E, R, b), len(best_Bs)))
+        best_B = random.choice(best_Bs)
 
     if best_B is None:
         continue
@@ -241,6 +261,15 @@ print(f"Number of rows wihtout e2_new: {original_count - e2_new_count}")
 
 print(f"Counterfactuals with e3_new generated: {e3_new_count}")
 print(f"Number of rows without e3_new: {original_count - e3_new_count}")
+
+# %%
+# info about groups in main loop
+
+print(f"Total number of Groups: {len(groups)}")
+groups_one_candidate_B = sum(1 for _, count in group_best_count if count == 1)
+no_candidate_B = len(groups) - len(group_best_count)
+print(f"Groups with no candidate B: {no_candidate_B}")
+print(f"Groups with only one candidate B: {groups_one_candidate_B}")
 
 # %%
 # find edit rows with no propagated rows
