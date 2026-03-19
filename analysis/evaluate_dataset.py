@@ -80,7 +80,9 @@ def eval_relation_shortcut(entries, model, tokenizer):
     - Generated prompt: "The spouse of the performer"
     - Expected answer: ":math:`\underset{e_3}{\text{Yoko Ono}}`"
 
-    Caveat: The Biran et al. [1] wrote "The spouse of the performer is", while the original source code generates "The spouse of the performer"
+    Caveat: 
+    - Biran et al. [1] wrote "The spouse of the performer is", while the original source code generates "The spouse of the performer".
+    - Biran et al. [1] remove with `[:-4]`. However, mot every `r1_template` ends with "... of {}". Consequently, removing `[:-4]` will cut off "the work that features {}" into "the work that featu".
 
     [1] Biran et al., "Hopping Too Late: Exploring the Limitations of Large Language Models on Multi-Hop Queries," in EMNLP 2024
     """
