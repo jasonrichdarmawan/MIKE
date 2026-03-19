@@ -1,3 +1,5 @@
+# %%
+
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -6,6 +8,9 @@ import pandas as pd
 from datasets import Dataset
 from utils import load_model, load_tokenizer, generate_and_test_answers, get_answers
 
+from tqdm.auto import tqdm
+
+# %%
 
 def eval_composition(entries, model, tokenizer):
     """
@@ -106,16 +111,37 @@ def main(args):
     tokenizer = load_tokenizer(args.model_name)
     tokenizer.padding_side = "left"
 
-    dataset = dataset.map(eval_first_hop, batched=True, batch_size=args.batch_size,
-                          fn_kwargs={"model": model, "tokenizer": tokenizer})
-    dataset = dataset.map(eval_second_hop, batched=True, batch_size=args.batch_size,
-                          fn_kwargs={"model": model, "tokenizer": tokenizer})
-    dataset = dataset.map(eval_composition, batched=True, batch_size=args.batch_size,
-                          fn_kwargs={"model": model, "tokenizer": tokenizer})
-    dataset = dataset.map(eval_entity_shortcut, batched=True, batch_size=args.batch_size,
-                          fn_kwargs={"model": model, "tokenizer": tokenizer})
-    dataset = dataset.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size,
-                          fn_kwargs={"model": model, "tokenizer": tokenizer})
+    # Evaluate in Python to avoid pickling the model/tokenizer for Dataset.map
+    n = len(dataset)
+    first_hop_res = [None] * n
+    second_hop_res = [None] * n
+    composition_res = [None] * n
+    entity_shortcut_res = [None] * n
+    relation_shortcut_res = [None] * n
+
+    for i in tqdm(range(0, n, args.batch_size), desc="Evaluating dataset"):
+        end = min(i + args.batch_size, n)
+        indices = list(range(i, end))
+        batch = dataset.select(indices)
+
+        r1 = eval_first_hop(batch, model, tokenizer)["first_hop_correct"]
+        r2 = eval_second_hop(batch, model, tokenizer)["second_hop_correct"]
+        comp = eval_composition(batch, model, tokenizer)["composition_correct"]
+        esc = eval_entity_shortcut(batch, model, tokenizer)["entity_shortcut_correct"]
+        rsc = eval_relation_shortcut(batch, model, tokenizer)["relation_shortcut_correct"]
+
+        for idx, v1, v2, v3, v4, v5 in zip(indices, r1, r2, comp, esc, rsc):
+            first_hop_res[idx] = v1
+            second_hop_res[idx] = v2
+            composition_res[idx] = v3
+            entity_shortcut_res[idx] = v4
+            relation_shortcut_res[idx] = v5
+
+    dataset = dataset.add_column("first_hop_correct", first_hop_res)
+    dataset = dataset.add_column("second_hop_correct", second_hop_res)
+    dataset = dataset.add_column("composition_correct", composition_res)
+    dataset = dataset.add_column("entity_shortcut_correct", entity_shortcut_res)
+    dataset = dataset.add_column("relation_shortcut_correct", relation_shortcut_res)
 
     dataset_path = Path(args.input_path)
     dataset_path.parent.mkdir(parents=True, exist_ok=True)

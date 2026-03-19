@@ -128,7 +128,7 @@ def generate_and_test_answers(model, tokenizer, task: str, prompts: list[str], i
                                    pad_token_id=tokenizer.eos_token_id, max_new_tokens=10) # shape (batch_size, seq_len)
     predictions = decode_generated(tokenizer, generated, prompts) # list of str, len=batch_size
     prompt = tokenizer.decode([t for t in inputs.input_ids[0] if t != tokenizer.pad_token_id], skip_special_tokens=False)
-    print(f"Task: {task}\nid: {ids[0]}\nPrompt: {prompt}\nPrediction: {predictions[0]}\nAnswers: {answers[0]}\nResults: {check_answer_in_pred(predictions[0], answers[0])}")
+    print(f"Task: {task}\nid: {ids[0]}\nPrompt: {prompt}\nPrediction: {predictions[0]}\nAnswers: {answers[0]}\nResult: {check_answer_in_pred(predictions[0], answers[0])}")
     print("-----------------------------------")
     return [check_answer_in_pred(p, a) for p, a in zip(predictions, answers)]
 
