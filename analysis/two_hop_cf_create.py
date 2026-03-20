@@ -40,10 +40,10 @@ description: Clear pseudo algorithm for generating two-hop counterfactuals with 
     display(df[mask][["e1_label", "r1_type", "e2_label", "r2_type", "e3_label"]])
     ```
   - The consequence of (e1, r1) and (e2, r2) having multiple candidates is that the (e1, r1, e2, r2) question have ambiguous answer, which makes the row invalid for evaluation.
-    - (e1, r1, e2, r2, e3) have incorrect facts in the original dataset, e.g.:
-    - "r1_template" is "the work that features WALL·E is" (e2 = "Disney Dreamlight Valley", which is correct)
-    - "r2_tempalte" is "the country of origin of Disney Dreamlight Valley is" (e3 = "Canada", which is correct)
-    - "source_prompt" is "the country of origin of the work that features WALL·E is" (e3 = "Canada" instead of "United States")
+    - (e1, r1, e2, r2, e3) have incorrect facts in the original dataset, e.g. `df.loc[63226]`:
+      - "r1_template" is "the work that features WALL·E is" (e2 = "Disney Dreamlight Valley", which is correct)
+      - "r2_tempalte" is "the country of origin of Disney Dreamlight Valley is" (e3 = "Canada", which is correct)
+      - "source_prompt" is "the country of origin of the work that features WALL·E is" (e3 = "Canada" instead of "United States")
   - In 2026, some facts are stale:
     - (Sergey Brin, spouse, Anne Wojcicki)
     - (Sergey Brin, spouse, Nicole Shanahan)
