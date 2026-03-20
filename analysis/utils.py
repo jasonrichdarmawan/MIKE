@@ -143,6 +143,10 @@ def _format_prompt(prompt: str, tokenizer, base_model = False):
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
 
 def _extract_answer_text_xml_tag(prediction: str, base_model: bool):
+    """
+    Caveat:
+    - If the model does not generate the <answer> tag, we return the whole prediction as the answer. This may happen if the model.generate(max_new_tokens) is too small. However, this is not ideal. For example, if the model generate "It cannot be answered...", but the list of correct answers is ["Canada", "CA"], then we will incorrectly mark the answer as correct.
+    """
     if base_model:
         m = re.search(r"(.*?)</answer>", prediction, re.IGNORECASE | re.DOTALL)
         text = m.group(1) if m else prediction
@@ -161,7 +165,7 @@ def generate_and_test_answers(model, tokenizer, task: str, prompts: list[str], i
     with torch.no_grad():
         generated = model.generate(
             **inputs, do_sample=False, temperature=1, top_p=1, num_beams=1,
-            pad_token_id=tokenizer.eos_token_id, max_new_tokens=100,
+            pad_token_id=tokenizer.eos_token_id, max_new_tokens=200,
             stop_strings=base_model_stop_strings if base_model else None,
             tokenizer=tokenizer
         ) # shape (batch_size, seq_len)
@@ -172,8 +176,8 @@ def generate_and_test_answers(model, tokenizer, task: str, prompts: list[str], i
         f"Task: {task}\n"
         f"id: {ids[0]}\n"
         f"{'-' * 100}\nPrompt:\n{prompt}\n{'-' * 100}\n"
-        f"{'-' * 100}\nPrediction: {predictions[0]}\n{'-' * 100}\n"
-        f"{'-' * 100}\nAnswers: {answers[0]}\n{'-' * 100}\n"
+        f"{'-' * 100}\nPrediction:\n{predictions[0]}\n{'-' * 100}\n"
+        f"{'-' * 100}\nAnswer:\n{answers[0]}\n{'-' * 100}\n"
         f"Result: {check_answer_fn(predictions[0], answers[0])}\n"
         f"{'=' * 100}\n"
     )
