@@ -6,52 +6,60 @@ from pathlib import Path
 import pandas as pd
 
 from datasets import Dataset
-from utils import load_model, load_tokenizer, generate_and_test_answers, get_answers
+from utils import load_model, load_tokenizer, _format_prompt, generate_and_test_answers, get_answers, _extract_answer_text_xml_tag, check_answer_in_pred
 
 from tqdm.auto import tqdm
 
 # %%
 
-def eval_composition(entries, model, tokenizer):
+def eval_composition(entries, model, tokenizer, base_model):
     """
     Example:
     - Source prompt: "the work that features the mother of Primrose Everdeen is"
     - Answers: ["The Hunger Games", "Hunger Games Saga", "The Hunger Games Saga"]
     """
+    prompts = [_format_prompt(entry, tokenizer, base_model)
+               for entry in entries["source_prompt"]]
+
+    check_fn = lambda pred, answers: check_answer_in_pred(_extract_answer_text_xml_tag(pred, base_model), answers)
     return {
-        "composition_correct": generate_and_test_answers(model, tokenizer, "composition", entries["source_prompt"], entries["id"], entries["e3_answers"])
+        "composition_correct": generate_and_test_answers(model, tokenizer, "composition", prompts, entries["id"], entries["e3_answers"], check_fn, base_model)
     }
 
 
-def eval_first_hop(entries, model, tokenizer):
+def eval_first_hop(entries, model, tokenizer, base_model):
     """
     Example:
     - Source prompt: "the work that features the mother of Primrose Everdeen is"
     - Generated prompt: "the mother of Primrose Everdeen is"
     - Answers: ["Mrs. Everdeen", "Clara Everdeen"]
     """
-    prompts = [f"{r1_template.format(e1_label)} is" for r1_template, e1_label in
-               zip(entries["r1_template"], entries["e1_label"])]
+    prompts = [_format_prompt(f"{r1_template.format(e1_label)} is", tokenizer, base_model)
+               for r1_template, e1_label in zip(entries["r1_template"], entries["e1_label"])]
+
+    check_fn = lambda pred, answers: check_answer_in_pred(_extract_answer_text_xml_tag(pred, base_model), answers)
     return {
-        "first_hop_correct": generate_and_test_answers(model, tokenizer, "first hop", prompts, entries["id"], entries["e2_answers"])
+        "first_hop_correct": generate_and_test_answers(model, tokenizer, "first hop", prompts, entries["id"], entries["e2_answers"], check_fn, base_model)
     }
 
 
-def eval_second_hop(entries, model, tokenizer):
+def eval_second_hop(entries, model, tokenizer, base_model):
     """
     Example:
     - Source prompt: "the work that features the mother of Primrose Everdeen is"
     - Generated prompt: "the work that features Mrs. Everdeen is"
     - Answers: ["The Hunger Games", "Hunger Games Saga", "The Hunger Games Saga"]
     """
-    prompts = [f"{r2_template.format(e2_label)} is" for r2_template, e2_label in
-               zip(entries["r2_template"], entries["e2_label"])]
+    prompts = [_format_prompt(f"{r2_template.format(e2_label)} is", tokenizer, base_model)
+               for r2_template, e2_label in zip(entries["r2_template"], entries["e2_label"])]
+
+    check_fn = lambda pred, answers: check_answer_in_pred(_extract_answer_text_xml_tag(pred, base_model), answers)
     return {
-        "second_hop_correct": generate_and_test_answers(model, tokenizer, "second hop", prompts, entries["id"], entries["e3_answers"])
+        "second_hop_correct": generate_and_test_answers(model, tokenizer, "second hop", prompts, entries["id"], entries["e3_answers"], check_fn, base_model)
     }
 
 
-def eval_entity_shortcut(entries, model, tokenizer):
+def eval_entity_shortcut(entries, model, tokenizer, base_model):
     r"""
     The goal is to filter out cases where no latent reasoing is performed. Specifically, where the model predicts due to a high correlation between :math:`e_1` and :math:`e_3`.
     
@@ -62,14 +70,16 @@ def eval_entity_shortcut(entries, model, tokenizer):
     - Generated prompt: "The spouse of Imagine is"
     - Expected answer: ":math:`\underset{e_3}{\text{Yoko Ono}}`"
     """
-    prompts = [f"{r2_template.format(e1_label)} is" for r2_template, e1_label in
-               zip(entries["r2_template"], entries["e1_label"])]
+    prompts = [_format_prompt(f"{r2_template.format(e1_label)} is", tokenizer, base_model)
+               for r2_template, e1_label in zip(entries["r2_template"], entries["e1_label"])]
+
+    check_fn = lambda pred, answers: check_answer_in_pred(_extract_answer_text_xml_tag(pred, base_model), answers)
     return {
-        "entity_shortcut_correct": generate_and_test_answers(model, tokenizer, "entity shortcut", prompts, entries["id"], entries["e3_answers"])
+        "entity_shortcut_correct": generate_and_test_answers(model, tokenizer, "entity shortcut", prompts, entries["id"], entries["e3_answers"], check_fn, base_model)
     }
 
 
-def eval_relation_shortcut(entries, model, tokenizer):
+def eval_relation_shortcut(entries, model, tokenizer, base_model):
     r"""
     The goal is to filter out cases where no latent reasoning is performed. Specifically, the model predicts generally popular entities.
 
@@ -86,10 +96,12 @@ def eval_relation_shortcut(entries, model, tokenizer):
 
     [1] Biran et al., "Hopping Too Late: Exploring the Limitations of Large Language Models on Multi-Hop Queries," in EMNLP 2024
     """
-    prompts = [f"{r2_template.format(r1_template.format(''))}"[:-4] for r2_template, r1_template in
-               zip(entries["r2_template"], entries["r1_template"])]
+    prompts = [_format_prompt(f"{r2_template.format(r1_template.format(''))}"[:-4], tokenizer, base_model)
+               for r2_template, r1_template in zip(entries["r2_template"], entries["r1_template"])]
+
+    check_fn = lambda pred, answers: check_answer_in_pred(_extract_answer_text_xml_tag(pred, base_model), answers)
     return {
-        "relation_shortcut_correct": generate_and_test_answers(model, tokenizer, "relation shortcut", prompts, entries["id"], entries["e3_answers"])
+        "relation_shortcut_correct": generate_and_test_answers(model, tokenizer, "relation shortcut", prompts, entries["id"], entries["e3_answers"], check_fn, base_model)
     }
 
 
@@ -126,11 +138,11 @@ def main(args):
         indices = list(range(i, end))
         batch = dataset.select(indices)
 
-        r1 = eval_first_hop(batch, model, tokenizer)["first_hop_correct"]
-        r2 = eval_second_hop(batch, model, tokenizer)["second_hop_correct"]
-        comp = eval_composition(batch, model, tokenizer)["composition_correct"]
-        esc = eval_entity_shortcut(batch, model, tokenizer)["entity_shortcut_correct"]
-        rsc = eval_relation_shortcut(batch, model, tokenizer)["relation_shortcut_correct"]
+        r1 = eval_first_hop(batch, model, tokenizer, args.base_model)["first_hop_correct"]
+        r2 = eval_second_hop(batch, model, tokenizer, args.base_model)["second_hop_correct"]
+        comp = eval_composition(batch, model, tokenizer, args.base_model)["composition_correct"]
+        esc = eval_entity_shortcut(batch, model, tokenizer, args.base_model)["entity_shortcut_correct"]
+        rsc = eval_relation_shortcut(batch, model, tokenizer, args.base_model)["relation_shortcut_correct"]
 
         for idx, v1, v2, v3, v4, v5 in zip(indices, r1, r2, comp, esc, rsc):
             first_hop_res[idx] = v1
@@ -177,8 +189,6 @@ def parse_args():
     args = parser.parse_args()
     
     args.base_model = True if args.model_name in BASE_MODELS else False
-    if not args.base_model:
-        raise NotImplementedError("Chat models are not supported yet.")
 
     if not args.input_path:
         args.input_path = "datasets/two_hop.csv"
