@@ -1787255,7 +1787255,17 @@
       {
         "question": "谁是 Windows NT 3.1 的开发者？",
         "cloze": "Windows NT 3.1 是由",
-        "answer": "微软"
+        "answer": "微软",
+        "answer_alias": [
+          "微软",
+          "MS",
+          "微軟公司",
+          "微软公司",
+          "微软公司（Microsoft Corp.）",
+          "微软公司（Microsoft Corporation）",
+          "MSFT",
+          "MICROSOFT TECHNOLOGY LICENSING, LLC（华盛顿州雷德蒙德）"
+        ]
       }
     ],
     "cloze_question_zh": "Windows  ?  ",

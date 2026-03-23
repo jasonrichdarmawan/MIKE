@@ -14,9 +14,22 @@ def mean_pooling(token_embeddings, mask):
     sentence_embeddings = token_embeddings.sum(dim=1) / mask.sum(dim=1)[..., None]
     return sentence_embeddings
 
+def _extract_answer_text(prediction):
+    """Extract answer from <answer> tags, or return raw prediction if no tags found."""
+    import re
+    m = re.search(r"<answer>(.*?)</answer>", prediction, re.IGNORECASE | re.DOTALL)
+    text = m.group(1) if m else prediction
+    return text.strip()
+
 def check_answer_in_pred(pred, answers):
-    pred = pred.lower()
-    return any([a.lower() in pred for a in answers])
+    pred = _extract_answer_text(pred).lower()
+    for a in answers:
+        a = a.strip().lower()
+        if not a:
+            continue
+        if a in pred or pred.startswith(a) or pred == a:
+            return True
+    return False
 
 
 def _supports_chat_template(tokenizer):
@@ -26,8 +39,15 @@ def _supports_chat_template(tokenizer):
 def _format_chat_prompt(prompt, tokenizer):
     if not _supports_chat_template(tokenizer):
         return prompt
-    messages = [{"role": "user", "content": prompt}]
-    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    system_content = (
+        "1. Only respond with the answer to the question. Do not include any explanations or additional text."
+        "\n2. Wrap your final answer in XML tags like this: <answer>ANSWER_HERE</answer>."
+    )
+    messages = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": prompt},
+    ]
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
 
 
 def _format_chat_train_pair(text, target, tokenizer):
@@ -277,50 +297,70 @@ def preprocess_function(examples, tokenizer):
     model_inputs['labels'] = labels
     return model_inputs
 
-def check_answer(model, question, tokenizer, answer, device, max_new_tokens=50):
-    """
-    Check if the model can answer the questions correctly
-    
-    Example:
-    - metrics['hop_wise']
-      - question:
-        - 'Answer: Fernando Santos is a citizen of'
-        - 'Question: What is the country of citizenship of Fernando Santos?\nAnswer: The answer is'
-      - answer: ["Britain", "UK", "G. B.", "GBR", ...]
-    - metrics['accuracy']
-      - question: 
-        - "Answer: The head of state of the country where Fernando Santos holds citizenship is"
-        - "Question: Who is the head of state of the country where Fernando Santos hold a citizenship?\nAnswer: The answer is"
-      - answer: ["Emerson Dambudzo Mnangagwa", ...]
-    """
+def check_answer(model, question, tokenizer, answer, device, max_new_tokens=100):
+    """Check if the model can answer the question correctly. Uses structured prompt."""
     prompt = _format_chat_prompt(question, tokenizer)
+    tokenizer.padding_side = "left"
+    tokenizer.pad_token = tokenizer.eos_token
     inputs = tokenizer(
         prompt,
         return_tensors="pt",
         add_special_tokens=not _supports_chat_template(tokenizer),
     ).to(device)
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=max_new_tokens,
-        do_sample=False, 
-        temperature=None,
-        top_p=None,
-        pad_token_id=tokenizer.eos_token_id
-    )
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            num_beams=1,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
+        )
     generated_text = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
     return check_answer_in_pred(generated_text, answer), generated_text
 
-def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=False):
+def check_answer_batch(model, questions, tokenizer, answers_list, device, max_new_tokens=100):
     """
-    Caveat:
-    - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
-    
-    Example:
-    - edit_item['new_answer_alias']: ["Emerson Dambudzo Mnangagwa", ...]
-    - edit_item['new_answer']: "Emerson Mnangagwa"
-    - edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
-    - edit_item['questions']: ["Who is the head of state of the country where Fernando Santos hold a citizenship?"]
+    Batched version of check_answer. Process multiple questions at once for speed.
+    questions: list of prompt strings
+    answers_list: list of lists of acceptable answers
+    Returns: list of (bool, str) tuples
     """
+    prompts = [_format_chat_prompt(q, tokenizer) for q in questions]
+    tokenizer.padding_side = "left"
+    tokenizer.pad_token = tokenizer.eos_token
+    inputs = tokenizer(
+        prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        add_special_tokens=not _supports_chat_template(tokenizer),
+    ).to(device)
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            num_beams=1,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
+        )
+    results = []
+    for idx in range(len(questions)):
+        generated_text = tokenizer.decode(outputs[idx][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+        matched = check_answer_in_pred(generated_text, answers_list[idx])
+        results.append((matched, generated_text))
+    return results
+
+def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=False, lang=None):
+    if lang is None:
+        lang = getattr(hparams, 'lang', None)
+    # Multi-lingual field selection
+    suffix = f"_{lang}" if lang and lang != "en" else ""
+    single_hops_key = f"new_single_hops{suffix}"
+    new_answer_key = f"new_answer{suffix}"
+    new_answer_alias_key = f"new_answer_alias{suffix}"
+    cloze_question_key = f"cloze_question{suffix}"
+    questions_key = f"questions{suffix}"
+
     metrics = {
         'hop_wise': [],
         'accuracy': [],
@@ -328,54 +368,64 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
         'accuracy_predictions': []
     }
     device = f"cuda:{hparams.device}"
-    for i in edit_item['new_single_hops']:
-        """
-        i['answer_alias']: ["Britain", "UK", "G. B.", "GBR", ...]
-        i['answer']: "United Kingdom"
-        i['cloze']: "Fernando Santos is a citizen of"
-        i['question']: "What is the country of citizenship of Fernando Santos?"
-        """
-        temp_metrics = []
-        temp_predictions = []
-        ans = i['answer_alias']
-        ans.append(i['answer'])
-        question = 'Answer: ' + i['cloze']
-        result, generated_text = check_answer(model, question, tokenizer, ans, device, max_new_tokens=10)
-        temp_metrics.append(result)
-        temp_predictions.append({
-            "question": question,
-            "generated_text": generated_text,
-            "answer": i['answer']
-        })
-        question = 'Question: ' + i['question'] + '\nAnswer: The answer is'
-        result, generated_text = check_answer(model, question, tokenizer, ans, device, max_new_tokens=10)
-        temp_metrics.append(result)
-        temp_predictions.append({
-            "question": question,
-            "generated_text": generated_text,
-            "answer": i['answer']
-        })
-        metrics['hop_wise'].append(temp_metrics)
-        metrics['hop_wise_predictions'].append(temp_predictions)
-    answer = edit_item['new_answer_alias']
-    answer.append(edit_item['new_answer'])
-    question = 'Answer: ' + edit_item['cloze_question']
-    result, generated_text = check_answer(model, question, tokenizer, answer, device, max_new_tokens=10)
-    metrics['accuracy'].append(result)
-    metrics['accuracy_predictions'].append({
-        "question": question,
-        "generated_text": generated_text,
-        "answer": edit_item['new_answer']
-    })
-    for i in edit_item['questions']:
-        question = 'Question: ' + i + '\nAnswer: The answer is'
-        result, generated_text = check_answer(model, question, tokenizer, answer, device, max_new_tokens=10)
-        metrics['accuracy'].append(result)
-        metrics['accuracy_predictions'].append({
-            "question": question,
-            "generated_text": generated_text,
-            "answer": edit_item['new_answer']
-        })
+
+    # ---- Batched hop_wise evaluation ----
+    hop_questions = []
+    hop_answers = []
+    hop_indices = []  # track which hop each question belongs to
+    for hop_idx, i in enumerate(edit_item.get(single_hops_key, [])):
+        ans = list(i.get('answer_alias', []))
+        ans.append(i.get('answer', ''))
+        # cloze question
+        hop_questions.append(i.get('cloze', ''))
+        hop_answers.append(ans)
+        hop_indices.append((hop_idx, 'cloze'))
+        # full question
+        hop_questions.append(i.get('question', ''))
+        hop_answers.append(ans)
+        hop_indices.append((hop_idx, 'question'))
+
+    if hop_questions:
+        hop_results = check_answer_batch(model, hop_questions, tokenizer, hop_answers, device, max_new_tokens=100)
+        # Organize results back into hop_wise structure
+        hop_data = {}
+        for (hop_idx, q_type), (matched, gen_text), question, answers in zip(hop_indices, hop_results, hop_questions, hop_answers):
+            if hop_idx not in hop_data:
+                hop_data[hop_idx] = {'metrics': [], 'predictions': []}
+            hop_data[hop_idx]['metrics'].append(matched)
+            hop_data[hop_idx]['predictions'].append({
+                "question": question,
+                "generated_text": gen_text,
+                "answer": answers[-1]  # last one is the main answer
+            })
+        for hop_idx in sorted(hop_data.keys()):
+            metrics['hop_wise'].append(hop_data[hop_idx]['metrics'])
+            metrics['hop_wise_predictions'].append(hop_data[hop_idx]['predictions'])
+
+    # ---- Batched accuracy evaluation ----
+    answer = list(edit_item.get(new_answer_alias_key, []))
+    answer.append(edit_item.get(new_answer_key, ''))
+
+    acc_questions = []
+    acc_answers = []
+    # cloze question
+    acc_questions.append(edit_item.get(cloze_question_key, ''))
+    acc_answers.append(answer)
+    # full questions
+    for i in edit_item.get(questions_key, []):
+        acc_questions.append(i)
+        acc_answers.append(answer)
+
+    if acc_questions:
+        acc_results = check_answer_batch(model, acc_questions, tokenizer, acc_answers, device, max_new_tokens=100)
+        for (matched, gen_text), question in zip(acc_results, acc_questions):
+            metrics['accuracy'].append(matched)
+            metrics['accuracy_predictions'].append({
+                "question": question,
+                "generated_text": gen_text,
+                "answer": edit_item.get(new_answer_key, '')
+            })
+
     return metrics
 
 def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, contriever_tokenizer, embs, test_generation=False):
@@ -490,7 +540,8 @@ def edit(model, tokenizer, edit_item, hparams,alg_name,apply_algo,test_generatio
     start = time()
     requests = edit_item['requested_rewrite']
     for i in requests:
-        i['target_new'] = i['target_new']['str']
+        if isinstance(i['target_new'], dict):
+            i['target_new'] = i['target_new']['str']
     hparams.batch_size = len(requests)
     edited_model, weights_copy = apply_algo(
         model,
@@ -529,7 +580,8 @@ def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,test_generation=F
     requests = edit_item['requested_rewrite']
     print(requests)
     for i in requests:
-        i['target_new'] = i['target_new']['str']
+        if isinstance(i['target_new'], dict):
+            i['target_new'] = i['target_new']['str']
     origin_weights_copy = None
     for index,request in enumerate(requests):
         edited_model, weights_copy = apply_algo(
@@ -558,7 +610,8 @@ def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo,tes
     requests = edit_item['requested_rewrite']
     ifmet_requests = []
     for i in requests:
-        i['target_new'] = i['target_new']['str']
+        if isinstance(i['target_new'], dict):
+            i['target_new'] = i['target_new']['str']
         if len(i['ifmet_question'])!=0:
             j={}
             j['prompt'] = i['ifmet_question'][0]
@@ -631,3 +684,167 @@ def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_a
     with torch.no_grad():
         weights_copy()
     return metrics, loc_index
+
+
+# ============================================================
+# Multilingual versions: edit in English, evaluate in 5 languages
+# These functions preserve the original functions above unchanged.
+# ============================================================
+
+MULTILINGUAL_LANGS = ['en', 'de', 'fr', 'ja', 'zh']
+
+def _eval_all_langs(model, tokenizer, edit_item, hparams, exec_time, test_generation=False):
+    """Evaluate edited model in all 5 languages. Returns dict of {lang: metrics}."""
+    lang_results = {}
+    for lang in MULTILINGUAL_LANGS:
+        hparams.lang = lang
+        lang_results[lang] = {
+            'case_id': edit_item['case_id'],
+            'requested_rewrite': edit_item['requested_rewrite'],
+            'time': exec_time,
+            'post': compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=test_generation),
+        }
+    return lang_results
+
+def edit_multilingual(model, tokenizer, edit_item, hparams, alg_name, apply_algo, test_generation=False):
+    """Edit in English, evaluate in 5 languages, then restore model."""
+    start = time()
+    import copy
+    requests = copy.deepcopy(edit_item['requested_rewrite'])
+    for i in requests:
+        if isinstance(i['target_new'], dict):
+            i['target_new'] = i['target_new']['str']
+    hparams.batch_size = len(requests)
+    edited_model, weights_copy = apply_algo(
+        model,
+        tokenizer,
+        requests,
+        hparams,
+        copy=False,
+        return_orig_weights=True
+    )
+    exec_time = time() - start
+
+    # Evaluate in all 5 languages on edited model
+    lang_results = _eval_all_langs(edited_model, tokenizer, edit_item, hparams, exec_time, test_generation)
+
+    # Restore model
+    if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
+        with torch.no_grad():
+            weights_copy()
+    elif alg_name == 'LoRA' or alg_name == 'QLoRA' or alg_name == 'DPO':
+        edited_model = edited_model.unload()
+        del edited_model.peft_config
+    elif alg_name == 'MELO':
+        model = edited_model
+    else:
+        with torch.no_grad():
+            for k, v in weights_copy.items():
+                nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
+    return edited_model, lang_results
+
+def edit_rome_multilingual(model, tokenizer, edit_item, hparams, apply_algo, test_generation=False):
+    """ROME: edit in English, evaluate in 5 languages, then restore model."""
+    start = time()
+    import copy
+    requests = copy.deepcopy(edit_item['requested_rewrite'])
+    for i in requests:
+        if isinstance(i['target_new'], dict):
+            i['target_new'] = i['target_new']['str']
+    origin_weights_copy = None
+    for index, request in enumerate(requests):
+        edited_model, weights_copy = apply_algo(
+            model,
+            tokenizer,
+            [request],
+            hparams,
+            copy=False,
+            return_orig_weights=True
+        )
+        if index == 0:
+            origin_weights_copy = weights_copy
+    exec_time = time() - start
+
+    # Evaluate in all 5 languages on edited model
+    lang_results = _eval_all_langs(edited_model, tokenizer, edit_item, hparams, exec_time, test_generation)
+
+    # Restore model
+    with torch.no_grad():
+        for k, v in origin_weights_copy.items():
+            nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
+    return edited_model, lang_results
+
+def cake_multilingual(original_model, tokenizer, item, hparams, test_generation=False):
+    """CaKE: edit in English, evaluate in 5 languages, then restore model."""
+    target_modules = ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
+    model = create_lora_model(original_model, target_modules=target_modules)
+    model.enable_input_require_grads()
+    train_examples = []
+    item_case_examples = []
+    learning_examples = []
+    for rewrite in item['requested_rewrite']:
+        prompt = rewrite['prompt'].format(rewrite['subject'])
+        target = rewrite['target_new']['str']
+        item_case_examples.append({"text": prompt, "target": target})
+        if 'rephrase_prompt' in rewrite:
+            for rewrite_item in rewrite['rephrase_prompt']:
+                item_case_examples.append({"text": rewrite_item['question'], "target": rewrite_item['answer']})
+        if 'learning_prompt' in rewrite:
+            for learning_item in rewrite['learning_prompt']:
+                learning_examples.append({"text": learning_item['question'], "target": learning_item['answer']})
+    train_examples.append({'item_case_examples': item_case_examples, 'learning_examples': learning_examples})
+    train_dataset = Dataset.from_list(train_examples)
+    train_dataset = train_dataset.map(
+        preprocess_function, batched=True,
+        remove_columns=train_dataset.column_names,
+        fn_kwargs={"tokenizer": tokenizer}
+    )
+    training_args = TrainingArguments(
+        output_dir=f'./output/', overwrite_output_dir=True,
+        num_train_epochs=40, per_device_train_batch_size=4,
+        learning_rate=1e-4, save_strategy="no",
+        bf16=True, logging_steps=10, report_to="none",
+    )
+    trainer = Trainer(model=model, args=training_args, train_dataset=train_dataset)
+    start = time()
+    trainer.train()
+    exec_time = time() - start
+
+    # Evaluate in all 5 languages on edited model
+    lang_results = _eval_all_langs(model, tokenizer, item, hparams, exec_time, test_generation)
+
+    # Restore model (unload LoRA)
+    model = model.unload()
+    del model.peft_config
+    return model, lang_results
+
+def edit_wise_multilingual(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo, test_generation=False):
+    """WISE: edit in English, evaluate in 5 languages, then restore model."""
+    start = time()
+    import copy
+    requests = copy.deepcopy(edit_item['requested_rewrite'])
+    for i, item in enumerate(requests):
+        item['prompt'] = item['prompt'].format(item['subject'])
+        item['target_new'] = item['target_new']['str']
+        item.update({
+            'loc_prompt': loc_data[loc_index + i]['loc'] + ' ' + loc_data[loc_index + i]['loc_ans']
+        })
+    loc_index = loc_index + len(requests)
+    hparams.batch_size = len(requests)
+    edited_model, weights_copy = apply_algo(
+        model,
+        tokenizer,
+        requests,
+        hparams,
+        copy=False,
+        return_orig_weights=True
+    )
+    exec_time = time() - start
+
+    # Evaluate in all 5 languages on edited model
+    lang_results = _eval_all_langs(edited_model, tokenizer, edit_item, hparams, exec_time, test_generation)
+
+    # Restore model
+    with torch.no_grad():
+        weights_copy()
+    return lang_results, loc_index
