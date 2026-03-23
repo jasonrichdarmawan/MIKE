@@ -137,9 +137,9 @@ def _patch_gpt2(model):
         src = encoder_hidden_states if encoder_hidden_states is not None else hidden_states
         raw = self.c_attn(src)
         splits = raw.split(self.split_size, dim=2)
-        value_raw = splits[-1]
+        value_raw = splits[-1] # [batch, seq_len, hidden]
         bsz, seq_len, _ = value_raw.shape
-        value_states = value_raw.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        value_states = value_raw.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2) # [batch, heads, seq_len, head_dim]
 
         # Call original forward
         outputs = _orig_attn_forward(
@@ -155,11 +155,11 @@ def _patch_gpt2(model):
         )
         # GPT-2 returns (attn_output, present, attn_weights) when output_attentions=True.
         # present is None when use_cache=False.  Attention weights are always at index 2.
-        attn_output = outputs[0]
-        attn_weights = outputs[2]
+        attn_output = outputs[0] # [batch, seq_len, hidden]
+        attn_weights = outputs[2] # [batch, heads, seq_q, seq_k]
 
-        last_weights = attn_weights[:, :, -1, :].unsqueeze(-1)
-        self._last_attn_subvalues = last_weights * value_states
+        last_weights = attn_weights[:, :, -1, :].unsqueeze(-1) # [batch, heads, seq_k, 1]
+        self._last_attn_subvalues = last_weights * value_states # [batch, heads, seq_k, head_dim]
         self._last_attn_weights = attn_weights
 
         if not output_attentions:
@@ -189,7 +189,7 @@ def _patch_gpt2(model):
                        head_mask=None, encoder_hidden_states=None,
                        encoder_attention_mask=None, use_cache=False, 
                        output_attentions=False, **kwargs):
-        layer_input = hidden_states
+        layer_input = hidden_states # [batch, seq_len, hidden]
 
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
@@ -204,14 +204,14 @@ def _patch_gpt2(model):
             use_cache=use_cache,
             output_attentions=True,
             **kwargs,
-        )
-        attn_output = attn_outputs[0]
+        ) # returns (attn_output, present, attn_weights)
+        attn_output = attn_outputs[0] # [batch, seq_len, hidden]
         
         attn_weights = self.attn._last_attn_weights
-        attn_subvalues = self.attn._last_attn_subvalues
+        attn_subvalues = self.attn._last_attn_subvalues # [batch, heads, seq_k, head_dim]
 
         hidden_states = attn_output + residual
-        residual_output = hidden_states
+        residual_output = hidden_states # [batch, seq_len, hidden]
 
         if encoder_hidden_states is not None:
             residual = hidden_states
@@ -228,20 +228,20 @@ def _patch_gpt2(model):
 
         residual = hidden_states
         hidden_states = self.ln_2(hidden_states)
-        ffn_output = self.mlp(hidden_states)
-        coeff_scores = self.mlp._last_coefficient_scores
+        ffn_output = self.mlp(hidden_states) # [batch, seq_len, hidden]
+        coeff_scores = self.mlp._last_coefficient_scores # [batch, seq_len, ffn_dim]
         hidden_states = residual + ffn_output
-        layer_output = hidden_states
+        layer_output = hidden_states # [batch, seq_len, hidden]
 
         _states[self._layer_i] = dict(
-            layer_input=layer_input[0],
-            attn_output=attn_output[0],
-            residual_output=residual_output[0],
-            ffn_output=ffn_output[0],
-            layer_output=layer_output[0],
-            attn_subvalues=attn_subvalues[0],
-            coeff_scores=coeff_scores[0],
-            attn_weights=attn_weights[0],
+            layer_input=layer_input[0], # shape [seq, hidden]
+            attn_output=attn_output[0], # shape [seq, hidden]
+            residual_output=residual_output[0], # shape [seq, hidden]
+            ffn_output=ffn_output[0], # shape [seq, hidden]
+            layer_output=layer_output[0], # shape [seq, hidden]
+            attn_subvalues=attn_subvalues[0], # shape [heads, seq_k, head_dim]
+            coeff_scores=coeff_scores[0], # shape [seq, hidden]
+            attn_weights=attn_weights[0], # shape [seq, hidden]
         )
 
         # Return (hidden_states, presents) etc.
@@ -284,14 +284,14 @@ def _patch_llama(model):
         # attn_weights: [batch, num_heads, seq_q, seq_k]
         # Recompute value states (no RoPE on V in Llama).
         bsz, q_len, _ = hidden_states.size()
-        v = self.v_proj(hidden_states)                                        
-        v = v.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(hidden_states) # [batch, seq_len, kv_heads*head_dim]                
+        v = v.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2) # [batch, kv_heads, seq_len, head_dim]
         # Expand kv_heads to num_heads for GQA
         num_groups = self.num_heads // self.num_key_value_heads
         if num_groups > 1:
-            v = v.repeat_interleave(num_groups, dim=1)                        
-        last_weights = attn_weights[:, :, -1, :].unsqueeze(-1)               
-        self._last_attn_subvalues = last_weights * v                          
+            v = v.repeat_interleave(num_groups, dim=1) # [batch, heads, seq_len, head_dim]
+        last_weights = attn_weights[:, :, -1, :].unsqueeze(-1) # [batch, heads, seq_k, 1]
+        self._last_attn_subvalues = last_weights * v # [batch, heads, seq_k, head_dim]
         self._last_attn_weights = attn_weights
 
         if not output_attentions:
@@ -306,8 +306,8 @@ def _patch_llama(model):
     # Patch 2: LlamaMLP.forward
     def _patched_llama_mlp(self, x):
         gate = self.gate_proj(x)
-        up   = self.up_proj(x)
-        self._last_coefficient_scores = self.act_fn(gate) * up  
+        up   = self.up_proj(x) # shape [batch, seq_len, ffn_dim]
+        self._last_coefficient_scores = self.act_fn(gate) * up # shape [batch, seq_len, ffn_dim]
         return self.down_proj(self._last_coefficient_scores)
 
     LlamaMLP.forward = _patched_llama_mlp
@@ -319,7 +319,7 @@ def _patch_llama(model):
     def _patched_llama_layer(self, hidden_states, attention_mask=None, position_ids=None,
                               past_key_value=None, output_attentions=False, use_cache=False,
                               **kwargs):
-        layer_input = hidden_states
+        layer_input = hidden_states # [batch, seq_len, hidden]
 
         # Self-attention
         residual = hidden_states

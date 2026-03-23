@@ -219,55 +219,56 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
       python analysis/classify_results.py $RESULT_DIR
       ```
     </details>
-  - Run `analysis/neuron_attribution.py` to compute neuron-level LPI and chained backward attribution for FFN and attention value neurons. Requires GPU for practical runtimes (~2 min for 900 examples). Internally uses `analysis/patch_model.py` to monkey-patch GPT-2/Llama forward passes and capture internal states without modifying model files.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets/${MODEL}
+  - Z. Yu et al. [3, 4]:
+    - Run `analysis/neuron_attribution.py` to compute neuron-level LPI and chained backward attribution for FFN and attention value neurons. Requires GPU for practical runtimes (~2 min for 900 examples). Internally uses `analysis/patch_model.py` to monkey-patch GPT-2/Llama forward passes and capture internal states without modifying model files.
+      <details>
+        <summary>GPT2 example</summary>
+        ```bash
+        MODEL=gpt2
+        DATA_DIR=datasets/${MODEL}
 
-      # Run all three prompt types (composition, first-hop, second-hop) and all subsets
-      python analysis/neuron_attribution.py --model-name $MODEL --data-dir $DATA_DIR \
-          --prompts composition first-hop second-hop \
-          --subsets correct incorrect inconsistent
+        # Run all three prompt types (composition, first-hop, second-hop) and all subsets
+        python analysis/neuron_attribution.py --model-name $MODEL --data-dir $DATA_DIR \
+            --prompts two-hop first-hop second-hop \
+            --subsets correct incorrect inconsistent
 
-      # Or run a single prompt type with a limit for quick testing
-      python analysis/neuron_attribution.py --model-name $MODEL --data-dir $DATA_DIR \
-          --prompts composition --subsets correct --max-examples 20
-      ```
+        # Or run prompts type with a limit for quick testing
+        python analysis/neuron_attribution.py --model-name $MODEL --data-dir $DATA_DIR \
+            --prompts two-hop first-hop --subsets correct --max-examples 20
+        ```
 
-      Outputs per `(prompt_type, subset)` under `datasets/{model}/composition_{subset}/{neuron_attribution_*}/`:
-      - `sublayer_lpi.csv` — per-(example, layer, sublayer) LPI
-      - `head_lpi.csv` — per-(example, layer, head) LPI
-      - `ffn_neurons.csv` — top-K FFN value neurons (LPI + top tokens)
-      - `attn_neurons.csv` — top-K attention value neurons (LPI + top tokens)
-      - `ffn_query_layers.csv` / `attn_query_layers.csv` — residual stream layer decomposition
-      - `chain_order{N}_ffn.csv` / `chain_order{N}_attn.csv` — chained backward attribution at order N (runs until exhausted)
-    </details>
-  - Run `analysis/analyze_neuron_attribution.py` to generate figures from the neuron attribution results.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets
-      OUTPUT_PATH=plots
+        Outputs per `(prompt_type, subset)` under `datasets/{model}/composition_{subset}/{neuron_attribution_*}/`:
+        - `sublayer_lpi.csv` — per-(example, layer, sublayer) LPI
+        - `head_lpi.csv` — per-(example, layer, head) LPI
+        - `ffn_neurons.csv` — top-K FFN value neurons (LPI + top tokens)
+        - `attn_neurons.csv` — top-K attention value neurons (LPI + top tokens)
+        - `ffn_query_layers.csv` / `attn_query_layers.csv` — residual stream layer decomposition
+        - `chain_order{N}_ffn.csv` / `chain_order{N}_attn.csv` — chained backward attribution at order N (runs until exhausted)
+      </details>
+    - Run `analysis/analyze_neuron_attribution.py` to generate figures from the neuron attribution results.
+      <details>
+        <summary>GPT2 example</summary>
+        ```bash
+        MODEL=gpt2
+        DATA_DIR=datasets
+        OUTPUT_PATH=plots
 
-      # Composition prompt (default)
-      python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL
+        # Composition prompt (default)
+        python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL
 
-      # First-hop and second-hop prompts
-      python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL --prompt first-hop
-      python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL --prompt second-hop
-      ```
+        # First-hop and second-hop prompts
+        python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL --prompt first-hop
+        python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL --prompt second-hop
+        ```
 
-      Produces per model under `plots/{model}/`:
-      - `sublayer_lpi_profile{_*}.pdf` / `sublayer_lpi_bars{_*}.pdf` — mean LPI by layer and sublayer
-      - `head_lpi_heatmap{_*}.pdf` — mean head LPI heatmap (layer × head)
-      - `neuron_layer_dist{_*}.pdf` — top-K neuron counts per layer
-      - `query_layer_bars{_*}.pdf` — residual stream decomposition by layer
-      - `chain_layer_profile{_*}.pdf` — backward attribution chain by layer and order (reveals first-hop at orders 2–3)
-      - `neuron_overlap_{subset}.pdf` — pairwise Jaccard similarity of top-K neurons across prompt types
-    </details>
+        Produces per model under `plots/{model}/`:
+        - `sublayer_lpi_profile{_*}.pdf` / `sublayer_lpi_bars{_*}.pdf` — mean LPI by layer and sublayer
+        - `head_lpi_heatmap{_*}.pdf` — mean head LPI heatmap (layer × head)
+        - `neuron_layer_dist{_*}.pdf` — top-K neuron counts per layer
+        - `query_layer_bars{_*}.pdf` — residual stream decomposition by layer
+        - `chain_layer_profile{_*}.pdf` — backward attribution chain by layer and order (reveals first-hop at orders 2–3)
+        - `neuron_overlap_{subset}.pdf` — pairwise Jaccard similarity of top-K neurons across prompt types
+      </details>
   - Run `analysis/analyze_resutls.py` to generate figures.
     <details>
       <summary>GPT2 example</summary>
@@ -327,6 +328,8 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 
 [1] E. Biran et al., "Hopping Too Late: Exploring Limitations of Large Language models on Multi-Hop Queries," in EMNLP 2024
 [2] Y. Yao et al., "CaKe: Circuit-aware Editing Enables Generalizable Knowledge Learners," in EMNLP 2025
+[3] Z. Yu et al., "Back Attention: Understanding and Enhancing Multi-Hop Reasoning in Large Language Models," in EMNLP 2025
+[4] Z. Yu et al., "Neuron-Level Knowledge Attribution in Large Language Models," in EMNLP 2024
 
 ## 🧐Editing
 Just run the following commond:

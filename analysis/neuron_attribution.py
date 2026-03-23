@@ -43,6 +43,8 @@ Usage:
     python analysis/neuron_attribution.py --prompts two-hop first-hop second-hop
 """
 
+# %%
+
 import argparse
 import math
 import pickle
@@ -54,13 +56,16 @@ from pathlib import Path
 import patch_model
 import pandas as pd
 import torch
+from tqdm.auto import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+# %%
 
 # Prompt type names are used directly as subdirectory names under
 # <data_dir>/neuron_attribution/<subset>/<prompt_type>/
 PROMPT_TYPES = ["two-hop", "first-hop", "second-hop"]
 
+# %%
 
 # ── Projection helpers ────────────────────────────────────────────────────────
 
@@ -71,9 +76,9 @@ def project_to_vocab(vectors, final_std, ln_f_weight, lm_head):
     vectors: (..., hidden_dim)
     returns: (..., vocab_size) logits
     """
-    E = vectors.mean(-1, keepdim=True)
-    normed = (vectors - E) / final_std * ln_f_weight
-    return lm_head(normed)
+    E = vectors.mean(-1, keepdim=True) # shape (..., 1)
+    normed = (vectors - E) / final_std * ln_f_weight # shape (..., hidden_dim)
+    return lm_head(normed) # shape (..., vocab_size)
 
 
 def decode_top_k(vectors, final_std, ln_f_weight, lm_head, tokenizer, k=10):
@@ -83,8 +88,8 @@ def decode_top_k(vectors, final_std, ln_f_weight, lm_head, tokenizer, k=10):
     vectors: (..., hidden_dim)
     returns: list of top-k token strings per vector
     """
-    logits = project_to_vocab(vectors, final_std, ln_f_weight, lm_head)
-    top_idx = logits.topk(k, dim=-1).indices
+    logits = project_to_vocab(vectors, final_std, ln_f_weight, lm_head) # shape (..., vocab_size)
+    top_idx = logits.topk(k, dim=-1).indices # shape (..., k)
     if top_idx.dim() == 1:
         return tokenizer.convert_ids_to_tokens(top_idx.tolist())
     flat = top_idx.reshape(-1, k).tolist()
@@ -103,19 +108,19 @@ def compute_layer_lpi(states, layer_num, predict_index, final_std, ln_f_weight, 
     """
     rows = []
     for i in range(layer_num):
-        layer_input_last = states[i]["layer_input"][-1]
-        attn_output_last = states[i]["attn_output"][-1]
-        residual_last    = states[i]["residual_output"][-1]
-        ffn_output_last  = states[i]["ffn_output"][-1]
+        layer_input_last = states[i]["layer_input"][-1] # shape (hidden_dim,)
+        attn_output_last = states[i]["attn_output"][-1] # shape (hidden_dim,)
+        residual_last    = states[i]["residual_output"][-1] # shape (hidden_dim,)
+        ffn_output_last  = states[i]["ffn_output"][-1] # shape (hidden_dim,)
 
-        base  = torch.log_softmax(project_to_vocab(layer_input_last, final_std, ln_f_weight, lm_head), -1)[predict_index]
-        after = torch.log_softmax(project_to_vocab(layer_input_last + attn_output_last, final_std, ln_f_weight, lm_head), -1)[predict_index]
-        attn_tokens = decode_top_k(attn_output_last, final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj)
+        base  = torch.log_softmax(project_to_vocab(layer_input_last, final_std, ln_f_weight, lm_head), -1)[predict_index] # shape ()
+        after = torch.log_softmax(project_to_vocab(layer_input_last + attn_output_last, final_std, ln_f_weight, lm_head), -1)[predict_index] # shape ()
+        attn_tokens = decode_top_k(attn_output_last, final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj) # shape (top_k_proj,)
         rows.append((i, "attention", (after - base).item(), attn_tokens))
 
         base  = torch.log_softmax(project_to_vocab(residual_last, final_std, ln_f_weight, lm_head), -1)[predict_index]
         after = torch.log_softmax(project_to_vocab(residual_last + ffn_output_last, final_std, ln_f_weight, lm_head), -1)[predict_index]
-        ffn_tokens = decode_top_k(ffn_output_last, final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj)
+        ffn_tokens = decode_top_k(ffn_output_last, final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj) # shape (top_k_proj,)
         rows.append((i, "ffn", (after - base).item(), ffn_tokens))
     return rows
 
@@ -130,16 +135,16 @@ def compute_head_lpi(states, info, layer_num, head_num, head_dim,
     """
     rows = []
     for layer_i in range(layer_num):
-        layer_input_last = states[layer_i]["layer_input"][-1]
-        v_heads = states[layer_i]["attn_subvalues"]
-        o_proj  = info["get_attn_o_proj"](info["layers"][layer_i])
-        head_sum = torch.bmm(v_heads, o_proj).sum(1)
+        layer_input_last = states[layer_i]["layer_input"][-1] # shape (hidden_dim,)
+        v_heads = states[layer_i]["attn_subvalues"] # shape (head_num, seq_k, head_dim)
+        o_proj  = info["get_attn_o_proj"](info["layers"][layer_i]) # shape (head_num, head_dim, hidden_dim)
+        head_sum = torch.bmm(v_heads, o_proj).sum(1) # shape (head_num, hidden_dim)
 
-        base = torch.log_softmax(project_to_vocab(layer_input_last, final_std, ln_f_weight, lm_head), -1)[predict_index]
-        head_plus = head_sum + layer_input_last
-        logits = project_to_vocab(head_plus, final_std, ln_f_weight, lm_head)
-        lpi = torch.log_softmax(logits, -1)[:, predict_index] - base
-        head_tokens = decode_top_k(head_sum, final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj)
+        base = torch.log_softmax(project_to_vocab(layer_input_last, final_std, ln_f_weight, lm_head), -1)[predict_index] # shape ()
+        head_plus = head_sum + layer_input_last # shape (head_num, hidden_dim)
+        logits = project_to_vocab(head_plus, final_std, ln_f_weight, lm_head) # shape (head_num, vocab_size)
+        lpi = torch.log_softmax(logits, -1)[:, predict_index] - base # shape (head_num,)
+        head_tokens = decode_top_k(head_sum, final_std, ln_f_weight, lm_head, tokenizer, k=top_k_proj) # shape (head_num, top_k_proj)
 
         for head_i, score in enumerate(lpi.tolist()):
             rows.append((layer_i, head_i, score, head_tokens[head_i]))
@@ -176,7 +181,7 @@ def compute_ffn_neuron_lpi(states, info, layer_num, predict_index,
     FFN value neuron LPI: per-neuron contribution to the predicted token.
 
     Uses a first-order Taylor approximation of log-softmax to avoid projecting
-    all ffn_dim neuron outputs through the full vocabulary matrix.  The effective
+    all ffn_dim neuron outputs through the full vocabulary matrix. The effective
     unembedding direction is precomputed once per layer (one vocab projection)
     and the per-neuron score reduces to a dot product, giving ~30x speedup vs
     the exact formulation with negligible impact on top-k neuron ranking.
@@ -190,7 +195,7 @@ def compute_ffn_neuron_lpi(states, info, layer_num, predict_index,
         fc2      = info["get_ffn_down_proj"](info["layers"][layer_i])  # (ffn_dim, hidden_dim)
         residual = states[layer_i]["residual_output"][-1]           # (hidden_dim,)
 
-        eff_dir = _lpi_effective_direction(residual, final_std, ln_f_weight, lm_head, predict_index)
+        eff_dir = _lpi_effective_direction(residual, final_std, ln_f_weight, lm_head, predict_index) # (hidden_dim,)
         # fc2 @ eff_dir: (ffn_dim, hidden_dim) @ (hidden_dim,) → (ffn_dim,)
         lpi = coeff * (fc2 @ eff_dir)                               # (ffn_dim,)
 
@@ -212,7 +217,7 @@ def compute_attn_neuron_lpi(states, info, layer_num, head_num, head_dim,
     Per layer, the effective direction is projected through o_proj once to give a
     (head_num, head_dim) score matrix; scores for all positions are then computed
     via a single elementwise multiply against attn_subvalues — no per-position vocab
-    projection loop.  Reduces compute_attn_neuron_lpi from O(layers × seq_len ×
+    projection loop. Reduces compute_attn_neuron_lpi from O(layers × seq_len ×
     head_num × head_dim × vocab_size) to O(layers × head_num × head_dim × hidden_dim).
 
     Returns top_k (layer_i, head_i, neuron_id, pos, lpi_score) tuples globally,
@@ -226,7 +231,7 @@ def compute_attn_neuron_lpi(states, info, layer_num, head_num, head_dim,
 
         # eff_dir: (hidden_dim,) — one vocab projection per layer
         eff_dir = _lpi_effective_direction(
-            layer_input_last, final_std, ln_f_weight, lm_head, predict_index)
+            layer_input_last, final_std, ln_f_weight, lm_head, predict_index) # (hidden_dim,)
 
         # Project eff_dir through o_proj: (head_num, head_dim, hidden_dim) @ (hidden_dim,)
         # → (head_num, head_dim)
@@ -264,7 +269,7 @@ def _build_residual_components(states, layer_limit, pos):
     for i in range(layer_limit):
         components.append(states[i]["attn_output"][pos])
         components.append(states[i]["ffn_output"][pos])
-    return components
+    return components # shape (1 + 2*layer_limit, hidden_dim)
 
 
 def compute_ffn_query_layers(states, info, top_neurons, layer_num):
@@ -281,11 +286,11 @@ def compute_ffn_query_layers(states, info, top_neurons, layer_num):
             * info["get_ffn_ln_weight"](info["layers"][ffn_layer])
         )
         if ffn_layer not in stacked_cache:
-            components = _build_residual_components(states, ffn_layer, -1)
+            components = _build_residual_components(states, ffn_layer, -1) # shape (1 + 2*ffn_layer, hidden_dim)
             components.append(states[ffn_layer]["attn_output"][-1])
-            stacked_cache[ffn_layer] = torch.stack(components)
-        stacked = stacked_cache[ffn_layer]
-        ips = (stacked * key_scaled).sum(-1)
+            stacked_cache[ffn_layer] = torch.stack(components) # shape (1 + 2*ffn_layer + 1, hidden_dim)
+        stacked = stacked_cache[ffn_layer] # shape (1 + 2*ffn_layer + 1, hidden_dim)
+        ips = (stacked * key_scaled).sum(-1) # shape (1 + 2*ffn_layer + 1,)
         total = ips.sum().item()
         if abs(total) < 1e-9:
             continue
@@ -421,9 +426,9 @@ def compute_ffn_query_neurons(states, info, top_neurons, head_num, head_dim,
 
     for ffn_layer, neuron_id, pos, lpi_score in top_neurons:
         key_scaled = (
-            info["get_ffn_key"](info["layers"][ffn_layer], neuron_id)
-            * info["get_ffn_ln_weight"](info["layers"][ffn_layer])
-        )
+            info["get_ffn_key"](info["layers"][ffn_layer], neuron_id) # shape (hidden_dim,)
+            * info["get_ffn_ln_weight"](info["layers"][ffn_layer]) # shape (hidden_dim,)
+        ) # shape (hidden_dim,)
         residual = states[ffn_layer]["residual_output"][pos]
         total = (residual * key_scaled).sum().item()
         if abs(total) < 1e-9:
@@ -437,12 +442,12 @@ def compute_ffn_query_neurons(states, info, top_neurons, head_num, head_dim,
 
         # Vectorised over layers: (ffn_layer+1, head_num, head_dim, hidden_dim) @ (hidden_dim,)
         # -> (ffn_layer+1, head_num, head_dim)
-        dot_all = info["o_proj_stack"][:ffn_layer + 1] @ key_scaled
+        dot_all = info["o_proj_stack"][:ffn_layer + 1] @ key_scaled # shape (ffn_layer+1, head_num, head_dim)
         # attn_sv_stack[:ffn_layer+1]: (ffn_layer+1, head_num, seq_len, head_dim)
         # dot_all.unsqueeze(2):        (ffn_layer+1, head_num, 1,        head_dim)
-        acc[:ffn_layer + 1] += attn_sv_stack[:ffn_layer + 1] * dot_all.unsqueeze(2) * scale
+        acc[:ffn_layer + 1] += attn_sv_stack[:ffn_layer + 1] * dot_all.unsqueeze(2) * scale # shape (ffn_layer+1, head_num, seq_len, head_dim)
 
-    flat = acc.reshape(-1)
+    flat = acc.reshape(-1) # shape (layer_num * head_num * seq_len * head_dim,)
     k = min(top_k, flat.numel())
     topk_vals, topk_idx = flat.topk(k)
     stride_h = seq_len * head_dim
@@ -495,7 +500,7 @@ def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_di
     states = patch_model.extract_states(layer_num)
 
     with torch.no_grad():
-        last_hidden = states[-1]["layer_output"][-1]
+        last_hidden = states[-1]["layer_output"][-1] # shape (hidden_dim,)
         final_std = (last_hidden.var(unbiased=False) + 1e-5).sqrt().item()
         predict_index = info["lm_head"](
             (last_hidden - last_hidden.mean()) / final_std * info["ln_f_weight"]
@@ -517,10 +522,10 @@ def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_di
             tokenizer, top_k_proj=top_k_proj)
         ffn_top = compute_ffn_neuron_lpi(
             states, info, layer_num, predict_index,
-            final_std, ln_f_weight, lm_head, top_k=top_k_ffn)
+            final_std, ln_f_weight, lm_head, top_k=top_k_ffn) # list of (layer_i, neuron_id, pos, lpi_score)
         attn_top = compute_attn_neuron_lpi(
             states, info, layer_num, head_num, head_dim,
-            predict_index, final_std, ln_f_weight, lm_head, top_k=top_k_ffn)
+            predict_index, final_std, ln_f_weight, lm_head, top_k=top_k_ffn) # list of (layer_i, head_i, neuron_id, pos, lpi_score)
 
         ffn_query_rows  = compute_ffn_query_layers(states, info, ffn_top, layer_num)
         attn_query_rows = compute_attn_query_layers(states, info, attn_top, layer_num, head_dim,
@@ -829,7 +834,7 @@ def _load_checkpoint(path):
 
 def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device}  Model: {args.model_name}")
+    print(f"Device: {device}\nModel: {args.model_name}")
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name, clean_up_tokenization_spaces=True)
@@ -874,7 +879,7 @@ def main(args):
     data_dir = Path(args.data_dir)
     prompt_pairs = list(combinations(args.prompts, 2))
 
-    for subset in args.subsets:
+    for subset in tqdm(args.subsets, desc="Subsets", unit="subset"):
         input_path = data_dir / f"composition_{subset}" / "two_hop.csv"
         if not input_path.exists():
             print(f"\n[SKIP] {input_path} not found")
@@ -903,134 +908,140 @@ def main(args):
             start_idx         = ckpt["next_idx"]
             print(f"  Resuming from checkpoint at example {start_idx}/{n}")
 
-        for idx in range(start_idx, n):
-            row    = df.iloc[idx]
-            row_id = row.get("id", idx)
+        with tqdm(
+            total=n,
+            initial=start_idx,
+            desc=f"{subset} examples",
+            unit="example",
+            leave=False,
+        ) as examples_pbar:
+            for idx in range(start_idx, n):
+                row    = df.iloc[idx]
+                row_id = row.get("id", idx)
 
-            # Process every prompt type for this example
-            ex_results = {}
-            for pt in args.prompts:
-                prompt = _get_prompt(row, pt)
-                try:
-                    result = process_example(
-                        model, info, tokenizer, prompt,
-                        layer_num, head_num, head_dim, num_kv_heads,
-                        top_k_ffn=args.top_k_ffn,
-                        top_k_proj=args.top_k_proj,
-                        top_k_query=args.top_k_query,
-                        max_order=2 if pt == "two-hop" else 1,
-                    )
-                    ex_results[pt] = result
-                except Exception as e:
-                    print(f"  [{idx}] {pt} ERROR: {e}", file=sys.stderr)
+                # Process every prompt type for this example
+                ex_results = {}
+                for pt in args.prompts:
+                    prompt = _get_prompt(row, pt)
+                    try:
+                        result = process_example(
+                            model, info, tokenizer, prompt,
+                            layer_num, head_num, head_dim, num_kv_heads,
+                            top_k_ffn=args.top_k_ffn,
+                            top_k_proj=args.top_k_proj,
+                            top_k_query=args.top_k_query,
+                            max_order=2 if pt == "two-hop" else 1,
+                        ) # (layer_rows, head_rows, ffn_top, attn_top, ffn_query_rows, attn_query_rows, chain)
+                        ex_results[pt] = result
+                    except Exception as e:
+                        print(f"  [{idx}] {pt} ERROR: {e}", file=sys.stderr)
 
-            # Build neuron sets and update accumulators for each successful prompt type
-            ex_sets      = {}   # pt -> {(order, ntype): {layer: frozenset}}
-            ex_pos_dicts = {}   # pt -> {(order, ntype): {layer: {key: [pos, ...]}}}
-            ex_pos_labels = {}  # pt -> [pos_label, ...]
-            for pt, result in ex_results.items():
-                layer_rows_ex, head_rows_ex, ffn_top, attn_top, ffq, aq, chain_ex = result
-                a = accum[pt]
-                a.n_examples += 1
+                # Build neuron sets and update accumulators for each successful prompt type
+                ex_sets      = {}   # pt -> {(order, ntype): {layer: frozenset}}
+                ex_pos_dicts = {}   # pt -> {(order, ntype): {layer: {key: [pos, ...]}}}
+                ex_pos_labels = {}  # pt -> [pos_label, ...]
+                for pt, result in ex_results.items():
+                    layer_rows_ex, head_rows_ex, ffn_top, attn_top, ffq, aq, chain_ex = result
+                    a = accum[pt]
+                    a.n_examples += 1
 
-                # Small per-example rows (kept as-is)
-                for layer_i, sublayer, lpi, tokens in layer_rows_ex:
-                    a.layer_rows.append({"id": row_id, "layer": layer_i, "sublayer": sublayer,
-                                         "lpi": lpi, "top_k_tokens": tokens})
-                for layer_i, head_i, score, tokens in head_rows_ex:
-                    a.head_rows.append({"id": row_id, "layer": layer_i, "head": head_i,
-                                        "lpi": score, "top_k_tokens": tokens})
-                for layer_i, sublayer, score in ffq:
-                    a.ffn_query_rows.append({"id": row_id, "layer": layer_i,
-                                             "sublayer": sublayer, "score": score})
-                for layer_i, sublayer, score in aq:
-                    a.attn_query_rows.append({"id": row_id, "layer": layer_i,
-                                              "sublayer": sublayer, "score": score})
+                    # Small per-example rows (kept as-is)
+                    for layer_i, sublayer, lpi, tokens in layer_rows_ex:
+                        a.layer_rows.append({"id": row_id, "layer": layer_i, "sublayer": sublayer,
+                                             "lpi": lpi, "top_k_tokens": tokens})
+                    for layer_i, head_i, score, tokens in head_rows_ex:
+                        a.head_rows.append({"id": row_id, "layer": layer_i, "head": head_i,
+                                            "lpi": score, "top_k_tokens": tokens})
+                    for layer_i, sublayer, score in ffq:
+                        a.ffn_query_rows.append({"id": row_id, "layer": layer_i,
+                                                 "sublayer": sublayer, "score": score})
+                    for layer_i, sublayer, score in aq:
+                        a.attn_query_rows.append({"id": row_id, "layer": layer_i,
+                                                  "sublayer": sublayer, "score": score})
 
-                # Compute position labels for this prompt type
-                pt_prompt  = _get_prompt(row, pt)
-                pt_tokens  = tokenizer.encode(pt_prompt)
-                pos_labels = _get_position_labels(pt_tokens, row, tokenizer, pt)
-                ex_pos_labels[pt] = pos_labels
+                    # Compute position labels for this prompt type
+                    pt_prompt  = _get_prompt(row, pt)
+                    pt_tokens  = tokenizer.encode(pt_prompt)
+                    pos_labels = _get_position_labels(pt_tokens, row, tokenizer, pt)
+                    ex_pos_labels[pt] = pos_labels
 
-                # Aggregate neuron stats with position tracking
-                a.add_neurons(0, "ffn",  ffn_top,  pos_labels=pos_labels)
-                a.add_neurons(0, "attn", attn_top, pos_labels=pos_labels)
-                for order, ntype, rows in chain_ex:
-                    a.add_neurons(order, ntype, rows, pos_labels=pos_labels)
+                    # Aggregate neuron stats with position tracking
+                    a.add_neurons(0, "ffn",  ffn_top,  pos_labels=pos_labels)
+                    a.add_neurons(0, "attn", attn_top, pos_labels=pos_labels)
+                    for order, ntype, rows in chain_ex:
+                        a.add_neurons(order, ntype, rows, pos_labels=pos_labels)
 
-                # Build per-layer neuron sets and position dicts for Jaccard computation
-                sets = {
-                    (0, "ffn"):  _ffn_sets_by_layer(ffn_top),
-                    (0, "attn"): _attn_sets_by_layer(attn_top),
-                }
-                pos_dicts = {
-                    (0, "ffn"):  _ffn_pos_by_layer(ffn_top),
-                    (0, "attn"): _attn_pos_by_layer(attn_top),
-                }
-                for order, ntype, rows in chain_ex:
-                    is_ffn = ntype.startswith("ffn")
-                    sets[(order, ntype)] = (
-                        _ffn_sets_by_layer(rows) if is_ffn else _attn_sets_by_layer(rows)
-                    )
-                    pos_dicts[(order, ntype)] = (
-                        _ffn_pos_by_layer(rows) if is_ffn else _attn_pos_by_layer(rows)
-                    )
-                ex_sets[pt] = sets
-                ex_pos_dicts[pt] = pos_dicts
+                    # Build per-layer neuron sets and position dicts for Jaccard computation
+                    sets = {
+                        (0, "ffn"):  _ffn_sets_by_layer(ffn_top),
+                        (0, "attn"): _attn_sets_by_layer(attn_top),
+                    }
+                    pos_dicts = {
+                        (0, "ffn"):  _ffn_pos_by_layer(ffn_top),
+                        (0, "attn"): _attn_pos_by_layer(attn_top),
+                    }
+                    for order, ntype, rows in chain_ex:
+                        is_ffn = ntype.startswith("ffn")
+                        sets[(order, ntype)] = (
+                            _ffn_sets_by_layer(rows) if is_ffn else _attn_sets_by_layer(rows)
+                        )
+                        pos_dicts[(order, ntype)] = (
+                            _ffn_pos_by_layer(rows) if is_ffn else _attn_pos_by_layer(rows)
+                        )
+                    ex_sets[pt] = sets
+                    ex_pos_dicts[pt] = pos_dicts
 
-            # Compute Jaccard + overlap position distribution for all prompt-type pairs
-            for pt_a, pt_b in prompt_pairs:
-                sets_a = ex_sets.get(pt_a, {})
-                sets_b = ex_sets.get(pt_b, {})
-                if not sets_a or not sets_b:
-                    continue
-                pair_key = f"{pt_a}__{pt_b}"
-                pd_a_all = ex_pos_dicts.get(pt_a, {})
-                pd_b_all = ex_pos_dicts.get(pt_b, {})
-                pl_a = ex_pos_labels.get(pt_a, [])
-                pl_b = ex_pos_labels.get(pt_b, [])
-                for (ord_a, ntype_a), layers_a in sets_a.items():
-                    nc_a = "ffn" if ntype_a.startswith("ffn") else "attn"
-                    pd_a = pd_a_all.get((ord_a, ntype_a), {})
-                    for (ord_b, ntype_b), layers_b in sets_b.items():
-                        nc_b = "ffn" if ntype_b.startswith("ffn") else "attn"
-                        if nc_a != nc_b:
-                            continue
-                        pd_b = pd_b_all.get((ord_b, ntype_b), {})
-                        base_key = (pair_key, nc_a, ntype_a, ord_a, ntype_b, ord_b)
-                        for layer in range(layer_num):
-                            s_a = layers_a.get(layer, frozenset())
-                            s_b = layers_b.get(layer, frozenset())
-                            j = _jaccard(s_a, s_b)
-                            if not math.isnan(j):
-                                jaccard_accum[
-                                    base_key + (layer,)
-                                ].append(j)
-                            # Position distribution of overlapping neurons
-                            intersection = s_a & s_b
-                            if not intersection:
+                # Compute Jaccard + overlap position distribution for all prompt-type pairs
+                for pt_a, pt_b in prompt_pairs:
+                    sets_a = ex_sets.get(pt_a, {})
+                    sets_b = ex_sets.get(pt_b, {})
+                    if not sets_a or not sets_b:
+                        continue
+                    pair_key = f"{pt_a}__{pt_b}"
+                    pd_a_all = ex_pos_dicts.get(pt_a, {})
+                    pd_b_all = ex_pos_dicts.get(pt_b, {})
+                    pl_a = ex_pos_labels.get(pt_a, [])
+                    pl_b = ex_pos_labels.get(pt_b, [])
+                    for (ord_a, ntype_a), layers_a in sets_a.items():
+                        nc_a = "ffn" if ntype_a.startswith("ffn") else "attn"
+                        pd_a = pd_a_all.get((ord_a, ntype_a), {})
+                        for (ord_b, ntype_b), layers_b in sets_b.items():
+                            nc_b = "ffn" if ntype_b.startswith("ffn") else "attn"
+                            if nc_a != nc_b:
                                 continue
-                            nd_a = pd_a.get(layer, {})
-                            nd_b = pd_b.get(layer, {})
-                            for key in intersection:
-                                for pos in nd_a.get(key, []):
-                                    lbl = _resolve_pos_label(pos, pl_a)
-                                    overlap_pos_accum[base_key + ("a", lbl)] += 1
-                                    overlap_pos_layer_accum[base_key + (layer, "a", lbl)] += 1
-                                for pos in nd_b.get(key, []):
-                                    lbl = _resolve_pos_label(pos, pl_b)
-                                    overlap_pos_accum[base_key + ("b", lbl)] += 1
-                                    overlap_pos_layer_accum[base_key + (layer, "b", lbl)] += 1
-                        # Count this example (once per order-pair, not per layer)
-                        overlap_pos_n[base_key] += 1
+                            pd_b = pd_b_all.get((ord_b, ntype_b), {})
+                            base_key = (pair_key, nc_a, ntype_a, ord_a, ntype_b, ord_b)
+                            for layer in range(layer_num):
+                                s_a = layers_a.get(layer, frozenset())
+                                s_b = layers_b.get(layer, frozenset())
+                                j = _jaccard(s_a, s_b)
+                                if not math.isnan(j):
+                                    jaccard_accum[
+                                        base_key + (layer,)
+                                    ].append(j)
+                                # Position distribution of overlapping neurons
+                                intersection = s_a & s_b
+                                if not intersection:
+                                    continue
+                                nd_a = pd_a.get(layer, {})
+                                nd_b = pd_b.get(layer, {})
+                                for key in intersection:
+                                    for pos in nd_a.get(key, []):
+                                        lbl = _resolve_pos_label(pos, pl_a)
+                                        overlap_pos_accum[base_key + ("a", lbl)] += 1
+                                        overlap_pos_layer_accum[base_key + (layer, "a", lbl)] += 1
+                                    for pos in nd_b.get(key, []):
+                                        lbl = _resolve_pos_label(pos, pl_b)
+                                        overlap_pos_accum[base_key + ("b", lbl)] += 1
+                                        overlap_pos_layer_accum[base_key + (layer, "b", lbl)] += 1
+                            # Count this example (once per order-pair, not per layer)
+                            overlap_pos_n[base_key] += 1
 
-            if (idx + 1) % 10 == 0 or idx == n - 1:
-                print(f"  {idx + 1}/{n}", end="\r", flush=True)
-            if args.checkpoint_every > 0 and (idx + 1) % args.checkpoint_every == 0:
-                _save_checkpoint(ckpt_path, accum, jaccard_accum,
-                                 overlap_pos_accum, overlap_pos_layer_accum,
-                                 overlap_pos_n, idx + 1)
+                examples_pbar.update(1)
+                if args.checkpoint_every > 0 and (idx + 1) % args.checkpoint_every == 0:
+                    _save_checkpoint(ckpt_path, accum, jaccard_accum,
+                                     overlap_pos_accum, overlap_pos_layer_accum,
+                                     overlap_pos_n, idx + 1)
         print(f"  {n}/{n} done      ")
 
         # Save per-prompt-type compact outputs
@@ -1106,3 +1117,5 @@ if __name__ == "__main__":
     parser.add_argument("--top-k-query", type=int, default=300,
                         help="Top-K neurons to track per neuron in backward chain decomposition")
     main(parser.parse_args())
+
+# %%
