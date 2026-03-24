@@ -207,7 +207,7 @@ Rules:
 4. CRITICAL FOR ALIASES: For alias fields (e2_aliases, e3_aliases, e2_aliases_new, e3_aliases_new), you MUST provide natural aliases and transliterations in {lang_name}. Do not just copy English acronyms.
 5. CRITICAL FOR TEMPLATES: The 'r1_template' and 'r2_template' fields contain a {{}} placeholder marking the entity slot. You MUST preserve {{}} exactly as-is in the translated output — only translate the surrounding text.
 6. GRAMMAR & NUANCE: Ensure translations are grammatically correct. Preserve meaning precisely.
-7. CRITICAL FOR CLOZE: The 'source_prompt' field is an abruptly incomplete sentence for cloze evaluation via next-token prediction. It MUST cut off exactly before the target answer. DO NOT use "...", "___", or any placeholder. For Chinese or Japanese, rewrite the syntax (e.g., move the subject to enable the answer to fall naturally at the absolute end of the string)."""
+7. CRITICAL FOR CLOZE: The 'source_prompt' field is an abruptly incomplete sentence for cloze evaluation via next-token prediction. It MUST cut off exactly before the target answer. DO NOT use "...", "___", or any placeholder. {"Rewrite the syntax if needed so the target answer naturally falls at the absolute end of the string — for example, restructure subject/predicate order to achieve this." if lang_name in ("Chinese", "Japanese") else "The sentence structure of English transfers naturally to French, so preserve the same word order and simply translate."}"""
 
 
 # 1-shot example shared across all calls: shows {} preservation in templates
