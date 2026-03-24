@@ -27,8 +27,22 @@ Produces:
   cross_order_{onehop}_{subset}.pdf  -- cross-order Jaccard heatmap: one-hop vs two-hop
 
 Usage:
-    python analyze_neuron_attribution.py <datasets_dir> <output_path> -m gpt2
-    python analyze_neuron_attribution.py <datasets_dir> <output_path> -m gpt2 --prompt first-hop
+    # Pre-edit
+    python analysis/analyze_results_neuron.py \\
+        --model meta-llama/Meta-Llama-3-8B \\
+        --output-dir plots/meta-llama/Meta-Llama-3-8B \\
+        --subsets \\
+            correct:datasets/meta-llama/Meta-Llama-3-8B/neuron_attribution/correct \\
+            incorrect:datasets/meta-llama/Meta-Llama-3-8B/neuron_attribution/incorrect
+
+    # Pre- and post-edit comparison
+    python analysis/analyze_results_neuron.py \\
+        --model meta-llama/Meta-Llama-3-8B \\
+        --output-dir plots/meta-llama/Meta-Llama-3-8B/post_alphaedit \\
+        --subsets \\
+            pre-edit:datasets/meta-llama/Meta-Llama-3-8B/neuron_attribution/incorrect \\
+            now_correct:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_edited/neuron_attribution/now_correct \\
+            still_incorrect:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_edited/neuron_attribution/still_incorrect
 """
 
 from argparse import ArgumentParser
@@ -802,8 +816,7 @@ def plot_four_stage_mechanism(lpi_data, n_layers, path):
         ( 0, "attn",           "Chain B\norder 0\nattn"),
     ]
 
-    # Only show subsets correct/incorrect; skip inconsistent
-    row_labels = [l for l in ["correct", "incorrect"] if l in lpi_data]
+    row_labels = list(lpi_data.keys())
 
     # Check data availability
     available_dfs = {
@@ -897,216 +910,216 @@ def main(args):
         "meta-llama/Meta-Llama-3-70B": 64,
     }
 
+    n_layers = layer_count[args.model]
+    n_heads  = head_count[args.model]
+    plots_path = args.output_dir
     prompt_suffix = "" if args.prompt == "two-hop" else f"_{args.prompt.replace('-', '_')}"
 
-    for model in args.models:
-        print(f"\nProcessing {model} (prompt={args.prompt})")
-        dataset_path = f"{args.datasets_dir}/{model}"
-        plots_path   = f"{args.output_path}/{model}"
-        n_layers = layer_count[model]
-        n_heads  = head_count[model]
-
-        # ── Per-subset LPI data (for the selected prompt type) ────────────────
-        lpi = {}
-        for label in SUBSET_LABELS:
-            neuron_dir = f"{dataset_path}/neuron_attribution/{label}"
-            try:
-                lpi[label] = load_neuron_lpi(neuron_dir, args.prompt)
-            except FileNotFoundError as e:
-                print(f"  [SKIP] {label}: {e}")
-                continue
-
-        if not lpi:
-            print(f"  [SKIP] No data loaded for {model}")
+    # ── Parse subsets ─────────────────────────────────────────────────────────
+    subsets = {}
+    for entry in args.subsets:
+        name, path = entry.split(":", 1)
+        if not Path(path).exists():
+            print(f"[SKIP] {name}: {path} not found")
             continue
+        subsets[name] = path
 
-        loaded = list(lpi.keys())
-        sublayer_data = {label: lpi[label]["sublayer"] for label in loaded}
+    if not subsets:
+        print("No valid subset paths found.")
+        return
 
-        # ── Per-prompt-type single-prompt plots ───────────────────────────────
-        plot_sublayer_lpi_profile(sublayer_data, n_layers,
-                                  f"{plots_path}/sublayer_lpi_profile{prompt_suffix}.pdf")
-        print(f"Saved sublayer LPI profile -> {plots_path}/sublayer_lpi_profile{prompt_suffix}.pdf")
+    # ── Per-subset LPI data (for the selected prompt type) ────────────────────
+    lpi = {}
+    for name, path in subsets.items():
+        try:
+            lpi[name] = load_neuron_lpi(path, args.prompt)
+        except FileNotFoundError as e:
+            print(f"  [SKIP] {name}: {e}")
 
-        plot_head_lpi_heatmap(
-            {label: lpi[label]["head"] for label in loaded},
-            n_layers, n_heads,
-            f"{plots_path}/head_lpi_heatmap{prompt_suffix}.pdf",
-        )
-        print(f"Saved head LPI heatmap     -> {plots_path}/head_lpi_heatmap{prompt_suffix}.pdf")
+    if not lpi:
+        print("No neuron attribution data loaded.")
+        return
 
-        plot_neuron_layer_distribution(
-            lpi, n_layers,
-            f"{plots_path}/neuron_layer_dist{prompt_suffix}.pdf",
-        )
-        print(f"Saved neuron layer dist    -> {plots_path}/neuron_layer_dist{prompt_suffix}.pdf")
+    loaded = list(lpi.keys())
 
-        plot_query_layer_bars(
-            {label: lpi[label]["ffn_query_layers"]  for label in loaded},
-            {label: lpi[label]["attn_query_layers"] for label in loaded},
-            n_layers,
-            f"{plots_path}/query_layer_bars{prompt_suffix}.pdf",
-        )
-        print(f"Saved query layer bars     -> {plots_path}/query_layer_bars{prompt_suffix}.pdf")
+    # ── Per-prompt-type single-prompt plots ───────────────────────────────────
+    plot_sublayer_lpi_profile(
+        {name: lpi[name]["sublayer"] for name in loaded},
+        n_layers,
+        f"{plots_path}/sublayer_lpi_profile{prompt_suffix}.pdf",
+    )
+    print(f"Saved sublayer LPI profile -> {plots_path}/sublayer_lpi_profile{prompt_suffix}.pdf")
 
-        plot_chain_layer_profile(
-            lpi, n_layers,
-            f"{plots_path}/chain_layer_profile{prompt_suffix}.pdf",
-        )
-        print(f"Saved chain layer profile  -> {plots_path}/chain_layer_profile{prompt_suffix}.pdf")
+    plot_head_lpi_heatmap(
+        {name: lpi[name]["head"] for name in loaded},
+        n_layers, n_heads,
+        f"{plots_path}/head_lpi_heatmap{prompt_suffix}.pdf",
+    )
+    print(f"Saved head LPI heatmap     -> {plots_path}/head_lpi_heatmap{prompt_suffix}.pdf")
 
-        plot_chain_position_dist(
-            lpi,
-            f"{plots_path}/chain_position_dist{prompt_suffix}.pdf",
-        )
-        print(f"Saved chain position dist  -> {plots_path}/chain_position_dist{prompt_suffix}.pdf")
+    plot_neuron_layer_distribution(
+        lpi, n_layers,
+        f"{plots_path}/neuron_layer_dist{prompt_suffix}.pdf",
+    )
+    print(f"Saved neuron layer dist    -> {plots_path}/neuron_layer_dist{prompt_suffix}.pdf")
 
-        for pt in PROMPT_TYPES:
-            lpi_pt = {}
-            for label in SUBSET_LABELS:
-                neuron_dir = f"{dataset_path}/neuron_attribution/{label}"
-                try:
-                    lpi_pt[label] = load_neuron_lpi(neuron_dir, pt)
-                except FileNotFoundError:
-                    continue
-            if lpi_pt:
-                pt_suffix = f"_{pt}"
-                plot_four_stage_mechanism(
-                    lpi_pt, n_layers,
-                    f"{plots_path}/chain_flow{pt_suffix}.pdf",
-                )
-                print(f"Saved chain flow ({pt})  -> {plots_path}/chain_flow{pt_suffix}.pdf")
+    plot_query_layer_bars(
+        {name: lpi[name]["ffn_query_layers"]  for name in loaded},
+        {name: lpi[name]["attn_query_layers"] for name in loaded},
+        n_layers,
+        f"{plots_path}/query_layer_bars{prompt_suffix}.pdf",
+    )
+    print(f"Saved query layer bars     -> {plots_path}/query_layer_bars{prompt_suffix}.pdf")
 
-        # ── Cross-prompt plots (use pre-computed Jaccard CSVs) ─────────────────
-        summary_records = []
+    plot_chain_layer_profile(
+        lpi, n_layers,
+        f"{plots_path}/chain_layer_profile{prompt_suffix}.pdf",
+    )
+    print(f"Saved chain layer profile  -> {plots_path}/chain_layer_profile{prompt_suffix}.pdf")
 
-        # Compute shared vmax for cross-order heatmaps across all subsets so
-        # colour saturation is comparable. CLI --heatmap-vmax overrides.
-        if args.heatmap_vmax is not None:
-            heatmap_vmax = args.heatmap_vmax
-        else:
-            all_jaccards = []
-            for _label in SUBSET_LABELS:
-                _jdf = load_jaccard(f"{dataset_path}/neuron_attribution/{_label}")
-                if _jdf is not None and len(_jdf) > 0:
-                    all_jaccards.extend(_jdf["mean_jaccard"].dropna().tolist())
-            heatmap_vmax = float(np.nanmax(all_jaccards)) if all_jaccards else 1.0
-            print(f"  heatmap vmax (global): {heatmap_vmax:.3f}")
+    plot_chain_position_dist(
+        lpi,
+        f"{plots_path}/chain_position_dist{prompt_suffix}.pdf",
+    )
+    print(f"Saved chain position dist  -> {plots_path}/chain_position_dist{prompt_suffix}.pdf")
 
-        # Compute shared ymax for overlap_position bar charts across all subsets/pairs
-        all_pos_counts = []
-        for _label in SUBSET_LABELS:
-            _df = load_overlap_position(f"{dataset_path}/neuron_attribution/{_label}")
-            if _df is not None and len(_df) > 0:
-                all_pos_counts.extend(_df["mean_count"].dropna().tolist())
-        overlap_pos_ymax = float(np.nanmax(all_pos_counts)) if all_pos_counts else 1.0
-        print(f"  overlap position ymax (global): {overlap_pos_ymax:.3f}")
+    for pt in PROMPT_TYPES:
+        lpi_pt = {}
+        for name, path in subsets.items():
+            try:
+                lpi_pt[name] = load_neuron_lpi(path, pt)
+            except FileNotFoundError:
+                continue
+        if lpi_pt:
+            pt_suffix = f"_{pt.replace('-', '_')}"
+            plot_four_stage_mechanism(
+                lpi_pt, n_layers,
+                f"{plots_path}/chain_flow{pt_suffix}.pdf",
+            )
+            print(f"Saved chain flow ({pt})  -> {plots_path}/chain_flow{pt_suffix}.pdf")
 
-        # Compute shared vmax for overlap_pos_layer heatmaps across all subsets
-        all_pos_layer_counts = []
-        for _label in SUBSET_LABELS:
-            _df = load_overlap_position_by_layer(
-                f"{dataset_path}/neuron_attribution/{_label}")
-            if _df is not None and len(_df) > 0:
-                all_pos_layer_counts.extend(_df["mean_count"].dropna().tolist())
-        overlap_pos_layer_vmax = float(np.nanmax(all_pos_layer_counts)) if all_pos_layer_counts else 1.0
-        print(f"  overlap pos×layer vmax (global): {overlap_pos_layer_vmax:.3f}")
+    # ── Cross-prompt plots (use pre-computed Jaccard CSVs) ────────────────────
+    summary_records = []
 
-        for label in SUBSET_LABELS:
-            neuron_dir    = f"{dataset_path}/neuron_attribution/{label}"
-            jaccard_df              = load_jaccard(neuron_dir)
-            overlap_pos_df          = load_overlap_position(neuron_dir)
-            overlap_pos_layer_df    = load_overlap_position_by_layer(neuron_dir)
+    # Compute shared vmaxes across all subsets for comparable colour scales
+    if args.heatmap_vmax is not None:
+        heatmap_vmax = args.heatmap_vmax
+    else:
+        all_jaccards = []
+        for path in subsets.values():
+            _jdf = load_jaccard(path)
+            if _jdf is not None and len(_jdf) > 0:
+                all_jaccards.extend(_jdf["mean_jaccard"].dropna().tolist())
+        heatmap_vmax = float(np.nanmax(all_jaccards)) if all_jaccards else 1.0
+        print(f"  heatmap vmax (global): {heatmap_vmax:.3f}")
 
-            # Same-order Jaccard overlap plots — one per unique order value
-            orders_in_jaccard = []
-            if jaccard_df is not None and len(jaccard_df) > 0:
-                orders_in_jaccard = sorted(
-                    set(jaccard_df["order_a"].unique()) | set(jaccard_df["order_b"].unique())
-                )
+    all_pos_counts = []
+    for path in subsets.values():
+        _df = load_overlap_position(path)
+        if _df is not None and len(_df) > 0:
+            all_pos_counts.extend(_df["mean_count"].dropna().tolist())
+    overlap_pos_ymax = float(np.nanmax(all_pos_counts)) if all_pos_counts else 1.0
+    print(f"  overlap position ymax (global): {overlap_pos_ymax:.3f}")
 
+    all_pos_layer_counts = []
+    for path in subsets.values():
+        _df = load_overlap_position_by_layer(path)
+        if _df is not None and len(_df) > 0:
+            all_pos_layer_counts.extend(_df["mean_count"].dropna().tolist())
+    overlap_pos_layer_vmax = float(np.nanmax(all_pos_layer_counts)) if all_pos_layer_counts else 1.0
+    print(f"  overlap pos×layer vmax (global): {overlap_pos_layer_vmax:.3f}")
+
+    for name, path in subsets.items():
+        jaccard_df           = load_jaccard(path)
+        overlap_pos_df       = load_overlap_position(path)
+        overlap_pos_layer_df = load_overlap_position_by_layer(path)
+
+        # Same-order Jaccard overlap plots
+        if jaccard_df is not None and len(jaccard_df) > 0:
+            orders_in_jaccard = sorted(
+                set(jaccard_df["order_a"].unique()) | set(jaccard_df["order_b"].unique())
+            )
             for order in orders_in_jaccard:
                 slug_order = str(order).replace("-", "neg")
-                out = f"{plots_path}/neuron_overlap_order{slug_order}_{label}{prompt_suffix}.pdf"
+                out = f"{plots_path}/neuron_overlap_order{slug_order}_{name}{prompt_suffix}.pdf"
                 if plot_neuron_overlap(jaccard_df, n_layers, out, order=order):
-                    print(f"Saved neuron overlap (order={order}, {label}) -> {out}")
+                    print(f"Saved neuron overlap (order={order}, {name}) -> {out}")
 
-            # Cross-order Jaccard heatmaps: each one-hop vs two-hop
+        # Cross-order Jaccard heatmaps: each one-hop vs two-hop
+        if jaccard_df is not None:
+            pairs_present = set(jaccard_df["pair"].unique())
             for one_hop_pt in ("first-hop", "second-hop"):
                 slug = one_hop_pt.replace("-", "_")
-                # The pair key may be in either order depending on which was pt_a / pt_b
                 pair_key_ab = f"two-hop__{one_hop_pt}"
                 pair_key_ba = f"{one_hop_pt}__two-hop"
-                # Check which exists in the jaccard_df
-                if jaccard_df is not None:
-                    pairs_present = set(jaccard_df["pair"].unique())
-                    if pair_key_ab in pairs_present:
-                        pair_key = pair_key_ab
-                    elif pair_key_ba in pairs_present:
-                        pair_key = pair_key_ba
-                    else:
-                        print(f"  [SKIP] cross-order {label}/{one_hop_pt}: pair not in jaccard.csv")
-                        continue
-                    out = f"{plots_path}/cross_order_{slug}_{label}{prompt_suffix}.pdf"
-                    plot_cross_order_overlap(jaccard_df, n_layers, out, pair_key,
-                                             one_hop_label=one_hop_pt,
-                                             vmax=heatmap_vmax)
-                    print(f"Saved cross-order overlap ({one_hop_pt}, {label}) -> {out}")
-
-                    out = f"{plots_path}/overlap_position_{slug}_{label}{prompt_suffix}.pdf"
-                    plot_overlap_position(overlap_pos_df, out, pair_key, label,
-                                         ymax=overlap_pos_ymax)
-                    print(f"Saved overlap position   ({one_hop_pt}, {label}) -> {out}")
-
-                    out = f"{plots_path}/overlap_pos_layer_{slug}_{label}{prompt_suffix}.pdf"
-                    plot_overlap_position_by_layer(overlap_pos_layer_df, n_layers,
-                                                  out, pair_key, label,
-                                                  vmax=overlap_pos_layer_vmax)
-                    print(f"Saved overlap pos×layer  ({one_hop_pt}, {label}) -> {out}")
-
-            # Chain mean layer summary — load from compact chain_mean_layer.csv files
-            for pt in PROMPT_TYPES:
-                try:
-                    pt_data = load_neuron_lpi(neuron_dir, pt)
-                except FileNotFoundError:
+                if pair_key_ab in pairs_present:
+                    pair_key = pair_key_ab
+                elif pair_key_ba in pairs_present:
+                    pair_key = pair_key_ba
+                else:
+                    print(f"  [SKIP] cross-order {name}/{one_hop_pt}: pair not in jaccard.csv")
                     continue
-                cml = pt_data.get("chain_mean_layer")
-                if cml is None or len(cml) == 0:
-                    continue
-                for _, row in cml.iterrows():
-                    summary_records.append({
-                        "subset":      label,
-                        "prompt_type": pt,
-                        "order":       int(row["order"]),
-                        "ntype":       row["ntype"],
-                        "mean_layer":  float(row["mean_layer"]),
-                        "n_neurons":   int(row["n_neurons"]),
-                    })
 
-        if summary_records:
-            csv_path = f"{plots_path}/chain_layer_summary.csv"
-            pd.DataFrame(summary_records).to_csv(csv_path, index=False)
-            print(f"Saved chain layer summary  -> {csv_path}")
+                out = f"{plots_path}/cross_order_{slug}_{name}{prompt_suffix}.pdf"
+                plot_cross_order_overlap(jaccard_df, n_layers, out, pair_key,
+                                         one_hop_label=one_hop_pt, vmax=heatmap_vmax)
+                print(f"Saved cross-order overlap ({one_hop_pt}, {name}) -> {out}")
 
-            plot_chain_mean_layer(
-                summary_records,
-                f"{plots_path}/chain_mean_layer.pdf",
-            )
-            print(f"Saved chain mean layer     -> {plots_path}/chain_mean_layer.pdf")
+                out = f"{plots_path}/overlap_position_{slug}_{name}{prompt_suffix}.pdf"
+                plot_overlap_position(overlap_pos_df, out, pair_key, name,
+                                      ymax=overlap_pos_ymax)
+                print(f"Saved overlap position   ({one_hop_pt}, {name}) -> {out}")
+
+                out = f"{plots_path}/overlap_pos_layer_{slug}_{name}{prompt_suffix}.pdf"
+                plot_overlap_position_by_layer(overlap_pos_layer_df, n_layers,
+                                               out, pair_key, name,
+                                               vmax=overlap_pos_layer_vmax)
+                print(f"Saved overlap pos×layer  ({one_hop_pt}, {name}) -> {out}")
+
+        # Chain mean layer summary
+        for pt in PROMPT_TYPES:
+            try:
+                pt_data = load_neuron_lpi(path, pt)
+            except FileNotFoundError:
+                continue
+            cml = pt_data.get("chain_mean_layer")
+            if cml is None or len(cml) == 0:
+                continue
+            for _, row in cml.iterrows():
+                summary_records.append({
+                    "subset":      name,
+                    "prompt_type": pt,
+                    "order":       int(row["order"]),
+                    "ntype":       row["ntype"],
+                    "mean_layer":  float(row["mean_layer"]),
+                    "n_neurons":   int(row["n_neurons"]),
+                })
+
+    if summary_records:
+        csv_path = f"{plots_path}/chain_layer_summary.csv"
+        pd.DataFrame(summary_records).to_csv(csv_path, index=False)
+        print(f"Saved chain layer summary  -> {csv_path}")
+        plot_chain_mean_layer(summary_records, f"{plots_path}/chain_mean_layer.pdf")
+        print(f"Saved chain mean layer     -> {plots_path}/chain_mean_layer.pdf")
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("datasets_dir")
-    parser.add_argument("output_path")
-    parser.add_argument("-m", "--models", nargs="+", required=True, choices=[
-        "gpt2",
-        "meta-llama/Llama-2-7b-hf", "meta-llama/Llama-2-13b-hf",
-        "meta-llama/Meta-Llama-3-8B", "meta-llama/Meta-Llama-3-70B",
-    ])
+    parser.add_argument("--subsets", nargs="+", required=True,
+                        metavar="NAME:PATH",
+                        help="One or more name:path pairs where path is the neuron attribution "
+                             "subset directory, e.g. "
+                             "correct:datasets/meta-llama/Meta-Llama-3-8B/neuron_attribution/correct")
+    parser.add_argument("--output-dir", required=True,
+                        help="Directory to write plot PDFs into")
+    parser.add_argument("-m", "--model", required=True,
+                        choices=["gpt2",
+                                 "meta-llama/Llama-2-7b-hf", "meta-llama/Llama-2-13b-hf",
+                                 "meta-llama/Meta-Llama-3-8B", "meta-llama/Meta-Llama-3-70B"],
+                        help="Model name (used for layer/head count metadata only)")
     parser.add_argument("--prompt", default="two-hop",
                         choices=["two-hop", "first-hop", "second-hop"],
-                        help="Prompt type: selects which neuron_attribution_* directory to read")
+                        help="Prompt type to use for per-subset plots")
     parser.add_argument("--heatmap-vmax", type=float, default=None,
                         help="Fixed colour-scale max for cross-order heatmaps "
                              "(default: auto from global max across all subsets)")

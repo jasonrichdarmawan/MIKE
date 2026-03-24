@@ -60,274 +60,219 @@ pip install zhipuai sniffio
 ## 📚Analyze
 Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
 
-- Constructing MQuAKE for multi-lingual knowledge editing benchmark:
-  - Copy `datasets/MQuAKE-CF-3k-v2-cake.json` to `datasets/MQuAKE-CF-3k-v2-clke.json`
-  - Run `analysis/llm_translate.py` to translate
+### Pipeline overview
+
+```
+1. run_preedit_analysis.py      — evaluate base model, create subsets, run all analyses
+2. neuron_attribution.py        — neuron-level LPI and backward attribution (GPU recommended)
+3. run_alphaedit_analysis.py    — apply AlphaEdit, evaluate, split subsets, run all analyses
+   run_ifmet_analysis.py        — same for IFMET
+4. neuron_attribution.py        — same, with --checkpoint for post-edit weights
+5. analyze_tables.py            — print summary tables (mechanism stages)
+   analyze_tables_neuron.py     — print neuron attribution tables
+   analyze_results.py           — generate mechanism plots
+   analyze_results_neuron.py    — generate neuron attribution plots
+```
+
+Each run script skips steps whose output files already exist, so re-runs are safe.
+Classification results are cached automatically as `*_classified.csv` on first run.
+
+---
+
+### Pre-edit analysis
+
+```bash
+MODEL=meta-llama/Meta-Llama-3-8B
+DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
+
+python analysis/run_preedit_analysis.py \
+    --model $MODEL \
+    --input datasets/two_hop.csv \
+    --data-dir $DATA_DIR
+```
+
+Outputs under `$DATA_DIR/composition_{correct,incorrect,inconsistent}/`:
+- `two_hop.csv` — subset split
+- `sublayer_projection/{attention,mlp}_projections.csv`
+- `attention_knockout/last_e1_attention_knockout_k3_composition.csv`
+- `entity_description/{e1,last}_entity_description_s0.csv`
+
+Add `--skip-patchscopes` to skip PatchScopes (method 4, slowest).
+
+---
+
+### Neuron attribution
+
+Requires GPU (~2 min for 900 examples). Uses `analysis/patch_model.py` to monkey-patch GPT-2/Llama forward passes without modifying model files.
+
+```bash
+MODEL=meta-llama/Meta-Llama-3-8B
+DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
+
+# Pre-edit
+python analysis/neuron_attribution.py \
+    --model-name $MODEL --data-dir $DATA_DIR \
+    --prompts two-hop first-hop second-hop \
+    --subsets correct incorrect inconsistent
+
+# Post-edit (load edited weights via checkpoint)
+python analysis/neuron_attribution.py \
+    --model-name $MODEL --data-dir $DATA_DIR/composition_incorrect_alphaedit \
+    --checkpoint $DATA_DIR/composition_incorrect_alphaedit/editing_checkpoint.pt \
+    --prompts two-hop first-hop second-hop \
+    --subsets now_correct still_incorrect still_inconsistent
+
+# Quick test
+python analysis/neuron_attribution.py \
+    --model-name $MODEL --data-dir $DATA_DIR \
+    --prompts two-hop --subsets correct --max-examples 20
+```
+
+Outputs per `(subset, prompt_type)` under `$DATA_DIR/neuron_attribution/{subset}/{prompt_type}/`:
+- `sublayer_lpi.csv`, `head_lpi.csv` — per-example LPI
+- `ffn_query_layers.csv`, `attn_query_layers.csv` — residual stream decomposition
+- `chain_profile.csv`, `chain_mean_layer.csv` — aggregated chain attribution
+- `chain_position_dist.csv` — marginal position distribution
+
+Under `$DATA_DIR/neuron_attribution/{subset}/`:
+- `jaccard.csv`, `overlap_position.csv`, `overlap_position_by_layer.csv`
+
+---
+
+### Post-edit analysis
+
+```bash
+MODEL=meta-llama/Meta-Llama-3-8B
+DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
+
+# AlphaEdit
+python analysis/run_alphaedit_analysis.py \
+    --model $MODEL \
+    --input $DATA_DIR/composition_incorrect/two_hop.csv \
+    --output $DATA_DIR/composition_incorrect_alphaedit
+
+# IFMET
+python analysis/run_ifmet_analysis.py \
+    --model $MODEL \
+    --input $DATA_DIR/composition_incorrect/two_hop.csv \
+    --output $DATA_DIR/composition_incorrect_ifmet
+```
+
+Outputs under `$OUTPUT/{now_correct,still_incorrect,still_inconsistent}/` (same structure as pre-edit).
+
+---
+
+### Tables and plots
+
+All `analyze_*` scripts accept `--subsets name:path ...` and work for any combination of pre- and post-edit subsets.
+
+```bash
+MODEL=meta-llama/Meta-Llama-3-8B
+DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
+PLOTS=plots/meta-llama/Meta-Llama-3-8B
+
+# Summary tables (mechanism)
+python analysis/analyze_tables.py --subsets \
+    correct:$DATA_DIR/composition_correct \
+    incorrect:$DATA_DIR/composition_incorrect
+
+# Summary tables (neuron attribution)
+python analysis/analyze_tables_neuron.py --subsets \
+    correct:$DATA_DIR/neuron_attribution/correct \
+    incorrect:$DATA_DIR/neuron_attribution/incorrect
+
+# Mechanism plots
+python analysis/analyze_results.py \
+    --model $MODEL --output-dir $PLOTS \
+    --subsets \
+        correct:$DATA_DIR/composition_correct \
+        incorrect:$DATA_DIR/composition_incorrect
+
+# Neuron attribution plots
+python analysis/analyze_results_neuron.py \
+    --model $MODEL --output-dir $PLOTS \
+    --subsets \
+        correct:$DATA_DIR/neuron_attribution/correct \
+        incorrect:$DATA_DIR/neuron_attribution/incorrect
+
+# Pre- vs post-edit comparison
+python analysis/analyze_tables.py --subsets \
+    pre-edit:$DATA_DIR/composition_incorrect \
+    now_correct:$DATA_DIR/composition_incorrect_alphaedit/now_correct \
+    still_incorrect:$DATA_DIR/composition_incorrect_alphaedit/still_incorrect
+```
+
+---
+
+### Script reference
+
+**Orchestrators** — load the model once and run the full analysis pipeline end-to-end:
+
+| Script | Purpose |
+|--------|---------|
+| `run_preedit_analysis.py` | Evaluate base model, create correct/incorrect/inconsistent subsets, run all 4 analyses |
+| `run_alphaedit_analysis.py` | Apply AlphaEdit, evaluate edited model, split into now_correct/still_incorrect/still_inconsistent, run all 4 analyses |
+| `run_ifmet_analysis.py` | Same as above for IFMET (two-phase MEMIT) |
+
+**Analysis methods** — called by the orchestrators; can also be run standalone with `--checkpoint` for a pre-saved edited model:
+
+| Script | Purpose |
+|--------|---------|
+| `generate_entity_description.py` | PatchScopes: patch hidden state at source position, decode entity description |
+| `project_sublayer.py` | Sublayer projection: project attention/MLP output into vocabulary per layer |
+| `knockout_attention.py` | Attention knockout: zero out attention from source to target, measure answer change |
+| `evaluate_dataset.py` | Evaluate model on two_hop.csv (first-hop, second-hop, composition, shortcuts) |
+| `neuron_attribution.py` | Neuron-level LPI and backward attribution chain (GPU recommended) |
+
+**Analysis output scripts** — read saved CSVs and produce tables or plots:
+
+| Script | Purpose |
+|--------|---------|
+| `analyze_tables.py` | Build `layers.csv` from source CSVs (cached), print mechanism stage tables |
+| `analyze_tables_neuron.py` | Print neuron attribution tables (LPI, chain, Jaccard, position) |
+| `analyze_results.py` | Generate mechanism plots (stage boxplots, PatchScopes heatmaps) |
+| `analyze_results_neuron.py` | Generate neuron attribution plots (LPI profiles, chain heatmaps, overlap bars) |
+
+**Internal modules** — imported by the scripts above, not run directly:
+
+| Script | Purpose |
+|--------|---------|
+| `patch_model.py` | Monkey-patches GPT-2/Llama forward passes to capture internal states |
+| `patched_generation.py` | Low-level generation with attention knockout and patching hooks; KV-cache variant gives ~32× speedup for PatchScopes |
+| `classify_results.py` | Classify raw CSV outputs; results cached as `*_classified.csv` |
+| `utils.py` | Model loading, answer checking, tokenizer helpers |
+
+**Standalone utilities:**
+
+| Script | Purpose |
+|--------|---------|
+| `llm_translate.py` | Translate MQuAKE dataset entries via LLM API |
+
+**Not part of the current pipeline:**
+
+| Script | Status |
+|--------|--------|
+| `patch_activations.py` | Superseded by `generate_entity_description.py` |
+| `create_subset.py` | Superseded — logic inlined into `run_preedit_analysis.py` |
+| `analyze_subset.py` | Depends on `patch_activations.py`; not used in current pipeline |
+| `neuron_importance.py` | Early prototype; superseded by `neuron_attribution.py` |
+
+---
+
+### MQuAKE multilingual benchmark
+
+- Copy `datasets/MQuAKE-CF-3k-v2-cake.json` to `datasets/MQuAKE-CF-3k-v2-clke.json`
+- Run `analysis/llm_translate.py` to translate:
   ```bash
-  DATA_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
-  MODEL="gpt-oss-120b"
-  ENDPOINT=<YOUR_ENDPOINT>
-  API_KEY=<YOUR_API_KEY>
-  : 'CASE_ID=<START> <STOP>"'
-  CASE_ID="1 1"
-  LANGUAGE="zh"
-  python analysis/llm_translate.py --dataset_path $DATA_PATH --model $MODEL --endpoint $ENDPOINT --api_key $API_KEY --case_id ${=CASE_ID} --language ${=LANGUAGE}
+  python analysis/llm_translate.py \
+      --dataset_path datasets/MQuAKE-CF-3k-v2-clke.json \
+      --model gpt-oss-120b \
+      --endpoint <YOUR_ENDPOINT> --api_key <YOUR_API_KEY> \
+      --case_id 1 1 --language zh
   ```
 
-- E. Biran et al. [1]:
-  - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/composition_{correct/incorrect/inconsistent}/two_hop.csv` files. Use it to do back-patching experiments.
-  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
-    ```bash
-    python analysis/evaluate_dataset.py gpt2 --input_path datasets/two_hop.csv --output_path datasets/gpt2/two_hop.csv
-    ```
-  - Run `analysis/generate_entity_description.py` to do Patchscopes entity description experiments.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets/${MODEL}
-      SEED=0
-
-      COMPOSITION=correct
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-      
-      SOURCE_TOKEN=e1
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/entity_description/$SOURCE_TOKEN_entity_description_s${SEED}.csv
-      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
-
-      SOURCE_TOKEN=last
-      OUTPUT_PATH=$DATA_DIR/composition_${COMPOSITION}/entity_description/${SOURCE_TOKEN}_entity_description_s${SEED}.csv
-      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
-
-      COMPOSITION=incorrect
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-
-      SOURCE_TOKEN=e1
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/entity_description/${SOURCE_TOKEN}_entity_description_s${SEED}.csv
-      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
-
-      SOURCE_TOKEN=last
-      OUTPUT_PATH=$DATA_DIR/composition_${COMPOSITION}/entity_description/${SOURCE_TOKEN}_entity_description_s${SEED}.csv
-      python analysis/generate_entity_description.py $MODEL $SOURCE_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH --target-prompt description --seed $SEED
-      ```
-    </details>
-  - Run `analysis/project_sublayer.py` to do sublayer projection experiments.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets/${MODEL}
-
-      COMPOSITION=correct
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-
-      SUBLAYER=attention
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
-      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-    
-      SUBLAYER=mlp
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
-      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-
-      COMPOSITION=incorrect
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-
-      SUBLAYER=attention
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
-      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-    
-      SUBLAYER=mlp
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/sublayer_projection/${SUBLAYER}_projections.csv
-      python analysis/project_sublayer.py $MODEL $SUBLAYER --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-      ```
-    </details>
-  - Run `analysis/patch_activations.py` to do back-patching experiments.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets/${MODEL}
-
-      COMPOSITION=correct
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-    
-      SOURCE_TOKEN=e1
-      TARGET_TOKEN=original
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-
-      SOURCE_TOKEN=last
-      TARGET_TOKEN=original
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-
-      COMPOSITION=incorrect
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-
-      SOURCE_TOKEN=e1
-      TARGET_TOKEN=original
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-
-      SOURCE_TOKEN=last
-      TARGET_TOKEN=original
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-      ```
-    </details>
-  - Run `analysis/knockout_attention.py` to do attention knockout experiments.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      PROMPT_TYPE=composition
-      DATA_DIR=datasets/${MODEL}
-      K=3
-      
-      COMPOSITION=correct
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-      
-      KNOCKOUT_SOURCE=last
-      KNOCKOUT_TARGET=e1
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/attention_knockout/${KNOCKOUT_SOURCE}_${KNOCKOUT_TARGET}_attention_knockout_k${K}_${PROMP_TYPE}.csv
-
-      python analysis/knockout_attention.py $MODEL $KNOCKOUT_SOURCE $KNOCKOUT_TARGET --input-path $INPUT_PATH --output-path $OUTPUT_PATH --k $K --prompt $PROMPT_TYPE
-
-      COMPOSITION=incorrect
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-      
-      KNOCKOUT_SOURCE=last
-      KNOCKOUT_TARGET=e1
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/attention_knockout/${KNOCKOUT_SOURCE}_${KNOCKOUT_TARGET}_attention_knockout_k${K}_${PROMP_TYPE}.csv
-
-      python analysis/knockout_attention.py $MODEL $KNOCKOUT_SOURCE $KNOCKOUT_TARGET --input-path $INPUT_PATH --output-path $OUTPUT_PATH --k $K --prompt $PROMPT_TYPE
-      ```
-    </details>
-  - Run `analysis/classify_results.py` to classify the experiments' results.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets/${MODEL}
-
-      COMPOSITION=correct
-      RESULT_DIR=${DATA_DIR}/composition_${COMPOSITION}
-      python analysis/classify_results.py $RESULT_DIR
-
-      COMPOSITION=incorrect
-      RESULT_DIR=${DATA_DIR}/composition_${COMPOSITION}
-      python analysis/classify_results.py $RESULT_DIR
-      ```
-    </details>
-  - Z. Yu et al. [3, 4]:
-    - Run `analysis/neuron_attribution.py` to compute neuron-level LPI and chained backward attribution for FFN and attention value neurons. Requires GPU for practical runtimes (~2 min for 900 examples). Internally uses `analysis/patch_model.py` to monkey-patch GPT-2/Llama forward passes and capture internal states without modifying model files.
-      <details>
-        <summary>GPT2 example</summary>
-        ```bash
-        MODEL=gpt2
-        DATA_DIR=datasets/${MODEL}
-
-        # Run all three prompt types (composition, first-hop, second-hop) and all subsets
-        python analysis/neuron_attribution.py --model-name $MODEL --data-dir $DATA_DIR \
-            --prompts two-hop first-hop second-hop \
-            --subsets correct incorrect inconsistent
-
-        # Or run prompts type with a limit for quick testing
-        python analysis/neuron_attribution.py --model-name $MODEL --data-dir $DATA_DIR \
-            --prompts two-hop first-hop --subsets correct --max-examples 20
-        ```
-
-        Outputs per `(prompt_type, subset)` under `datasets/{model}/composition_{subset}/{neuron_attribution_*}/`:
-        - `sublayer_lpi.csv` — per-(example, layer, sublayer) LPI
-        - `head_lpi.csv` — per-(example, layer, head) LPI
-        - `ffn_neurons.csv` — top-K FFN value neurons (LPI + top tokens)
-        - `attn_neurons.csv` — top-K attention value neurons (LPI + top tokens)
-        - `ffn_query_layers.csv` / `attn_query_layers.csv` — residual stream layer decomposition
-        - `chain_order{N}_ffn.csv` / `chain_order{N}_attn.csv` — chained backward attribution at order N (runs until exhausted)
-      </details>
-    - Run `analysis/analyze_neuron_attribution.py` to generate figures from the neuron attribution results.
-      <details>
-        <summary>GPT2 example</summary>
-        ```bash
-        MODEL=gpt2
-        DATA_DIR=datasets
-        OUTPUT_PATH=plots
-
-        # Composition prompt (default)
-        python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL
-
-        # First-hop and second-hop prompts
-        python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL --prompt first-hop
-        python analysis/analyze_neuron_attribution.py $DATA_DIR $OUTPUT_PATH -m $MODEL --prompt second-hop
-        ```
-
-        Produces per model under `plots/{model}/`:
-        - `sublayer_lpi_profile{_*}.pdf` / `sublayer_lpi_bars{_*}.pdf` — mean LPI by layer and sublayer
-        - `head_lpi_heatmap{_*}.pdf` — mean head LPI heatmap (layer × head)
-        - `neuron_layer_dist{_*}.pdf` — top-K neuron counts per layer
-        - `query_layer_bars{_*}.pdf` — residual stream decomposition by layer
-        - `chain_layer_profile{_*}.pdf` — backward attribution chain by layer and order (reveals first-hop at orders 2–3)
-        - `neuron_overlap_{subset}.pdf` — pairwise Jaccard similarity of top-K neurons across prompt types
-      </details>
-  - Run `analysis/analyze_resutls.py` to generate figures.
-    <details>
-      <summary>GPT2 example</summary>
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets
-      OUTPUT_PATH=output
-
-      python analysis/analyze_results.py $DATA_DIR $OUTPUT_PATH -m $MODEL
-      ```
-    </details>
-- Y. Yao et al. [2]:
-  - Run `analysis/analyze_subset.py` to compute the `backpatch_t1`, `backpatch_t2`, `t1_to_t2` success rate.
-    <details>
-      <summary>GPT2 example</summary>
-
-      do extra activation patching
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets/${MODEL}
-
-      COMPOSITION=incorrect
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-
-      SOURCE_TOKEN=e1
-      TARGET_TOKEN=last
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-
-      COMPOSITION=inconsistent
-      INPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/two_hop.csv
-    
-      SOURCE_TOKEN=e1
-      TARGET_TOKEN=original
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-
-      SOURCE_TOKEN=last
-      TARGET_TOKEN=original
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-
-      SOURCE_TOKEN=e1
-      TARGET_TOKEN=last
-      OUTPUT_PATH=${DATA_DIR}/composition_${COMPOSITION}/activation_patching/${SOURCE_TOKEN}_${TARGET_TOKEN}_activation_patching.csv
-      python analysis/patch_activations.py $MODEL $SOURCE_TOKEN $TARGET_TOKEN --input-path $INPUT_PATH --output-path $OUTPUT_PATH
-      ```
-
-      analyze
-      ```bash
-      MODEL=gpt2
-      DATA_DIR=datasets/gpt2
-
-      python analysis/analyze_subset.py --data_dir $DATA_DIR
-      ```
-    </details>
-
-[1] E. Biran et al., "Hopping Too Late: Exploring Limitations of Large Language models on Multi-Hop Queries," in EMNLP 2024
-[2] Y. Yao et al., "CaKe: Circuit-aware Editing Enables Generalizable Knowledge Learners," in EMNLP 2025
+[1] E. Biran et al., "Hopping Too Late: Exploring the Limitations of Large Language Models on Multi-Hop Queries," in EMNLP 2024
+[2] Y. Yao et al., "CaKE: Circuit-aware Editing Enables Generalizable Knowledge Learners," in EMNLP 2025
 [3] Z. Yu et al., "Back Attention: Understanding and Enhancing Multi-Hop Reasoning in Large Language Models," in EMNLP 2025
 [4] Z. Yu et al., "Neuron-Level Knowledge Attribution in Large Language Models," in EMNLP 2024
 

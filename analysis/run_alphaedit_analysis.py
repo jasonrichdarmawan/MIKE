@@ -12,12 +12,8 @@ Subsets are derived from evaluated_two_hop.csv (post-edit evaluation):
     still_incorrect    — composition_correct == False, is_correct_second_hop == False
     still_inconsistent — composition_correct == False, is_correct_second_hop == True
 
-Prerequisites:
-    evaluated_two_hop.csv must exist in <output_dir>/.
-    Generate it with evaluate_dataset.py run on the edited model.
-
 Usage:
-    python analysis/run_edited_analysis.py \\
+    python analysis/run_alphaedit_analysis.py \\
         [--model  meta-llama/Meta-Llama-3-8B] \\
         [--hparams EasyEdit/hparams/AlphaEdit/llama3-8b.yaml] \\
         [--input  datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect/two_hop.csv] \\
@@ -39,8 +35,12 @@ from EasyEdit.easyeditor import AlphaEditHyperParams
 from EasyEdit.easyeditor.util import nethook
 from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
 
+from evaluate_dataset import (
+    eval_composition, eval_first_hop, eval_second_hop,
+    eval_entity_shortcut, eval_relation_shortcut,
+)
+from generate_entity_description import generate_entity_description_with_patching
 from knockout_attention import generate_answer_with_attention_knockout
-from patch_activations import activation_patching, create_target_prompt
 from project_sublayer import project_attention
 from utils import get_answers, load_model, load_tokenizer
 
@@ -142,13 +142,22 @@ def main(args):
         apply_algo(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
         save_checkpoint(model, hparams, ckpt_path)
 
-    # ── Split into subsets ────────────────────────────────────────────────────
+    # ── Evaluate edited model (if not already done) ───────────────────────────
     evaluated_path = out_dir / "evaluated_two_hop.csv"
     if not evaluated_path.exists():
-        raise FileNotFoundError(
-            f"{evaluated_path} not found.\n"
-            "Run evaluate_dataset.py on the edited model checkpoint first.")
-    evaluated = pd.read_csv(evaluated_path, index_col=0)
+        print("Running evaluation on edited model ...")
+        fn_kwargs = {"model": model, "tokenizer": tokenizer}
+        hf_eval = Dataset.from_pandas(dataset, preserve_index=False)
+        hf_eval = hf_eval.map(eval_first_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_eval = hf_eval.map(eval_second_hop,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_eval = hf_eval.map(eval_composition,      batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_eval = hf_eval.map(eval_entity_shortcut,  batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_eval = hf_eval.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        evaluated = hf_eval.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True)
+        evaluated.to_csv(evaluated_path)
+        print(f"Saved {evaluated_path}")
+    else:
+        evaluated = pd.read_csv(evaluated_path, index_col=0)
     if args.max_examples:
         evaluated = evaluated.head(args.max_examples)
 
@@ -163,59 +172,79 @@ def main(args):
 
     hf_dataset = Dataset.from_pandas(dataset, preserve_index=False)
 
+    def outputs_exist(subdir, filename):
+        return all((out_dir / name / subdir / filename).exists() for name in subsets)
+
     # ── Method 1: Sublayer projection — attention ─────────────────────────────
-    print("\n=== Method 1/4: Sublayer projection (attention) ===")
-    sublayer_attn = to_sublayer_df(hf_dataset.map(
-        project_attention,
-        fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
-        batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
-    ))
-    save_by_subset(sublayer_attn, subsets, out_dir,
-                   "sublayer_projection", "attention_projections.csv", ["id", "layer"])
+    if outputs_exist("sublayer_projection", "attention_projections.csv"):
+        print("\n=== Method 1/4: Sublayer projection (attention) — SKIP (exists) ===")
+    else:
+        print("\n=== Method 1/4: Sublayer projection (attention) ===")
+        sublayer_attn = to_sublayer_df(hf_dataset.map(
+            project_attention,
+            fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
+        ))
+        save_by_subset(sublayer_attn, subsets, out_dir,
+                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
 
     # ── Method 2: Sublayer projection — MLP ───────────────────────────────────
-    print("\n=== Method 2/4: Sublayer projection (MLP) ===")
-    sublayer_mlp = to_sublayer_df(hf_dataset.map(
-        project_attention,
-        fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
-        batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
-    ))
-    save_by_subset(sublayer_mlp, subsets, out_dir,
-                   "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
+    if outputs_exist("sublayer_projection", "mlp_projections.csv"):
+        print("\n=== Method 2/4: Sublayer projection (MLP) — SKIP (exists) ===")
+    else:
+        print("\n=== Method 2/4: Sublayer projection (MLP) ===")
+        sublayer_mlp = to_sublayer_df(hf_dataset.map(
+            project_attention,
+            fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
+        ))
+        save_by_subset(sublayer_mlp, subsets, out_dir,
+                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
 
     # ── Method 3: Attention knockout ──────────────────────────────────────────
-    print("\n=== Method 3/4: Attention knockout ===")
-    knockout = hf_dataset.map(
-        generate_answer_with_attention_knockout,
-        fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
-                   "knockout_source": "last", "knockout_target": "e1", "k": 3,
-                   "prompt": "composition"},
-        batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
-    ).to_pandas()
-    save_by_subset(knockout, subsets, out_dir,
-                   "attention_knockout", "last_e1_attention_knockout_k3_composition.csv",
-                   ["id", "layer"])
+    if outputs_exist("attention_knockout", "last_e1_attention_knockout_k3_composition.csv"):
+        print("\n=== Method 3/4: Attention knockout — SKIP (exists) ===")
+    else:
+        print("\n=== Method 3/4: Attention knockout ===")
+        knockout = hf_dataset.map(
+            generate_answer_with_attention_knockout,
+            fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
+                       "knockout_source": "last", "knockout_target": "e1", "k": 3,
+                       "prompt": "composition"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
+        ).to_pandas()
+        save_by_subset(knockout, subsets, out_dir,
+                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv",
+                       ["id", "layer"])
 
     # ── Method 4: PatchScopes (optional, slow) ────────────────────────────────
     if not args.skip_patchscopes:
-        print("\n=== Method 4/4: PatchScopes ===")
+        target_prompt = (
+            "Syria: Syria is a country in the Middle East, "
+            "Leonardo DiCaprio: Leonardo DiCaprio is an American actor, "
+            "Samsung: Samsung is a South Korean multinational corporation, "
+            "x"
+        )
+        dataset_ps = dataset.copy()
+        dataset_ps["target_prompt"] = target_prompt
+        hf_ps = Dataset.from_pandas(dataset_ps, preserve_index=False)
         for source in ["e1", "last"]:
-            print(f"  source={source}")
-            dataset_src = dataset.copy()
-            dataset_src["target_prompt"] = create_target_prompt(dataset, source, "original")
-            hf_src = Dataset.from_pandas(dataset_src, preserve_index=False)
-            patch = hf_src.map(
-                activation_patching,
+            if outputs_exist("entity_description", f"{source}_entity_description_s0.csv"):
+                print(f"\n=== Method 4/4: PatchScopes source={source} — SKIP (exists) ===")
+                continue
+            print(f"\n=== Method 4/4: PatchScopes source={source} ===")
+            patch = hf_ps.map(
+                generate_entity_description_with_patching,
                 fn_kwargs={"model": model, "tokenizer": tokenizer,
-                           "source": source, "target": "original", "default_decoding": False},
+                           "source": source, "do_sample": False},
                 batched=True, batch_size=args.batch_size,
-                remove_columns=hf_src.column_names,
+                remove_columns=hf_ps.column_names,
             ).to_pandas()
             save_by_subset(patch, subsets, out_dir,
                            "entity_description", f"{source}_entity_description_s0.csv",
                            ["id", "source_layer", "target_layer"])
 
-    print(f"\nDone. Run: python analysis/analyze_edited.py")
+    print(f"\nDone. Run: python analysis/analyze_tables.py --subsets pre-edit:<base_dir> now_correct:{out_dir}/now_correct ...")
 
 
 # %%

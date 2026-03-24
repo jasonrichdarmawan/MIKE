@@ -59,6 +59,8 @@ import torch
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+from EasyEdit.easyeditor.util import nethook
+
 # %%
 
 # Prompt type names are used directly as subdirectory names under
@@ -846,6 +848,12 @@ def main(args):
         torch_dtype=torch.bfloat16,
     ).to(device)
     model.eval()
+    if args.checkpoint:
+        weights = torch.load(args.checkpoint, map_location=device)
+        with torch.no_grad():
+            for k, v in weights.items():
+                nethook.get_parameter(model, k)[...] = v
+        print(f"Loaded checkpoint from {args.checkpoint}")
 
     patch_model.patch(model)
     info = patch_model.model_info(model)
@@ -1128,6 +1136,9 @@ if __name__ == "__main__":
                         help="Token to attribute LPI toward: 'argmax' (model's predicted token, "
                              "default) or 'label' (first token of the target answer e2/e3). "
                              "Use 'label' for pre/post-edit comparison on the incorrect subset.")
+    parser.add_argument("--checkpoint", default=None,
+                        help="Path to .pt checkpoint of edited weights (e.g. editing_checkpoint.pt). "
+                             "Applied before weight stacking — stacked tensors reflect edited weights.")
     main(parser.parse_args())
 
 # %%

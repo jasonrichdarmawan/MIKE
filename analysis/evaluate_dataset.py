@@ -2,8 +2,10 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from datasets import Dataset
+from EasyEdit.easyeditor.util import nethook
 from utils import load_model, load_tokenizer, generate_and_test_answers, get_answers
 
 
@@ -106,6 +108,12 @@ def main(args):
 
     model = load_model(args.model_name)
     model.eval()
+    if args.checkpoint:
+        weights = torch.load(args.checkpoint, map_location=next(model.parameters()).device)
+        with torch.no_grad():
+            for k, v in weights.items():
+                nethook.get_parameter(model, k)[...] = v
+        print(f"Loaded checkpoint from {args.checkpoint}")
     tokenizer = load_tokenizer(args.model_name)
     tokenizer.padding_side = "left"
 
@@ -120,8 +128,6 @@ def main(args):
     dataset = dataset.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size,
                           fn_kwargs={"model": model, "tokenizer": tokenizer})
 
-    dataset_path = Path(f"..datasets/{args.model_name}/two_hop.csv")
-    dataset_path.parent.mkdir(parents=True, exist_ok=True)
     dataset = dataset.to_pandas()
     dataset = dataset.drop(["e2_answers", "e3_answers"], axis=1)
     dataset = dataset.reset_index(drop=True)
@@ -141,5 +147,7 @@ if __name__ == "__main__":
         "meta-llama/Meta-Llama-3-8B", "meta-llama/Meta-Llama-3-70B"])
     parser.add_argument("--input-path")
     parser.add_argument("--output-path")
+    parser.add_argument("--checkpoint", default=None,
+                        help="Path to .pt checkpoint of edited weights (e.g. editing_checkpoint.pt)")
     parser.add_argument("--batch-size", type=int, default=32)
     main(parser.parse_args())
