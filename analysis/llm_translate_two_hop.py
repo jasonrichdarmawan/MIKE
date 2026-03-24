@@ -250,20 +250,29 @@ async def _api_call(client: AsyncOpenAI, deployment_name: str,
 
 async def translate_row(client: AsyncOpenAI, deployment_name: str,
                         semaphore: asyncio.Semaphore,
-                        input_data: dict, lang_name: str, lang_code: str):
-    """Translate one row into one language, respecting the concurrency semaphore."""
-    system_prompt = build_system_prompt(lang_name)
-    async with semaphore:
-        try:
-            content = await _api_call(client, deployment_name, system_prompt, input_data)
-        except Exception as e:
-            tqdm.write(f"API error row lang={lang_code}: {e}")
-            return None
+                        input_data: dict, lang_name: str, lang_code: str,
+                        max_parse_retries: int = 3):
+    """Translate one row into one language, respecting the concurrency semaphore.
 
-    translated = parse_model_json(content)
-    if translated is None:
-        tqdm.write(f"Failed to parse JSON lang={lang_code}")
-    return translated
+    Retries up to max_parse_retries times if the model returns valid text but
+    unparseable JSON (common with French when the model adds prose around the JSON).
+    """
+    system_prompt = build_system_prompt(lang_name)
+    for attempt in range(1, max_parse_retries + 1):
+        async with semaphore:
+            try:
+                content = await _api_call(client, deployment_name, system_prompt, input_data)
+            except Exception as e:
+                tqdm.write(f"API error lang={lang_code} (attempt {attempt}/{max_parse_retries}): {e}")
+                return None
+
+        translated = parse_model_json(content)
+        if translated is not None:
+            return translated
+
+        tqdm.write(f"Failed to parse JSON lang={lang_code} (attempt {attempt}/{max_parse_retries})")
+
+    return None
 
 
 async def save_json(output_path: str, output_index: dict):
