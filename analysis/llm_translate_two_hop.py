@@ -8,11 +8,14 @@ import os
 import re
 
 import aiofiles
+import httpx
 import pandas as pd
 from openai import AsyncOpenAI, RateLimitError, APIStatusError
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from tqdm.asyncio import tqdm as atqdm
 from tqdm import tqdm
+
+API_TIMEOUT_SECONDS = 60   # abort any single API call after this long
 
 # %%
 
@@ -234,16 +237,22 @@ FEW_SHOT_ASSISTANT = json.dumps({
 )
 async def _api_call(client: AsyncOpenAI, deployment_name: str,
                     system_prompt: str, input_data: dict) -> str:
-    """Single async API call with tenacity retry on rate-limit / server errors."""
-    response = await client.chat.completions.create(
-        model=deployment_name,
-        messages=[
-            {"role": "system",    "content": system_prompt},
-            {"role": "user",      "content": FEW_SHOT_USER},
-            {"role": "assistant", "content": FEW_SHOT_ASSISTANT},
-            {"role": "user",      "content": json.dumps(input_data, ensure_ascii=False)},
-        ],
-        temperature=0.3,
+    """Single async API call with tenacity retry on rate-limit / server errors.
+    Wrapped in asyncio.wait_for to enforce a hard timeout so hung calls don't
+    block the batch forever.
+    """
+    response = await asyncio.wait_for(
+        client.chat.completions.create(
+            model=deployment_name,
+            messages=[
+                {"role": "system",    "content": system_prompt},
+                {"role": "user",      "content": FEW_SHOT_USER},
+                {"role": "assistant", "content": FEW_SHOT_ASSISTANT},
+                {"role": "user",      "content": json.dumps(input_data, ensure_ascii=False)},
+            ],
+            temperature=0.3,
+        ),
+        timeout=API_TIMEOUT_SECONDS,
     )
     return response.choices[0].message.content
 
@@ -275,11 +284,12 @@ async def translate_row(client: AsyncOpenAI, deployment_name: str,
     return None
 
 
-async def save_json(output_path: str, output_index: dict):
-    """Async write of the full output JSON after each batch."""
-    output_list = [output_index[rid] for rid in sorted(output_index.keys())]
-    async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
-        await f.write(json.dumps(output_list, ensure_ascii=False, indent=2))
+async def save_json(output_path: str, output_index: dict, lock: asyncio.Lock):
+    """Async write of the full output JSON, serialised via lock to prevent corruption."""
+    async with lock:
+        output_list = [output_index[rid] for rid in sorted(output_index.keys())]
+        async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(output_list, ensure_ascii=False, indent=2))
     return len(output_list)
 
 # %%
@@ -290,6 +300,7 @@ async def main():
     deployment_name = args.model
     languages       = {k: v for k, v in TARGET_LANGUAGES.items() if k in args.language}
     semaphore       = asyncio.Semaphore(args.max_concurrency)
+    save_lock       = asyncio.Lock()   # prevents concurrent writes corrupting the JSON
 
     client = AsyncOpenAI(base_url=args.endpoint, api_key=args.api_key)
 
@@ -343,21 +354,16 @@ async def main():
               f"{len(batch_jobs)} jobs  "
               f"({len(batch_row_ids)} rows × {len(languages)} languages)")
 
-        # fire all jobs concurrently; semaphore caps simultaneous API calls
+        # fire all jobs concurrently; semaphore caps simultaneous API calls;
+        # each job saves immediately on success — progress survives Ctrl+C
         async def run_job(rid, lang_code, lang_name):
             input_data = row_to_input(output_index[rid])
             result     = await translate_row(
                 client, deployment_name, semaphore, input_data, lang_name, lang_code
             )
-            return rid, lang_code, result
-
-        tasks   = [asyncio.create_task(run_job(r, lc, ln)) for r, lc, ln in batch_jobs]
-        results = await atqdm.gather(*tasks, desc=f"Batch {batch_num}/{total_batches}", unit="job")
-
-        for rid, lang_code, result in results:
             if result is None:
                 tqdm.write(f"Translation failed row_id={rid} lang={lang_code}, skipping.")
-                continue
+                return
 
             updated = 0
             for key in KEYS_TO_TRANSLATE:
@@ -370,13 +376,14 @@ async def main():
             if updated == 0:
                 tqdm.write(f"No expected keys row_id={rid} lang={lang_code}; "
                            f"got={list(result.keys())}")
-            else:
-                tqdm.write(f"row_id={rid} lang={lang_code}: "
-                           f"{updated}/{len(KEYS_TO_TRANSLATE)} keys")
+                return
 
-        # save after each complete batch
-        n_saved = await save_json(args.output_path, output_index)
-        tqdm.write(f"Saved {n_saved} entries → {args.output_path}")
+            tqdm.write(f"row_id={rid} lang={lang_code}: {updated}/{len(KEYS_TO_TRANSLATE)} keys")
+            await save_json(args.output_path, output_index, save_lock)
+
+        tasks = [asyncio.create_task(run_job(r, lc, ln)) for r, lc, ln in batch_jobs]
+        await atqdm.gather(*tasks, desc=f"Batch {batch_num}/{total_batches}", unit="job")
+        tqdm.write(f"Batch {batch_num}/{total_batches} complete.")
 
     await client.close()
 
