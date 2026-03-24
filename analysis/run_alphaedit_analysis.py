@@ -17,7 +17,7 @@ Usage:
         [--model  meta-llama/Meta-Llama-3-8B] \\
         [--hparams EasyEdit/hparams/AlphaEdit/llama3-8b.yaml] \\
         [--input  datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect/two_hop.csv] \\
-        [--output datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_edited] \\
+        [--output datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit] \\
         [--max-examples N] [--skip-patchscopes] [--device 0]
 """
 
@@ -257,7 +257,7 @@ if __name__ == "__main__":
     parser.add_argument("--input",
                         default="datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect/two_hop.csv")
     parser.add_argument("--output",
-                        default="datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_edited")
+                        default="datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit")
     parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument("--skip-patchscopes", action="store_true",
                         help="Skip patchscopes (method 4) to save time")

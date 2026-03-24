@@ -21,9 +21,9 @@ Usage:
     python analysis/analyze_tables.py \\
         --subsets \\
             pre-edit:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect \\
-            now_correct:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_edited/now_correct \\
-            still_incorrect:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_edited/still_incorrect \\
-            still_inconsistent:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_edited/still_inconsistent
+            now_correct:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/now_correct \\
+            still_incorrect:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/still_incorrect \\
+            still_inconsistent:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/still_inconsistent
 """
 
 # %%
