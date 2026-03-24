@@ -54,7 +54,7 @@ pip install opencv-python==4.8.0.76 fairscale==0.4.13
 
 micromamba install beartype jaxtyping
 
-pip install zhipuai sniffio
+pip install baukit zhipuai sniffio
 ```
 
 ## 📚Analyze
