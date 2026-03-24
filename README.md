@@ -130,13 +130,13 @@ python analysis/neuron_attribution.py \
     --prompts two-hop --subsets correct --max-examples 20
 ```
 
-Outputs per `(subset, prompt_type)` under `$DATA_DIR/{subset}/neuron_attribution/{prompt_type}/`:
+Outputs per `(subset, prompt_type)` under `{subset_dir}/neuron_attribution/{prompt_type}/`, where `subset_dir` is the resolved input folder (e.g. `$DATA_DIR/composition_correct` for pre-edit, `$OUT_DIR/now_correct` for post-edit):
 - `sublayer_lpi.csv`, `head_lpi.csv` — per-example LPI
 - `ffn_query_layers.csv`, `attn_query_layers.csv` — residual stream decomposition
 - `chain_profile.csv`, `chain_mean_layer.csv` — aggregated chain attribution
 - `chain_position_dist.csv` — marginal position distribution
 
-Under `$DATA_DIR/{subset}/neuron_attribution/`:
+Under `{subset_dir}/neuron_attribution/`:
 - `jaccard.csv`, `overlap_position.csv`, `overlap_position_by_layer.csv`
 
 ---
@@ -205,8 +205,8 @@ python analysis/analyze_tables.py --subsets \
 
 # Summary tables (neuron attribution)
 python analysis/analyze_tables_neuron.py --subsets \
-    correct:$DATA_DIR/correct/neuron_attribution \
-    incorrect:$DATA_DIR/incorrect/neuron_attribution
+    correct:$DATA_DIR/composition_correct/neuron_attribution \
+    incorrect:$DATA_DIR/composition_incorrect/neuron_attribution
 
 # Mechanism plots
 python analysis/analyze_plots.py \
@@ -219,8 +219,8 @@ python analysis/analyze_plots.py \
 python analysis/analyze_plots_neuron.py \
     --model $MODEL --output-dir $PLOTS \
     --subsets \
-        correct:$DATA_DIR/correct/neuron_attribution \
-        incorrect:$DATA_DIR/incorrect/neuron_attribution
+        correct:$DATA_DIR/composition_correct/neuron_attribution \
+        incorrect:$DATA_DIR/composition_incorrect/neuron_attribution
 
 # Pre- vs post-edit comparison
 python analysis/analyze_tables.py --subsets \

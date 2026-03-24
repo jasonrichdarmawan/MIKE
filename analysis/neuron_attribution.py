@@ -897,12 +897,14 @@ def main(args):
             print(f"\n[SKIP] {input_path} not found")
             continue
 
+        subset_dir = input_path.parent
+
         df = pd.read_csv(input_path, index_col=0)
         n  = len(df) if args.max_examples is None else min(len(df), args.max_examples)
         print(f"\n=== subset={subset}: {n} examples, prompts={args.prompts} ===")
 
         # Checkpoint: resume from partial run if available
-        ckpt_path = data_dir / subset / "neuron_attribution" / f"{subset}_ckpt.pkl"
+        ckpt_path = subset_dir / "neuron_attribution" / f"{subset}_ckpt.pkl"
         ckpt_path.parent.mkdir(parents=True, exist_ok=True)
         start_idx = 0
         accum = {pt: _Accum() for pt in args.prompts}
@@ -1063,7 +1065,7 @@ def main(args):
         print(f"  {n}/{n} done      ")
 
         # Save per-prompt-type compact outputs
-        na_subset_dir = data_dir / subset / "neuron_attribution"
+        na_subset_dir = subset_dir / "neuron_attribution"
         for pt in args.prompts:
             a = accum[pt]
             output_dir = na_subset_dir / pt

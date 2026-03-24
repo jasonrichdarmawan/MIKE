@@ -26,13 +26,13 @@ Usage:
     # Pre-edit
     python analysis/analyze_tables_neuron.py \\
         --subsets \\
-            correct:datasets/meta-llama/Meta-Llama-3-8B/correct/neuron_attribution \\
-            incorrect:datasets/meta-llama/Meta-Llama-3-8B/incorrect/neuron_attribution
+            correct:datasets/meta-llama/Meta-Llama-3-8B/composition_correct/neuron_attribution \\
+            incorrect:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect/neuron_attribution
 
     # Pre- and post-edit comparison
     python analysis/analyze_tables_neuron.py \\
         --subsets \\
-            pre-edit:datasets/meta-llama/Meta-Llama-3-8B/incorrect/neuron_attribution \\
+            pre-edit:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect/neuron_attribution \\
             now_correct:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/now_correct/neuron_attribution \\
             still_incorrect:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/still_incorrect/neuron_attribution
 """
@@ -259,5 +259,5 @@ if __name__ == "__main__":
                         metavar="NAME:PATH",
                         help="One or more name:path pairs where path is the neuron attribution "
                              "directory for that subset, e.g. "
-                             "correct:datasets/meta-llama/Meta-Llama-3-8B/correct/neuron_attribution")
+                             "correct:datasets/meta-llama/Meta-Llama-3-8B/composition_correct/neuron_attribution")
     main(parser.parse_args())

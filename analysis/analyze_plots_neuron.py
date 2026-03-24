@@ -32,15 +32,15 @@ Usage:
         --model meta-llama/Meta-Llama-3-8B \\
         --output-dir plots/meta-llama/Meta-Llama-3-8B \\
         --subsets \\
-            correct:datasets/meta-llama/Meta-Llama-3-8B/correct/neuron_attribution \\
-            incorrect:datasets/meta-llama/Meta-Llama-3-8B/incorrect/neuron_attribution
+            correct:datasets/meta-llama/Meta-Llama-3-8B/composition_correct/neuron_attribution \\
+            incorrect:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect/neuron_attribution
 
     # Pre- and post-edit comparison
     python analysis/analyze_plots_neuron.py \\
         --model meta-llama/Meta-Llama-3-8B \\
         --output-dir plots/meta-llama/Meta-Llama-3-8B/post_alphaedit \\
         --subsets \\
-            pre-edit:datasets/meta-llama/Meta-Llama-3-8B/incorrect/neuron_attribution \\
+            pre-edit:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect/neuron_attribution \\
             now_correct:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/now_correct/neuron_attribution \\
             still_incorrect:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/still_incorrect/neuron_attribution
 """
@@ -1109,7 +1109,7 @@ if __name__ == "__main__":
                         metavar="NAME:PATH",
                         help="One or more name:path pairs where path is the neuron attribution "
                              "subset directory, e.g. "
-                             "correct:datasets/meta-llama/Meta-Llama-3-8B/correct/neuron_attribution")
+                             "correct:datasets/meta-llama/Meta-Llama-3-8B/composition_correct/neuron_attribution")
     parser.add_argument("--output-dir", required=True,
                         help="Directory to write plot PDFs into")
     parser.add_argument("-m", "--model", required=True,
