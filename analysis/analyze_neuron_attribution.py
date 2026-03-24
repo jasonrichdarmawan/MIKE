@@ -45,6 +45,7 @@ sns.set_style("whitegrid")
 
 SUBSET_LABELS = ["correct", "incorrect", "inconsistent"]
 PROMPT_TYPES  = ["two-hop", "first-hop", "second-hop"]
+PROMPT_TYPES  = ["two-hop", "first-hop", "second-hop"]
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
@@ -76,7 +77,8 @@ def load_neuron_lpi(dataset_dir: str, attr_subdir: str = "two-hop"):
         "neuron_layer_dist":    _optional("neuron_layer_dist.csv"),
         "chain_profile":        _optional("chain_profile.csv"),
         "chain_mean_layer":     _optional("chain_mean_layer.csv"),
-        "chain_position_dist":  _optional("chain_position_dist.csv"),
+        "chain_position_dist":       _optional("chain_position_dist.csv"),
+        "chain_position_layer_dist": _optional("chain_position_layer_dist.csv"),
     }
 
     # Infer max chain order from chain_profile
@@ -773,6 +775,110 @@ def plot_overlap_position_by_layer(overlap_pos_layer_df, n_layers, path, pair_ke
         plt.close()
 
 
+# ── Plot 13: attribution chain flow heatmap ──────────────────────────────────
+
+def plot_four_stage_mechanism(lpi_data, n_layers, path):
+    """
+    Full attribution chain flow: position × layer heatmap for each chain step.
+
+    Two parallel chains feeding the final prediction:
+      Chain A: ffn→attn (order -2) → attn→ffn (order -1) → ffn (order 0, last)
+      Chain B: ffn→attn (order -1) → attn (order 0, all positions)
+
+    Columns = chain steps ordered deepest → shallowest. Order -2 is skipped if
+    not present in data (first-hop / second-hop only have orders 0 and -1).
+    Rows = correct / incorrect subsets.
+    Each panel: y = position (r2/r1/e1/last), x = layer, colour = mean neuron count.
+    Shared colour scale across all panels.
+    """
+    positions = ["r2", "r1", "e1", "last"]
+
+    # All possible chain steps in display order (left = deepest backward)
+    ALL_STEPS = [
+        (-2, "ffn\u2192attn",  "Chain A\norder −2\nffn→attn"),
+        (-1, "attn\u2192ffn",  "Chain A\norder −1\nattn→ffn"),
+        (-1, "ffn\u2192attn",  "Chain B\norder −1\nffn→attn"),
+        ( 0, "ffn",            "Chain A\norder 0\nffn"),
+        ( 0, "attn",           "Chain B\norder 0\nattn"),
+    ]
+
+    # Only show subsets correct/incorrect; skip inconsistent
+    row_labels = [l for l in ["correct", "incorrect"] if l in lpi_data]
+
+    # Check data availability
+    available_dfs = {
+        label: lpi_data[label]["chain_position_layer_dist"]
+        for label in row_labels
+        if lpi_data[label].get("chain_position_layer_dist") is not None
+    }
+    if not available_dfs:
+        print("  [SKIP] plot_four_stage_mechanism: no chain_position_layer_dist data")
+        return
+
+    # Determine which steps have data (skip order -2 if absent)
+    all_data = pd.concat(available_dfs.values(), ignore_index=True)
+    steps = [
+        (order, ntype, label)
+        for order, ntype, label in ALL_STEPS
+        if len(all_data[(all_data["order"] == order) & (all_data["ntype"] == ntype)]) > 0
+    ]
+    if not steps:
+        print("  [SKIP] plot_four_stage_mechanism: no chain steps found in data")
+        return
+
+    # Shared vmax
+    vmax = float(all_data["mean_count"].max()) if len(all_data) > 0 else 1.0
+
+    n_rows = len(row_labels)
+    n_cols = len(steps)
+    with sns.plotting_context("paper", font_scale=1.0):
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(2.8 * n_cols, 2.5 * n_rows),
+            sharex=True, sharey=True,
+            squeeze=False,
+        )
+
+        for ri, label in enumerate(row_labels):
+            df = available_dfs.get(label)
+            for ci, (order, ntype, col_label) in enumerate(steps):
+                ax = axes[ri][ci]
+                mat = np.zeros((len(positions), n_layers))
+                if df is not None:
+                    sub = df[(df["order"] == order) & (df["ntype"] == ntype)]
+                    for _, row in sub.iterrows():
+                        if row["position"] in positions and 0 <= int(row["layer"]) < n_layers:
+                            pi = positions.index(row["position"])
+                            mat[pi, int(row["layer"])] = row["mean_count"]
+
+                im = ax.imshow(mat, aspect="auto", cmap="YlOrRd",
+                               vmin=0, vmax=vmax, origin="lower")
+                ax.set_yticks(range(len(positions)))
+                ax.set_yticklabels(positions if ci == 0 else [], fontsize=8)
+                ax.set_xticks(range(0, n_layers, max(1, n_layers // 8)))
+                ax.set_xticklabels(
+                    range(0, n_layers, max(1, n_layers // 8)) if ri == n_rows - 1 else [],
+                    fontsize=7,
+                )
+                if ri == 0:
+                    ax.set_title(col_label, fontsize=8)
+                if ci == 0:
+                    ax.set_ylabel(label, fontsize=9)
+                if ri == n_rows - 1:
+                    ax.set_xlabel("Layer", fontsize=8)
+
+        fig.colorbar(
+            plt.cm.ScalarMappable(cmap="YlOrRd", norm=plt.Normalize(vmin=0, vmax=vmax)),
+            ax=axes, orientation="vertical", label="Mean neuron count",
+            fraction=0.02, pad=0.04,
+        )
+        fig.suptitle("Attribution chain flow: position × layer", y=1.01)
+        fig.tight_layout()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, bbox_inches="tight")
+        plt.close()
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(args):
@@ -854,6 +960,22 @@ def main(args):
             f"{plots_path}/chain_position_dist{prompt_suffix}.pdf",
         )
         print(f"Saved chain position dist  -> {plots_path}/chain_position_dist{prompt_suffix}.pdf")
+
+        for pt in PROMPT_TYPES:
+            lpi_pt = {}
+            for label in SUBSET_LABELS:
+                neuron_dir = f"{dataset_path}/neuron_attribution/{label}"
+                try:
+                    lpi_pt[label] = load_neuron_lpi(neuron_dir, pt)
+                except FileNotFoundError:
+                    continue
+            if lpi_pt:
+                pt_suffix = f"_{pt}"
+                plot_four_stage_mechanism(
+                    lpi_pt, n_layers,
+                    f"{plots_path}/chain_flow{pt_suffix}.pdf",
+                )
+                print(f"Saved chain flow ({pt})  -> {plots_path}/chain_flow{pt_suffix}.pdf")
 
         # ── Cross-prompt plots (use pre-computed Jaccard CSVs) ─────────────────
         summary_records = []

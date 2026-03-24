@@ -279,7 +279,7 @@ def compute_ffn_query_layers(states, info, top_neurons, layer_num):
     Returns: list of (layer_i, sublayer, score)
     """
     stacked_cache = {}  # ffn_layer -> stacked residual tensor (reused across neurons)
-    all_scores = [0.0] * (1 + 2 * layer_num)
+    all_scores = [0.0] * (2 * layer_num)  # indices 0..2*layer_num-1; max stacked idx = 2*(layer_num-1)+1
     for ffn_layer, neuron_id, _pos, lpi_score in top_neurons:
         key_scaled = (
             info["get_ffn_key"](info["layers"][ffn_layer], neuron_id)
@@ -314,7 +314,7 @@ def compute_attn_query_layers(states, info, top_neurons, layer_num, head_dim,
     """
     num_groups  = head_num // num_kv_heads
     stacked_cache = {}  # (attn_layer, pos) -> stacked residual tensor
-    all_scores = [0.0] * (1 + 2 * layer_num)
+    all_scores = [0.0] * (2 * layer_num)
     for attn_layer, head_i, neuron_i, pos, lpi_score in top_neurons:
         kv_head_i   = head_i // num_groups
         flat_neuron = kv_head_i * head_dim + neuron_i
@@ -467,7 +467,8 @@ def compute_ffn_query_neurons(states, info, top_neurons, head_num, head_dim,
 # ── Per-example driver ────────────────────────────────────────────────────────
 
 def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_dim,
-                    num_kv_heads, top_k_ffn, top_k_proj, top_k_query, max_order=2):
+                    num_kv_heads, top_k_ffn, top_k_proj, top_k_query, max_order=2,
+                    target_token_id=None):
     """
     Run one forward pass and compute all LPI and fixed 2-order backward attribution.
 
@@ -495,16 +496,17 @@ def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_di
     tokens_tensor = torch.tensor([tokens], device=device)
 
     with torch.no_grad():
-        model(tokens_tensor, use_cache=False)
+        outputs = model(tokens_tensor, use_cache=False)
 
     states = patch_model.extract_states(layer_num)
 
     with torch.no_grad():
         last_hidden = states[-1]["layer_output"][-1] # shape (hidden_dim,)
         final_std = (last_hidden.var(unbiased=False) + 1e-5).sqrt().item()
-        predict_index = info["lm_head"](
-            (last_hidden - last_hidden.mean()) / final_std * info["ln_f_weight"]
-        ).argmax().item()
+        if target_token_id is not None:
+            predict_index = target_token_id
+        else:
+            predict_index = outputs.logits[0, -1].argmax().item()
 
         ln_f_weight = info["ln_f_weight"]
         lm_head     = info["lm_head"]
@@ -923,6 +925,11 @@ def main(args):
                 ex_results = {}
                 for pt in args.prompts:
                     prompt = _get_prompt(row, pt)
+                    target_token_id = None
+                    if args.predict_target == "label":
+                        answer = row["e3_label"] if pt in ("two-hop", "second-hop") else row["e2_label"]
+                        toks = tokenizer.encode(" " + str(answer), add_special_tokens=False)
+                        target_token_id = toks[0] if toks else None
                     try:
                         result = process_example(
                             model, info, tokenizer, prompt,
@@ -931,6 +938,7 @@ def main(args):
                             top_k_proj=args.top_k_proj,
                             top_k_query=args.top_k_query,
                             max_order=2 if pt == "two-hop" else 1,
+                            target_token_id=target_token_id,
                         ) # (layer_rows, head_rows, ffn_top, attn_top, ffn_query_rows, attn_query_rows, chain)
                         ex_results[pt] = result
                     except Exception as e:
@@ -1116,6 +1124,10 @@ if __name__ == "__main__":
                         help="Save a resume checkpoint every N examples (0 to disable)")
     parser.add_argument("--top-k-query", type=int, default=300,
                         help="Top-K neurons to track per neuron in backward chain decomposition")
+    parser.add_argument("--predict-target", choices=["argmax", "label"], default="argmax",
+                        help="Token to attribute LPI toward: 'argmax' (model's predicted token, "
+                             "default) or 'label' (first token of the target answer e2/e3). "
+                             "Use 'label' for pre/post-edit comparison on the incorrect subset.")
     main(parser.parse_args())
 
 # %%

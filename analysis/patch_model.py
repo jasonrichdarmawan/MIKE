@@ -153,10 +153,11 @@ def _patch_gpt2(model):
             output_attentions=True,
             **kwargs
         )
-        # GPT-2 returns (attn_output, present, attn_weights) when output_attentions=True.
-        # present is None when use_cache=False.  Attention weights are always at index 2.
+        # GPT-2 returns (attn_output, attn_weights) when use_cache=False,
+        # and (attn_output, present, attn_weights) when use_cache=True.
+        # attn_weights is always the last element when output_attentions=True.
         attn_output = outputs[0] # [batch, seq_len, hidden]
-        attn_weights = outputs[2] # [batch, heads, seq_q, seq_k]
+        attn_weights = outputs[-1] # [batch, heads, seq_q, seq_k]
 
         last_weights = attn_weights[:, :, -1, :].unsqueeze(-1) # [batch, heads, seq_k, 1]
         self._last_attn_subvalues = last_weights * value_states # [batch, heads, seq_k, head_dim]
@@ -173,8 +174,8 @@ def _patch_gpt2(model):
     # Patch 2: GPT2MLP.forward
     def _patched_mlp(self, hidden_states):
         hidden_states = self.c_fc(hidden_states)
-        self._last_coefficient_scores = hidden_states
         hidden_states = self.act(hidden_states)
+        self._last_coefficient_scores = hidden_states  # post-activation: actual coefficient on each value vector
         hidden_states = self.c_proj(hidden_states)
         hidden_states = self.dropout(hidden_states)
         return hidden_states
