@@ -141,6 +141,26 @@ Under `$DATA_DIR/neuron_attribution/{subset}/`:
 
 ### Post-edit analysis
 
+#### YAML configuration
+
+Both AlphaEdit and IFMET require hparams YAML files. Llama-3-8B files are already included:
+
+| Method | YAML path |
+|--------|-----------|
+| AlphaEdit | `EasyEdit/hparams/AlphaEdit/llama3-8b.yaml` |
+| IFMET phase 1 (shallow layers 4–8) | `EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml` |
+| IFMET phase 2 (deep layers 13–17) | `EasyEdit/hparams/IFMET/llama3-8b-deep.yaml` |
+
+Key fields to check before running:
+
+- **`device`** — GPU index (default `0`). Must match `--device` CLI arg passed to the run script.
+- **`stats_dir`** — Directory where Fisher/covariance statistics are cached (default `./data/stats`). Computed once on first run (can take tens of minutes); reused on subsequent runs.
+- **`P_loc`** *(AlphaEdit only)* — Path to the null-space projection matrix (default `./null_space_project.pt`). Auto-computed and saved on first run if the file is absent. Can also be downloaded from the link in `EasyEdit/easyeditor/models/alphaedit/README.md`.
+
+For a **new model**, copy the closest existing YAML, update `model_name`, `layers`, `v_loss_layer` (= last layer index), and the `*_module_tmp` / `ln_f_module` / `lm_head_module` fields to match the model's architecture.
+
+#### Running
+
 ```bash
 MODEL=meta-llama/Meta-Llama-3-8B
 DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
@@ -148,12 +168,15 @@ DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
 # AlphaEdit
 python analysis/run_alphaedit_analysis.py \
     --model $MODEL \
+    --hparams EasyEdit/hparams/AlphaEdit/llama3-8b.yaml \
     --input $DATA_DIR/composition_incorrect/two_hop.csv \
     --output $DATA_DIR/composition_incorrect_alphaedit
 
 # IFMET
 python analysis/run_ifmet_analysis.py \
     --model $MODEL \
+    --hparams-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml \
+    --hparams-deep    EasyEdit/hparams/IFMET/llama3-8b-deep.yaml \
     --input $DATA_DIR/composition_incorrect/two_hop.csv \
     --output $DATA_DIR/composition_incorrect_ifmet
 ```
