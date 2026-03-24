@@ -80,11 +80,34 @@ def load_checkpoint(model, ckpt_path: Path, device: str):
 # %% Subset splitting
 
 def split_subsets(evaluated: pd.DataFrame) -> dict:
-    """Split post-edit evaluated dataset into the three outcome subsets."""
-    now_correct        = evaluated[evaluated["composition_correct"]]
-    still_wrong        = evaluated[~evaluated["composition_correct"]]
-    still_inconsistent = still_wrong[still_wrong["is_correct_second_hop"]]
-    still_incorrect    = still_wrong[~still_wrong["is_correct_second_hop"]]
+    """
+    Split post-edit evaluated dataset into the three outcome subsets.
+
+    Requires first_hop_correct & second_hop_correct post-edit so examples
+    where editing broke single-hop recall are excluded from all subsets.
+
+    still_inconsistent: composition still fails but the (e2, r2, e3) second
+    hop appears among now_correct examples — meaning the bridge entity is
+    decodable in some contexts, pointing to a composition failure rather
+    than a missing fact. Cannot rely on the pre-edit is_correct_second_hop
+    column since the input (composition_incorrect) has it False by construction.
+    """
+    passes_hops        = evaluated["first_hop_correct"] & evaluated["second_hop_correct"]
+    now_correct        = evaluated[evaluated["composition_correct"] & passes_hops]
+    still_failed       = evaluated[~evaluated["composition_correct"] & passes_hops]
+
+    correct_second_hops = set(
+        zip(now_correct["e2_label"], now_correct["r2_type"], now_correct["e3_label"])
+    )
+    still_inconsistent = still_failed[still_failed.apply(
+        lambda r: (r["e2_label"], r["r2_type"], r["e3_label"]) in correct_second_hops, axis=1
+    )]
+    still_incorrect    = still_failed[~still_failed.index.isin(still_inconsistent.index)]
+
+    print(f"  now_correct:         {len(now_correct)}")
+    print(f"  still_incorrect:     {len(still_incorrect)}")
+    print(f"  still_inconsistent:  {len(still_inconsistent)}")
+    print(f"  excluded (broken single hops post-edit): {(~passes_hops).sum()}")
     return {
         "now_correct":        now_correct,
         "still_incorrect":    still_incorrect,
