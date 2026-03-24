@@ -170,10 +170,13 @@ def main(args):
         df.to_csv(path)
         print(f"Saved {path}")
 
+    # Analyses only for now_correct and still_incorrect (inconsistent excluded)
+    analysis_subsets = {k: v for k, v in subsets.items() if k != "still_inconsistent"}
+
     hf_dataset = Dataset.from_pandas(dataset, preserve_index=False)
 
     def outputs_exist(subdir, filename):
-        return all((out_dir / name / subdir / filename).exists() for name in subsets)
+        return all((out_dir / name / subdir / filename).exists() for name in analysis_subsets)
 
     # ── Method 1: Sublayer projection — attention ─────────────────────────────
     if outputs_exist("sublayer_projection", "attention_projections.csv"):
@@ -185,7 +188,7 @@ def main(args):
             fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
             batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
         ))
-        save_by_subset(sublayer_attn, subsets, out_dir,
+        save_by_subset(sublayer_attn, analysis_subsets, out_dir,
                        "sublayer_projection", "attention_projections.csv", ["id", "layer"])
 
     # ── Method 2: Sublayer projection — MLP ───────────────────────────────────
@@ -198,7 +201,7 @@ def main(args):
             fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
             batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
         ))
-        save_by_subset(sublayer_mlp, subsets, out_dir,
+        save_by_subset(sublayer_mlp, analysis_subsets, out_dir,
                        "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
 
     # ── Method 3: Attention knockout ──────────────────────────────────────────
@@ -213,7 +216,7 @@ def main(args):
                        "prompt": "composition"},
             batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
         ).to_pandas()
-        save_by_subset(knockout, subsets, out_dir,
+        save_by_subset(knockout, analysis_subsets, out_dir,
                        "attention_knockout", "last_e1_attention_knockout_k3_composition.csv",
                        ["id", "layer"])
 
@@ -240,7 +243,7 @@ def main(args):
                 batched=True, batch_size=args.batch_size,
                 remove_columns=hf_ps.column_names,
             ).to_pandas()
-            save_by_subset(patch, subsets, out_dir,
+            save_by_subset(patch, analysis_subsets, out_dir,
                            "entity_description", f"{source}_entity_description_s0.csv",
                            ["id", "source_layer", "target_layer"])
 

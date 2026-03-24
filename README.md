@@ -91,8 +91,10 @@ python analysis/run_preedit_analysis.py \
     --data-dir $DATA_DIR
 ```
 
-Outputs under `$DATA_DIR/composition_{correct,incorrect,inconsistent}/`:
-- `two_hop.csv` — subset split
+Creates three subsets under `$DATA_DIR/composition_{correct,incorrect,inconsistent}/two_hop.csv`.
+Analyses (methods 1–4) are run only on `correct` and `incorrect`; `inconsistent` is saved as CSV only.
+
+Each analysed subset gets:
 - `sublayer_projection/{attention,mlp}_projections.csv`
 - `attention_knockout/last_e1_attention_knockout_k3_composition.csv`
 - `entity_description/{e1,last}_entity_description_s0.csv`
@@ -113,14 +115,14 @@ DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
 python analysis/neuron_attribution.py \
     --model-name $MODEL --data-dir $DATA_DIR \
     --prompts two-hop first-hop second-hop \
-    --subsets correct incorrect inconsistent
+    --subsets correct incorrect
 
 # Post-edit (load edited weights via checkpoint)
 python analysis/neuron_attribution.py \
     --model-name $MODEL --data-dir $DATA_DIR/composition_incorrect_alphaedit \
     --checkpoint $DATA_DIR/composition_incorrect_alphaedit/editing_checkpoint.pt \
     --prompts two-hop first-hop second-hop \
-    --subsets now_correct still_incorrect still_inconsistent
+    --subsets now_correct still_incorrect
 
 # Quick test
 python analysis/neuron_attribution.py \
@@ -181,7 +183,8 @@ python analysis/run_ifmet_analysis.py \
     --output $DATA_DIR/composition_incorrect_ifmet
 ```
 
-Outputs under `$OUTPUT/{now_correct,still_incorrect,still_inconsistent}/` (same structure as pre-edit).
+Creates three subsets under `$OUTPUT/{now_correct,still_incorrect,still_inconsistent}/two_hop.csv`.
+Analyses are run only on `now_correct` and `still_incorrect`; `still_inconsistent` is saved as CSV only.
 
 ---
 
@@ -233,9 +236,9 @@ python analysis/analyze_tables.py --subsets \
 
 | Script | Purpose |
 |--------|---------|
-| `run_preedit_analysis.py` | Evaluate base model, create correct/incorrect/inconsistent subsets, run all 4 analyses |
-| `run_alphaedit_analysis.py` | Apply AlphaEdit, evaluate edited model, split into now_correct/still_incorrect/still_inconsistent, run all 4 analyses |
-| `run_ifmet_analysis.py` | Same as above for IFMET (two-phase MEMIT) |
+| `run_preedit_analysis.py` | Evaluate base model, create correct/incorrect/inconsistent subsets, run all 4 analyses on correct and incorrect only |
+| `run_alphaedit_analysis.py` | Apply AlphaEdit, evaluate edited model, split into now_correct/still_incorrect/still_inconsistent, run all 4 analyses on now_correct and still_incorrect only |
+| `run_ifmet_analysis.py` | Same as above for IFMET (two-phase MEMIT); analyses on now_correct and still_incorrect only |
 
 **Analysis methods** — called by the orchestrators; can also be run standalone with `--checkpoint` for a pre-saved edited model:
 

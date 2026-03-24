@@ -143,7 +143,11 @@ def main(args):
     subsets = create_subsets(evaluated, data_dir)
 
     # ── Run analyses per subset ───────────────────────────────────────────────
+    ANALYSE_SUBSETS = {"correct", "incorrect"}
     for subset_name, subset_df in subsets.items():
+        if subset_name not in ANALYSE_SUBSETS:
+            print(f"\nSkipping analyses for subset '{subset_name}'")
+            continue
         subset_dir = data_dir / f"composition_{subset_name}"
 
         print(f"\n{'='*60}")
