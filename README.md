@@ -70,8 +70,8 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 4. neuron_attribution.py        — same, with --checkpoint for post-edit weights
 5. analyze_tables.py            — print summary tables (mechanism stages)
    analyze_tables_neuron.py     — print neuron attribution tables
-   analyze_results.py           — generate mechanism plots
-   analyze_results_neuron.py    — generate neuron attribution plots
+   analyze_plots.py           — generate mechanism plots
+   analyze_plots_neuron.py    — generate neuron attribution plots
 ```
 
 Each run script skips steps whose output files already exist, so re-runs are safe.
@@ -130,13 +130,13 @@ python analysis/neuron_attribution.py \
     --prompts two-hop --subsets correct --max-examples 20
 ```
 
-Outputs per `(subset, prompt_type)` under `$DATA_DIR/neuron_attribution/{subset}/{prompt_type}/`:
+Outputs per `(subset, prompt_type)` under `$DATA_DIR/{subset}/neuron_attribution/{prompt_type}/`:
 - `sublayer_lpi.csv`, `head_lpi.csv` — per-example LPI
 - `ffn_query_layers.csv`, `attn_query_layers.csv` — residual stream decomposition
 - `chain_profile.csv`, `chain_mean_layer.csv` — aggregated chain attribution
 - `chain_position_dist.csv` — marginal position distribution
 
-Under `$DATA_DIR/neuron_attribution/{subset}/`:
+Under `$DATA_DIR/{subset}/neuron_attribution/`:
 - `jaccard.csv`, `overlap_position.csv`, `overlap_position_by_layer.csv`
 
 ---
@@ -204,22 +204,22 @@ python analysis/analyze_tables.py --subsets \
 
 # Summary tables (neuron attribution)
 python analysis/analyze_tables_neuron.py --subsets \
-    correct:$DATA_DIR/neuron_attribution/correct \
-    incorrect:$DATA_DIR/neuron_attribution/incorrect
+    correct:$DATA_DIR/correct/neuron_attribution \
+    incorrect:$DATA_DIR/incorrect/neuron_attribution
 
 # Mechanism plots
-python analysis/analyze_results.py \
+python analysis/analyze_plots.py \
     --model $MODEL --output-dir $PLOTS \
     --subsets \
         correct:$DATA_DIR/composition_correct \
         incorrect:$DATA_DIR/composition_incorrect
 
 # Neuron attribution plots
-python analysis/analyze_results_neuron.py \
+python analysis/analyze_plots_neuron.py \
     --model $MODEL --output-dir $PLOTS \
     --subsets \
-        correct:$DATA_DIR/neuron_attribution/correct \
-        incorrect:$DATA_DIR/neuron_attribution/incorrect
+        correct:$DATA_DIR/correct/neuron_attribution \
+        incorrect:$DATA_DIR/incorrect/neuron_attribution
 
 # Pre- vs post-edit comparison
 python analysis/analyze_tables.py --subsets \
@@ -256,8 +256,8 @@ python analysis/analyze_tables.py --subsets \
 |--------|---------|
 | `analyze_tables.py` | Build `layers.csv` from source CSVs (cached), print mechanism stage tables |
 | `analyze_tables_neuron.py` | Print neuron attribution tables (LPI, chain, Jaccard, position) |
-| `analyze_results.py` | Generate mechanism plots (stage boxplots, PatchScopes heatmaps) |
-| `analyze_results_neuron.py` | Generate neuron attribution plots (LPI profiles, chain heatmaps, overlap bars) |
+| `analyze_plots.py` | Generate mechanism plots (stage boxplots, PatchScopes heatmaps) |
+| `analyze_plots_neuron.py` | Generate neuron attribution plots (LPI profiles, chain heatmaps, overlap bars) |
 
 **Internal modules** — imported by the scripts above, not run directly:
 

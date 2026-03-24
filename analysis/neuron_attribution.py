@@ -892,6 +892,8 @@ def main(args):
     for subset in tqdm(args.subsets, desc="Subsets", unit="subset"):
         input_path = data_dir / f"composition_{subset}" / "two_hop.csv"
         if not input_path.exists():
+            input_path = data_dir / subset / "two_hop.csv"
+        if not input_path.exists():
             print(f"\n[SKIP] {input_path} not found")
             continue
 
@@ -900,7 +902,7 @@ def main(args):
         print(f"\n=== subset={subset}: {n} examples, prompts={args.prompts} ===")
 
         # Checkpoint: resume from partial run if available
-        ckpt_path = data_dir / "neuron_attribution" / f"{subset}_ckpt.pkl"
+        ckpt_path = data_dir / subset / "neuron_attribution" / f"{subset}_ckpt.pkl"
         ckpt_path.parent.mkdir(parents=True, exist_ok=True)
         start_idx = 0
         accum = {pt: _Accum() for pt in args.prompts}
@@ -1061,7 +1063,7 @@ def main(args):
         print(f"  {n}/{n} done      ")
 
         # Save per-prompt-type compact outputs
-        na_subset_dir = data_dir / "neuron_attribution" / subset
+        na_subset_dir = data_dir / subset / "neuron_attribution"
         for pt in args.prompts:
             a = accum[pt]
             output_dir = na_subset_dir / pt
