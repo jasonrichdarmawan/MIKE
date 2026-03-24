@@ -1,4 +1,5 @@
 import ast
+import os
 
 import pandas as pd
 import torch
@@ -8,7 +9,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, GPT2LMHeadModel, \
 
 from jaxtyping import Float
 
-HF_TOKEN = ""
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 
 def load_tokenizer(model_name):
