@@ -24,13 +24,13 @@ Answers four questions about the model (pre- or post-edit):
 
 Usage:
     # Pre-edit
-    python analysis/analyze_mechanism_neuron.py \\
+    python analysis/analyze_tables_neuron.py \\
         --subsets \\
             correct:datasets/meta-llama/Meta-Llama-3-8B/correct/neuron_attribution \\
             incorrect:datasets/meta-llama/Meta-Llama-3-8B/incorrect/neuron_attribution
 
     # Pre- and post-edit comparison
-    python analysis/analyze_mechanism_neuron.py \\
+    python analysis/analyze_tables_neuron.py \\
         --subsets \\
             pre-edit:datasets/meta-llama/Meta-Llama-3-8B/incorrect/neuron_attribution \\
             now_correct:datasets/meta-llama/Meta-Llama-3-8B/composition_incorrect_alphaedit/now_correct/neuron_attribution \\
@@ -38,6 +38,9 @@ Usage:
 """
 
 # %%
+
+import sys
+sys.path.insert(0, ".")
 
 from argparse import ArgumentParser
 from pathlib import Path
@@ -196,7 +199,7 @@ def table_four_stage_mechanism(subsets: dict, prompt_type: str = "two-hop", tabl
         if prev_order is not None and order != prev_order:
             print()
         prev_order = order
-        row_str = f"{order:<7} {ntype.replace(chr(8594), '->'):  <12} {position:<6}"
+        row_str = f"{order:<7} {ntype.replace(chr(8594), '->'):<12} {position:<6}"
         for name, df in dfs.items():
             col_w = max(12, len(name))
             if df is None:

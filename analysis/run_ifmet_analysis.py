@@ -20,7 +20,11 @@ Usage:
         [--max-examples N] [--skip-patchscopes] [--device 0]
 """
 
+import os
 import sys
+
+os.environ["USE_TF"] = "0"
+sys.path.insert(0, ".")
 sys.path.insert(0, "analysis")
 
 import argparse

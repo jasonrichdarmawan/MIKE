@@ -21,7 +21,11 @@ Usage:
         [--max-examples N] [--skip-patchscopes] [--device 0]
 """
 
+import os
 import sys
+
+os.environ["USE_TF"] = "0"
+sys.path.insert(0, ".")
 sys.path.insert(0, "analysis")
 
 import argparse
@@ -139,7 +143,7 @@ def main(args):
     else:
         requests = build_requests(dataset)
         print(f"Applying AlphaEdit ({len(requests)} facts across {len(dataset)} examples)...")
-        apply_algo(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
+        apply_algo(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False, edit_batch_size=args.edit_batch_size)
         save_checkpoint(model, hparams, ckpt_path)
 
     # ── Evaluate edited model (if not already done) ───────────────────────────
@@ -265,5 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip-patchscopes", action="store_true",
                         help="Skip patchscopes (method 4) to save time")
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--edit-batch-size", type=int, default=4,
+                        help="Number of facts per AlphaEdit forward pass (higher = faster but more VRAM)")
     parser.add_argument("--device", type=int, default=0)
     main(parser.parse_args())

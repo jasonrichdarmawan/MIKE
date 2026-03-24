@@ -24,7 +24,11 @@ Usage:
 
 # %%
 
+import os
 import sys
+
+os.environ["USE_TF"] = "0"
+sys.path.insert(0, ".")
 sys.path.insert(0, "analysis")
 
 import argparse

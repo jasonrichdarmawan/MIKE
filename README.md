@@ -173,6 +173,7 @@ python analysis/run_alphaedit_analysis.py \
     --hparams EasyEdit/hparams/AlphaEdit/llama3-8b.yaml \
     --input $DATA_DIR/composition_incorrect/two_hop.csv \
     --output $DATA_DIR/composition_incorrect_alphaedit
+    # --edit-batch-size 4   # facts per AlphaEdit forward pass (higher = faster, more VRAM)
 
 # IFMET
 python analysis/run_ifmet_analysis.py \

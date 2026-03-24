@@ -30,6 +30,7 @@ Usage:
 
 import ast
 import sys
+sys.path.insert(0, ".")
 sys.path.insert(0, "analysis")
 
 from argparse import ArgumentParser
@@ -142,11 +143,13 @@ def info_prop_layer(df: pd.DataFrame) -> pd.Series:
       (a) last_e1_attention_knockout_layers
       (b) attention_e2_projection_layers
       (c) last_e2_entity_layer
+    Columns absent when the corresponding analysis was skipped are ignored.
     """
-    a = to_min(df["last_e1_attention_knockout_layers"])
-    b = to_min(df["attention_e2_projection_layers"])
-    c = to_min(df["last_e2_entity_layer"])
-    return pd.concat([a, b, c], axis=1).mean(axis=1, skipna=True)
+    cols = ["last_e1_attention_knockout_layers", "attention_e2_projection_layers", "last_e2_entity_layer"]
+    parts = [to_min(df[c]) for c in cols if c in df.columns]
+    if not parts:
+        return pd.Series(dtype=float, index=df.index)
+    return pd.concat(parts, axis=1).mean(axis=1, skipna=True)
 
 
 ENTITY_COLUMNS = {
