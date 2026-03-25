@@ -63,43 +63,76 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 ### Pipeline overview
 
 ```
-1. run_preedit_analysis.py      — evaluate base model, create subsets, run all analyses
-2. neuron_attribution.py        — neuron-level LPI and backward attribution (GPU recommended)
-3. run_alphaedit_analysis.py    — apply AlphaEdit, evaluate, split subsets, run all analyses
-   run_ifmet_analysis.py        — same for IFMET
-4. neuron_attribution.py        — same, with --checkpoint for post-edit weights
-5. analyze_tables.py            — print summary tables (mechanism stages)
-   analyze_tables_neuron.py     — print neuron attribution tables
-   analyze_plots.py           — generate mechanism plots
-   analyze_plots_neuron.py    — generate neuron attribution plots
+run_overnight.sh
+  ├── run_analysis.py --methods ifmet      — edit, evaluate, split subsets, sublayer + knockout + patchscopes
+  ├── neuron_attribution.py (IFMET post-edit)
+  ├── neuron_attribution.py (AlphaEdit post-edit)
+  ├── neuron_attribution.py (pre-edit)
+  └── run_analysis.py --methods alphaedit  — same as IFMET
+
+analyze_tables.py / analyze_plots.py      — tables and plots from saved CSVs
 ```
 
-Each run script skips steps whose output files already exist, so re-runs are safe.
+`run_analysis.py` skips steps whose output files already exist, so re-runs are safe.
 Classification results are cached automatically as `*_classified.csv` on first run.
 
 ---
 
-### Pre-edit analysis
+### Running the full pipeline
+
+```bash
+bash run_overnight.sh   # full end-to-end (edit -> neuron attribution -> push to HF)
+```
+
+Or step by step:
 
 ```bash
 MODEL=meta-llama/Meta-Llama-3-8B
 DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
 
-python analysis/run_preedit_analysis.py \
-    --model $MODEL \
-    --input datasets/two_hop.csv \
-    --data-dir $DATA_DIR
+# Pre-edit: evaluate base model, create correct/incorrect/inconsistent subsets, run analyses
+python analysis/run_analysis.py \
+    --model $MODEL --data-dir $DATA_DIR
+
+# Post-edit: AlphaEdit -- edit, evaluate, split subsets, run analyses
+python analysis/run_analysis.py \
+    --model $MODEL --data-dir $DATA_DIR --methods alphaedit \
+    --hparams-alphaedit EasyEdit/hparams/AlphaEdit/llama3-8b.yaml
+
+# Post-edit: IFMET
+python analysis/run_analysis.py \
+    --model $MODEL --data-dir $DATA_DIR --methods ifmet \
+    --hparams-ifmet-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml \
+    --hparams-ifmet-deep    EasyEdit/hparams/IFMET/llama3-8b-deep.yaml
 ```
 
-Creates three subsets under `$DATA_DIR/composition_{correct,incorrect,inconsistent}/two_hop.csv`.
-Analyses (methods 1–4) are run only on `correct` and `incorrect`; `inconsistent` is saved as CSV only.
+Pre-edit creates three subsets under `$DATA_DIR/composition_{correct,incorrect,inconsistent}/two_hop.csv`.
+Post-edit creates four subsets under `$OUT/{now_correct,still_incorrect,still_inconsistent,broken_hops}/two_hop.csv`:
 
-Each analysed subset gets:
-- `sublayer_projection/{attention,mlp}_projections.csv`
-- `attention_knockout/last_e1_attention_knockout_k3_composition.csv`
-- `entity_description/{e1,last}_entity_description_s0.csv`
+| Subset | Definition |
+|--------|------------|
+| `now_correct` | Both single hops and composition pass after editing |
+| `still_incorrect` | Both single hops pass, composition still fails |
+| `still_inconsistent` | Both single hops pass, composition fails due to inconsistent second-hop |
+| `broken_hops` | One or both single-hop retrievals broke after editing |
 
-Add `--skip-patchscopes` to skip PatchScopes (method 4, slowest).
+Mechanism analyses (sublayer projection, attention knockout, patchscopes) run on `now_correct` and `still_incorrect` only; `still_inconsistent` and `broken_hops` are saved as CSVs only.
+
+#### YAML configuration
+
+Both AlphaEdit and IFMET require hparams YAML files. Llama-3-8B files are already included:
+
+| Method | YAML path |
+|--------|-----------|
+| AlphaEdit | `EasyEdit/hparams/AlphaEdit/llama3-8b.yaml` |
+| IFMET phase 1 (shallow layers 4-8) | `EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml` |
+| IFMET phase 2 (deep layers 13-17) | `EasyEdit/hparams/IFMET/llama3-8b-deep.yaml` |
+
+Key fields to check before running:
+
+- **`device`** -- GPU index (default `0`).
+- **`stats_dir`** -- Directory where Fisher/covariance statistics are cached (default `./data/stats`). Computed once on first run; reused on subsequent runs.
+- **`P_loc`** *(AlphaEdit only)* -- Path to the null-space projection matrix (default `./null_space_project.pt`). Auto-computed on first run if absent.
 
 ---
 
@@ -115,14 +148,15 @@ DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
 python analysis/neuron_attribution.py \
     --model-name $MODEL --data-dir $DATA_DIR \
     --prompts two-hop first-hop second-hop \
-    --subsets correct incorrect
+    --subsets correct incorrect inconsistent
 
 # Post-edit (load edited weights via checkpoint)
 python analysis/neuron_attribution.py \
-    --model-name $MODEL --data-dir $DATA_DIR/composition_incorrect_alphaedit \
+    --model-name $MODEL \
+    --data-dir $DATA_DIR/composition_incorrect_alphaedit \
     --checkpoint $DATA_DIR/composition_incorrect_alphaedit/editing_checkpoint.pt \
     --prompts two-hop first-hop second-hop \
-    --subsets now_correct still_incorrect
+    --subsets now_correct still_incorrect still_inconsistent
 
 # Quick test
 python analysis/neuron_attribution.py \
@@ -130,62 +164,14 @@ python analysis/neuron_attribution.py \
     --prompts two-hop --subsets correct --max-examples 20
 ```
 
-Outputs per `(subset, prompt_type)` under `{subset_dir}/neuron_attribution/{prompt_type}/`, where `subset_dir` is the resolved input folder (e.g. `$DATA_DIR/composition_correct` for pre-edit, `$OUT_DIR/now_correct` for post-edit):
-- `sublayer_lpi.csv`, `head_lpi.csv` — per-example LPI
-- `ffn_query_layers.csv`, `attn_query_layers.csv` — residual stream decomposition
-- `chain_profile.csv`, `chain_mean_layer.csv` — aggregated chain attribution
-- `chain_position_dist.csv` — marginal position distribution
+Outputs per `(subset, prompt_type)` under `{subset_dir}/neuron_attribution/{prompt_type}/`:
+- `sublayer_lpi.csv`, `head_lpi.csv` -- per-example LPI
+- `ffn_query_layers.csv`, `attn_query_layers.csv` -- residual stream decomposition
+- `chain_profile.csv`, `chain_mean_layer.csv` -- aggregated chain attribution
+- `chain_position_dist.csv` -- marginal position distribution
 
 Under `{subset_dir}/neuron_attribution/`:
 - `jaccard.csv`, `overlap_position.csv`, `overlap_position_by_layer.csv`
-
----
-
-### Post-edit analysis
-
-#### YAML configuration
-
-Both AlphaEdit and IFMET require hparams YAML files. Llama-3-8B files are already included:
-
-| Method | YAML path |
-|--------|-----------|
-| AlphaEdit | `EasyEdit/hparams/AlphaEdit/llama3-8b.yaml` |
-| IFMET phase 1 (shallow layers 4–8) | `EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml` |
-| IFMET phase 2 (deep layers 13–17) | `EasyEdit/hparams/IFMET/llama3-8b-deep.yaml` |
-
-Key fields to check before running:
-
-- **`device`** — GPU index (default `0`). Must match `--device` CLI arg passed to the run script.
-- **`stats_dir`** — Directory where Fisher/covariance statistics are cached (default `./data/stats`). Computed once on first run (can take tens of minutes); reused on subsequent runs.
-- **`P_loc`** *(AlphaEdit only)* — Path to the null-space projection matrix (default `./null_space_project.pt`). Auto-computed and saved on first run if the file is absent. Can also be downloaded from the link in `EasyEdit/easyeditor/models/alphaedit/README.md`.
-
-For a **new model**, copy the closest existing YAML, update `model_name`, `layers`, `v_loss_layer` (= last layer index), and the `*_module_tmp` / `ln_f_module` / `lm_head_module` fields to match the model's architecture.
-
-#### Running
-
-```bash
-MODEL=meta-llama/Meta-Llama-3-8B
-DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
-
-# AlphaEdit
-python analysis/run_alphaedit_analysis.py \
-    --model $MODEL \
-    --hparams EasyEdit/hparams/AlphaEdit/llama3-8b.yaml \
-    --input $DATA_DIR/composition_incorrect/two_hop.csv \
-    --output $DATA_DIR/composition_incorrect_alphaedit
-    # --edit-batch-size 4   # facts per AlphaEdit forward pass (higher = faster, more VRAM)
-
-# IFMET
-python analysis/run_ifmet_analysis.py \
-    --model $MODEL \
-    --hparams-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml \
-    --hparams-deep    EasyEdit/hparams/IFMET/llama3-8b-deep.yaml \
-    --input $DATA_DIR/composition_incorrect/two_hop.csv \
-    --output $DATA_DIR/composition_incorrect_ifmet
-```
-
-Creates three subsets under `$OUTPUT/{now_correct,still_incorrect,still_inconsistent}/two_hop.csv`.
-Analyses are run only on `now_correct` and `still_incorrect`; `still_inconsistent` is saved as CSV only.
 
 ---
 
@@ -233,15 +219,21 @@ python analysis/analyze_tables.py --subsets \
 
 ### Script reference
 
-**Orchestrators** — load the model once and run the full analysis pipeline end-to-end:
+**Top-level orchestration:**
 
 | Script | Purpose |
 |--------|---------|
-| `run_preedit_analysis.py` | Evaluate base model, create correct/incorrect/inconsistent subsets, run all 4 analyses on correct and incorrect only |
-| `run_alphaedit_analysis.py` | Apply AlphaEdit, evaluate edited model, split into now_correct/still_incorrect/still_inconsistent, run all 4 analyses on now_correct and still_incorrect only |
-| `run_ifmet_analysis.py` | Same as above for IFMET (two-phase MEMIT); analyses on now_correct and still_incorrect only |
+| `run_overnight.sh` | Full end-to-end pipeline: pre-edit + both methods + neuron attribution + HF push |
+| `run_remaining.sh` | Re-run any failed steps (skips completed steps via existing output files) |
+| `monitor.py` | Check pipeline progress: stats cache, step status, GPU, process |
 
-**Analysis methods** — called by the orchestrators; can also be run standalone with `--checkpoint` for a pre-saved edited model:
+**Analysis orchestrator** -- loads the model once and runs the full analysis pipeline:
+
+| Script | Purpose |
+|--------|---------|
+| `run_analysis.py` | Unified orchestrator: pre-edit (evaluate + create subsets + analyses) or post-edit (edit + evaluate + split + analyses) via `--methods` flag |
+
+**Analysis methods** -- called by the orchestrator; can also be run standalone:
 
 | Script | Purpose |
 |--------|---------|
@@ -251,7 +243,7 @@ python analysis/analyze_tables.py --subsets \
 | `evaluate_dataset.py` | Evaluate model on two_hop.csv (first-hop, second-hop, composition, shortcuts) |
 | `neuron_attribution.py` | Neuron-level LPI and backward attribution chain (GPU recommended) |
 
-**Analysis output scripts** — read saved CSVs and produce tables or plots:
+**Analysis output scripts** -- read saved CSVs and produce tables or plots:
 
 | Script | Purpose |
 |--------|---------|
@@ -260,12 +252,12 @@ python analysis/analyze_tables.py --subsets \
 | `analyze_plots.py` | Generate mechanism plots (stage boxplots, PatchScopes heatmaps) |
 | `analyze_plots_neuron.py` | Generate neuron attribution plots (LPI profiles, chain heatmaps, overlap bars) |
 
-**Internal modules** — imported by the scripts above, not run directly:
+**Internal modules** -- imported by the scripts above, not run directly:
 
 | Script | Purpose |
 |--------|---------|
 | `patch_model.py` | Monkey-patches GPT-2/Llama forward passes to capture internal states |
-| `patched_generation.py` | Low-level generation with attention knockout and patching hooks; KV-cache variant gives ~32× speedup for PatchScopes |
+| `patched_generation.py` | Low-level generation with attention knockout and patching hooks; KV-cache variant gives ~32x speedup for PatchScopes |
 | `classify_results.py` | Classify raw CSV outputs; results cached as `*_classified.csv` |
 | `utils.py` | Model loading, answer checking, tokenizer helpers |
 
@@ -280,7 +272,7 @@ python analysis/analyze_tables.py --subsets \
 | Script | Status |
 |--------|--------|
 | `patch_activations.py` | Superseded by `generate_entity_description.py` |
-| `create_subset.py` | Superseded — logic inlined into `run_preedit_analysis.py` |
+| `create_subset.py` | Superseded -- logic inlined into `run_analysis.py` |
 | `analyze_subset.py` | Depends on `patch_activations.py`; not used in current pipeline |
 | `neuron_importance.py` | Early prototype; superseded by `neuron_attribution.py` |
 

@@ -43,6 +43,7 @@ from generate_entity_description import generate_entity_description_with_patchin
 from knockout_attention import generate_answer_with_attention_knockout
 from project_sublayer import project_attention
 from utils import get_answers, load_model, load_tokenizer
+from EasyEdit.easyeditor.util import nethook
 
 
 # %%
@@ -132,6 +133,7 @@ def split_subsets(evaluated: pd.DataFrame) -> dict:
     decodable in some contexts, pointing to a composition failure.
     """
     passes_hops   = evaluated["first_hop_correct"] & evaluated["second_hop_correct"]
+    broken_hops   = evaluated[~passes_hops]
     now_correct   = evaluated[evaluated["composition_correct"] & passes_hops]
     still_failed  = evaluated[~evaluated["composition_correct"] & passes_hops]
 
@@ -146,11 +148,12 @@ def split_subsets(evaluated: pd.DataFrame) -> dict:
     print(f"  now_correct:         {len(now_correct)}")
     print(f"  still_incorrect:     {len(still_incorrect)}")
     print(f"  still_inconsistent:  {len(still_inconsistent)}")
-    print(f"  excluded (broken single hops post-edit): {(~passes_hops).sum()}")
+    print(f"  broken_hops:         {len(broken_hops)}")
     return {
         "now_correct":        now_correct,
         "still_incorrect":    still_incorrect,
         "still_inconsistent": still_inconsistent,
+        "broken_hops":        broken_hops,
     }
 
 
@@ -436,7 +439,8 @@ def run_alphaedit(args):
         df.to_csv(path)
         print(f"Saved {path}")
 
-    analysis_subsets = {k: v for k, v in subsets.items() if k != "still_inconsistent"}
+    analysis_subsets = {k: v for k, v in subsets.items()
+                        if k not in ("still_inconsistent", "broken_hops")}
     run_postedit_analyses(model, tokenizer, dataset, analysis_subsets, out_dir, args)
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
@@ -530,7 +534,8 @@ def run_ifmet(args):
         df.to_csv(path)
         print(f"Saved {path}")
 
-    analysis_subsets = {k: v for k, v in subsets.items() if k != "still_inconsistent"}
+    analysis_subsets = {k: v for k, v in subsets.items()
+                        if k not in ("still_inconsistent", "broken_hops")}
     run_postedit_analyses(model, tokenizer, dataset, analysis_subsets, out_dir, args)
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "

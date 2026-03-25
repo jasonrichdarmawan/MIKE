@@ -59,6 +59,7 @@ import torch
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from EasyEdit.easyeditor.util import nethook
 
 # %%

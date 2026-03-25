@@ -173,7 +173,18 @@ def _generate_with_patch_and_cache(
     Uses a first_call flag instead of shape check because x_input_ids is already
     1 token, so hs.shape[1] == 1 on both the patched prefill step and all
     subsequent generation steps.
+
+    Workaround for transformers 4.44 cache_position bug: _get_initial_cache_position
+    computes cache_position as [0, ..., input_len-1][past_length:], which yields an
+    empty tensor when input_ids has 1 token and past_length >= 1. Fix: pad input_ids
+    to length past_length+1 so cache_position becomes [past_length] after slicing.
+    prepare_inputs_for_generation then correctly slices back to just x_input_ids.
     """
+    past_length = prefix_kv[0][0].shape[2]
+    pad = torch.zeros(x_input_ids.shape[0], past_length,
+                      dtype=x_input_ids.dtype, device=x_input_ids.device)
+    padded_x = torch.cat([pad, x_input_ids], dim=1)  # [batch, past_length+1]
+
     first_call = [True]
 
     def replace_hidden_state_hook(output):
@@ -187,16 +198,18 @@ def _generate_with_patch_and_cache(
                                 edit_output=replace_hidden_state_hook):
         if do_sample:
             new_tokens = model.generate(
-                input_ids=x_input_ids, attention_mask=full_attention_mask,
+                input_ids=padded_x, attention_mask=full_attention_mask,
                 past_key_values=prefix_kv, pad_token_id=tokenizer.eos_token_id,
                 max_new_tokens=10, do_sample=True)
         else:
             new_tokens = model.generate(
-                input_ids=x_input_ids, attention_mask=full_attention_mask,
+                input_ids=padded_x, attention_mask=full_attention_mask,
                 past_key_values=prefix_kv, do_sample=False,
                 temperature=1, top_p=1, num_beams=1,
                 pad_token_id=tokenizer.eos_token_id, max_new_tokens=10)
 
+    # model.generate returns padded_x + newly_generated; strip the padding prefix
+    new_tokens = new_tokens[:, past_length:]
     full_generated = torch.cat([prefix_input_ids, new_tokens], dim=1)
     return decode_generated(tokenizer, full_generated, target_prompt)
 
