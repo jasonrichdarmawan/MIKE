@@ -1122,8 +1122,7 @@ if __name__ == "__main__":
     parser.add_argument("--model-name", default="gpt2")
     parser.add_argument("--data-dir",   default="datasets/gpt2")
     parser.add_argument("--subsets", nargs="+",
-                        default=["correct", "incorrect", "inconsistent"],
-                        choices=["correct", "incorrect", "inconsistent"])
+                        default=["correct", "incorrect", "inconsistent"])
     parser.add_argument("--prompts", nargs="+",
                         default=["two-hop", "first-hop", "second-hop"],
                         choices=["two-hop", "first-hop", "second-hop"],
