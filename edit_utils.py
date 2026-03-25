@@ -327,7 +327,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
         'hop_wise_predictions': [],
         'accuracy_predictions': []
     }
-    device = f"cuda:{hparams.device}"
+    device = f"cuda:{getattr(hparams, 'device', 0)}"
     for i in edit_item['new_single_hops']:
         """
         i['answer_alias']: ["Britain", "UK", "G. B.", "GBR", ...]
@@ -485,8 +485,7 @@ def cake(original_model, tokenizer, item, hparams, test_generation=False):
     return model, metrics
 
 
-def edit(model, tokenizer, edit_item, hparams,alg_name,apply_algo,test_generation=False):
-    # all_metrics = []
+def edit(model, tokenizer, edit_item, hparams, alg_name, apply_algo, test_generation=False, restore_weights=True):
     start = time()
     requests = edit_item['requested_rewrite']
     for i in requests:
@@ -501,27 +500,25 @@ def edit(model, tokenizer, edit_item, hparams,alg_name,apply_algo,test_generatio
         return_orig_weights=True
     )
     exec_time = time() - start
-    # start = time()
-    # chunk_metrics = []
     metrics = {
         'case_id': edit_item['case_id'],
         "requested_rewrite": requests,
         "time": exec_time,
         "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams, test_generation=test_generation),
     }
-    # chunk_metrics.append(metrics)
-    if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
-        with torch.no_grad():
-            weights_copy()
-    elif alg_name == 'LoRA' or alg_name == 'QLoRA' or alg_name == 'DPO':
-        edited_model=edited_model.unload()
-        del edited_model.peft_config
-    elif alg_name == 'MELO':
-        model = edited_model
-    else:
-        with torch.no_grad():
-            for k, v in weights_copy.items():
-                nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
+    if restore_weights:
+        if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
+            with torch.no_grad():
+                weights_copy()
+        elif alg_name == 'LoRA' or alg_name == 'QLoRA' or alg_name == 'DPO':
+            edited_model=edited_model.unload()
+            del edited_model.peft_config
+        elif alg_name == 'MELO':
+            model = edited_model
+        else:
+            with torch.no_grad():
+                for k, v in weights_copy.items():
+                    nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
     return edited_model, metrics
 def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,test_generation=False):
     # all_metrics = []
