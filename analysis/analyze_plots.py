@@ -48,7 +48,7 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 
-from classify_results import load_entity_description_generations
+from classify_results import load_entity_description_generations, classify_generations, classify_entity
 
 tqdm.pandas()
 sns.set_theme()
@@ -233,14 +233,15 @@ def main(args):
     # ── Entity description heatmaps (first subset that has data) ─────────────
     print("Plotting entity description heatmaps ...")
     for name, path in {e.split(":", 1)[0]: e.split(":", 1)[1] for e in args.subsets}.items():
-        entity_desc = load_entity_description_generations(path)
         for source, target, fname in [
             ("e1",   "e2", "entity_description_e1_e2.pdf"),
             ("last", "e2", "entity_description_last_e2.pdf"),
             ("last", "e3", "entity_description_last_e3.pdf"),
         ]:
-            gens = entity_desc.get(source)
-            if gens is None:
+            csv_path = f"{path}/entity_description/{source}_entity_description_s0.csv"
+            try:
+                gens = classify_generations(csv_path, classify_entity)
+            except FileNotFoundError:
                 continue
             out = f"{plots_path}/{name}_{fname}"
             plot_layer_matrix(gens, target, out)
