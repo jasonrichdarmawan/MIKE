@@ -9,105 +9,380 @@ import re
 
 # %%
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# %%
+
 # --- Standalone Utility Functions ---
 
-def find_peak_mlp_hubs(scores, n_layers=None):
+def _parse_node_name(name: str):
+    node = {
+        "raw": name,
+        "layer": None,
+        "module": None,
+        "head": None,
+    }
+    match = re.match(r"blocks\.(\d+)\.(.+)", name)
+    if not match:
+        raise ValueError(f"Unrecognized node name format: {name}. Expected 'blocks.<layer>.<module>'.")
+    node["layer"] = int(match.group(1))
+    tail = match.group(2)
+
+    if tail.startswith("attn.hook_result"):
+        node["module"] = "attn_result"
+        head_match = re.search(r"\[(\d+)\]", tail)
+        if not head_match:
+            raise ValueError(f"Missing head index in attention result node name: {name}. Expected format 'blocks.<layer>.attn.hook_result[<head>]'.")
+        node["head"] = int(head_match.group(1))
+    elif "hook_q_input" in tail:
+        node["module"] = "q_input"
+    elif "hook_k_input" in tail:
+        node["module"] = "k_input"
+    elif "hook_v_input" in tail:
+        node["module"] = "v_input"
+    elif "hook_mlp_in" in tail:
+        node["module"] = "mlp_in"
+    elif "hook_mlp_out" in tail:
+        node["module"] = "mlp_out"
+    elif "hook_resid_pre" in tail:
+        node["module"] = "resid_pre"
+    elif "hook_resid_post" in tail:
+        node["module"] = "resid_post"
+    else:
+        raise ValueError(f"Unrecognized module type in node name: {name}. Expected one of 'attn.hook_result', 'hook_q_input', 'hook_k_input', 'hook_v_input', 'hook_mlp_in', 'hook_mlp_out', 'hook_resid_pre', 'hook_resid_post'.")
+
+    return node
+
+
+def _infer_n_layers_from_scores(scores):
+    max_layer = -1
+    for key in scores.keys():
+        match = re.search(r"blocks\.(\d+)\.", key)
+        if match:
+            max_layer = max(max_layer, int(match.group(1)))
+    if max_layer == -1:
+        raise ValueError("Could not infer number of layers from scores. No keys matching pattern 'blocks.<layer>.' found.")
+    return max_layer + 1
+
+
+def find_peak_mlp_hubs_aggregated(scores):
     """
-    Identifies MLP layers where the total attribution is higher than both
-    the previous and next layers (local maxima).
+    Global MLP hub detection based on aggregated layer scores.
     """
-    print("\n--- MLP Hub Analysis ---")
-    
-    # Infer n_layers if not provided, assuming standard keys
-    if n_layers is None:
-        # Try to find max layer index from keys
-        max_layer = -1
-        for k in scores.keys():
-            match = re.search(r"blocks\.(\d+)\.", k)
-            if match:
-                max_layer = max(max_layer, int(match.group(1)))
-        n_layers = max_layer + 1
+    n_layers = _infer_n_layers_from_scores(scores)
 
     mlp_sums = []
-    for i in range(n_layers):
-        key = f"blocks.{i}.hook_mlp_in"
-        if key in scores:
-            # Sum absolute values across all sources (magnitude-based)
-            val = scores[key].abs().sum().item()
-            mlp_sums.append(val)
+    for layer_idx in range(n_layers):
+        key = f"blocks.{layer_idx}.hook_mlp_in"
+        if key in scores and isinstance(scores[key], torch.Tensor):
+            mlp_sums.append(float(scores[key].abs().sum().item()))
         else:
             mlp_sums.append(0.0)
-    
-    peaks = []
-    # Strictly applies to internal layers (1 to N-2)
-    for i in range(1, len(mlp_sums) - 1): 
-        curr = mlp_sums[i]
-        prev = mlp_sums[i-1]
-        next = mlp_sums[i+1]
-        
-        if curr > prev and curr > next:
-            peaks.append((i, curr))
-            print(f"Peak at Layer {i} (Score: {curr:.4f}) | Prev: {prev:.4f}, Next: {next:.4f}")
-    
-    if not peaks:
-        print("No internal peaks found satisfying condition.")
-        
-    return peaks
 
-def print_top_edges(scores, n=30):
+    global_peaks = []
+    for layer_idx in range(1, len(mlp_sums) - 1):
+        curr = mlp_sums[layer_idx]
+        prev = mlp_sums[layer_idx - 1]
+        nxt = mlp_sums[layer_idx + 1]
+        if curr > prev and curr > nxt:
+            global_peaks.append({
+                "layer": layer_idx,
+                "module": "mlp_in",
+                "score": curr,
+                "neighbor_scores": {
+                    "prev": prev,
+                    "next": nxt,
+                },
+            })
+
+    return global_peaks
+
+
+def find_peak_mlp_hubs_by_sample(scores):
     """
-    Prints the top N edges by absolute attribution score.
+    Sample-specific MLP hub detection based on per-token scores, aggregated over positions/sources.
     """
-    # Flatten the Tensor-based dict to edges
-    flat_scores = {}
+    n_layers = _infer_n_layers_from_scores(scores)
+
+    batch_size = None
+    for layer_idx in range(n_layers):
+        key = f"blocks.{layer_idx}.hook_mlp_in"
+        if key in scores and isinstance(scores[key], torch.Tensor) and scores[key].dim() == 3:
+            batch_size = scores[key].size(0)
+            break
+
+    if batch_size is None:
+        raise ValueError("Per-sample MLP hub analysis requires per-token scores [B, S, Src].")
+
+    layer_strength = torch.zeros(batch_size, n_layers)
+    for layer_idx in range(n_layers):
+        key = f"blocks.{layer_idx}.hook_mlp_in"
+        if key not in scores or not isinstance(scores[key], torch.Tensor) or scores[key].dim() != 3:
+            raise ValueError(f"Missing or invalid MLP input scores for layer {layer_idx}. Expected [B, S, Src].")
+        matrix = scores[key].abs()
+        layer_strength[:, layer_idx] = matrix.sum(dim=(1, 2))
+
+    peaks_by_sample = {sample_idx: [] for sample_idx in range(batch_size)}
+    for sample_idx in range(batch_size):
+        for layer_idx in range(1, n_layers - 1):
+            curr = float(layer_strength[sample_idx, layer_idx].item())
+            prev = float(layer_strength[sample_idx, layer_idx - 1].item())
+            nxt = float(layer_strength[sample_idx, layer_idx + 1].item())
+            if curr > prev and curr > nxt:
+                peaks_by_sample[sample_idx].append({
+                    "layer": layer_idx,
+                    "module": "mlp_in",
+                    "score": curr,
+                    "neighbor_scores": {
+                        "prev": prev,
+                        "next": nxt,
+                    },
+                })
+
+    return peaks_by_sample
+
+
+def find_peak_mlp_hubs_token_by_sample(scores, per_token_top_k=3):
+    """
+    Sample-specific MLP hub detection with token-level peak contributors.
+    """
+    n_layers = _infer_n_layers_from_scores(scores)
+
+    batch_size = None
+    for layer_idx in range(n_layers):
+        key = f"blocks.{layer_idx}.hook_mlp_in"
+        if key in scores and isinstance(scores[key], torch.Tensor) and scores[key].dim() == 3:
+            batch_size = scores[key].size(0)
+            break
+
+    if batch_size is None:
+        raise ValueError("Token-level MLP hub analysis requires per-token scores [B, S, Src].")
+
+    layer_strength = torch.zeros(batch_size, n_layers)
+    token_strength_by_layer = {}
+
+    for layer_idx in range(n_layers):
+        key = f"blocks.{layer_idx}.hook_mlp_in"
+        if key not in scores or not isinstance(scores[key], torch.Tensor) or scores[key].dim() != 3:
+            raise ValueError(f"Missing or invalid MLP input scores for layer {layer_idx}. Expected [B, S, Src].")
+        matrix = scores[key].abs()
+        layer_strength[:, layer_idx] = matrix.sum(dim=(1, 2))
+        token_strength_by_layer[layer_idx] = matrix.sum(dim=-1)
+
+    peaks_by_sample = {sample_idx: [] for sample_idx in range(batch_size)}
+    for sample_idx in range(batch_size):
+        for layer_idx in range(1, n_layers - 1):
+            curr = float(layer_strength[sample_idx, layer_idx].item())
+            prev = float(layer_strength[sample_idx, layer_idx - 1].item())
+            nxt = float(layer_strength[sample_idx, layer_idx + 1].item())
+
+            if not (curr > prev and curr > nxt):
+                continue
+            
+            token_strength = token_strength_by_layer[layer_idx][sample_idx]
+            k = min(per_token_top_k, token_strength.numel())
+            if k == 0:
+                raise ValueError(f"per_token_top_k is {per_token_top_k}, but token_strength has no elements. Check the shape of your score tensors and the value of per_token_top_k.")
+            top_positions = []
+            top_vals, top_pos = token_strength.topk(k)
+            for pos_idx, val in zip(top_pos.tolist(), top_vals.tolist()):
+                top_positions.append({
+                    "position": int(pos_idx),
+                    "score": float(val),
+                })
+
+            peaks_by_sample[sample_idx].append({
+                "layer": layer_idx,
+                "module": "mlp_in",
+                "score": curr,
+                "neighbor_scores": {
+                    "prev": prev,
+                    "next": nxt,
+                },
+                "top_positions": top_positions,
+            })
+
+    return peaks_by_sample
+
+
+def _require_source_names(scores):
     source_names = scores.get("source_names", [])
-    
     if not source_names:
-        print("Warning: 'source_names' not found in scores. cannot map indices to names.")
-        return
+        raise ValueError("Missing 'source_names' in scores. This should be a list of node names corresponding to source indices in the score matrices.")
+    return source_names
 
-    for dest, matrix in scores.items():
-        if dest == "source_names": continue
-        
-        # Matrix is Tensor.
-        # If 2D [Head, Src]
-        if matrix.dim() == 2:
+
+def _make_edge(source_meta, destination_meta, score, sample_idx=None, position=None):
+    return {
+        "score": float(score),
+        "abs_score": float(abs(score)),
+        "source": source_meta,
+        "destination": destination_meta,
+        "sample_idx": sample_idx,
+        "position": position,
+    }
+
+
+def find_top_edges_aggregated(scores, n=30):
+    """
+    Global edge ranking. Uses aggregated tensors directly, and aggregates per-token tensors over batch+position.
+    """
+    source_names = _require_source_names(scores)
+    global_edges = []
+
+    for dest_name, matrix in scores.items():
+        if dest_name == "source_names" or not isinstance(matrix, torch.Tensor):
+            continue
+
+        dest_meta = _parse_node_name(dest_name)
+
+        if matrix.dim() == 2:  # [Head, Src]
             n_heads, n_srcs = matrix.shape
-            for h in range(n_heads):
-                for s in range(n_srcs):
-                    if s < len(source_names):
-                        src_name = source_names[s]
-                        val = matrix[h, s].abs().item()
-                        flat_scores[f"{src_name} -> {dest}.H{h}"] = val
-                    
-        # If 1D [Src]
-        elif matrix.dim() == 1:
+            for head_idx in range(n_heads):
+                for src_idx in range(n_srcs):
+                    source_meta = _parse_node_name(source_names[src_idx])
+                    global_edges.append(
+                        _make_edge(source_meta=source_meta, destination_meta={**dest_meta, "head": int(head_idx)}, score=matrix[head_idx, src_idx].item())
+                    )
+        elif matrix.dim() == 1:  # [Src]
             n_srcs = matrix.shape[0]
-            for s in range(n_srcs):
-                if s < len(source_names):
-                    src_name = source_names[s]
-                    val = matrix[s].abs().item()
-                    flat_scores[f"{src_name} -> {dest}"] = val
+            for src_idx in range(n_srcs):
+                source_meta = _parse_node_name(source_names[src_idx])
+                global_edges.append(_make_edge(source_meta=source_meta, destination_meta=dest_meta, score=matrix[src_idx].item()))
+        elif matrix.dim() == 4:  # [B, Pos, Head, Src]
+            agg = matrix.sum(dim=(0, 1))
+            n_heads, n_srcs = agg.shape
+            for head_idx in range(n_heads):
+                for src_idx in range(n_srcs):
+                    source_meta = _parse_node_name(source_names[src_idx])
+                    global_edges.append(
+                        _make_edge(source_meta=source_meta, destination_meta={**dest_meta, "head": int(head_idx)}, score=agg[head_idx, src_idx].item())
+                    )
+        elif matrix.dim() == 3:  # [B, Pos, Src]
+            agg = matrix.sum(dim=(0, 1))
+            n_srcs = agg.shape[0]
+            for src_idx in range(n_srcs):
+                source_meta = _parse_node_name(source_names[src_idx])
+                global_edges.append(_make_edge(source_meta=source_meta, destination_meta=dest_meta, score=agg[src_idx].item()))
 
-    # Sort by absolute value
-    sorted_edges = sorted(flat_scores.items(), key=lambda x: abs(x[1]), reverse=True)
-    print(f"\n--- Top {n} Edges ---")
-    for i, (k, v) in enumerate(sorted_edges[:n]):
-        # Beautify formatting
-        k = k.replace("blocks.", "L")
-        k = k.replace(".hook_", ".")
-        k = k.replace("attn.result", "H")
-        k = k.replace("mlp_out", "MLP")
-        k = k.replace("mlp_in", "MLP")
-        k = k.replace("q_input", "Q")
-        k = k.replace("k_input", "K")
-        k = k.replace("v_input", "V")
-        k = k.replace("resid_pre", "ResidPre")
-        k = k.replace("resid_post", "ResidPost")   
-        k = k.replace("[", "").replace("]", "")
-        
-        print(f"{i+1:02d}. {k}  (Score: {v:.4f})")
+    top_edges = sorted(global_edges, key=lambda x: x["abs_score"], reverse=True)[:n]
+    return top_edges
 
+
+def find_top_edges_by_sample(scores, n=30):
+    """
+    Sample-specific edge ranking aggregated over positions only.
+    Requires per-token score tensors.
+    """
+    source_names = _require_source_names(scores)
+    sample_edges_by_sample = {}
+
+    for dest_name, matrix in scores.items():
+        if dest_name == "source_names" or not isinstance(matrix, torch.Tensor):
+            continue
+        dest_meta = _parse_node_name(dest_name)
+
+        if matrix.dim() == 4:  # [B, Pos, Head, Src]
+            bsz, _, n_heads, n_srcs = matrix.shape
+            for sample_idx in range(bsz):
+                sample_agg = matrix[sample_idx].sum(dim=0)  # [Head, Src]
+                for head_idx in range(n_heads):
+                    for src_idx in range(n_srcs):
+                        source_meta = _parse_node_name(source_names[src_idx])
+                        sample_edges_by_sample.setdefault(int(sample_idx), []).append(
+                            _make_edge(
+                                source_meta=source_meta,
+                                destination_meta={**dest_meta, "head": int(head_idx)},
+                                score=sample_agg[head_idx, src_idx].item(),
+                                sample_idx=int(sample_idx),
+                                position=None,
+                            )
+                        )
+        elif matrix.dim() == 3:  # [B, Pos, Src]
+            bsz, _, n_srcs = matrix.shape
+            for sample_idx in range(bsz):
+                sample_agg = matrix[sample_idx].sum(dim=0)  # [Src]
+                for src_idx in range(n_srcs):
+                    source_meta = _parse_node_name(source_names[src_idx])
+                    sample_edges_by_sample.setdefault(int(sample_idx), []).append(
+                        _make_edge(
+                            source_meta=source_meta,
+                            destination_meta=dest_meta,
+                            score=sample_agg[src_idx].item(),
+                            sample_idx=int(sample_idx),
+                            position=None,
+                        )
+                    )
+
+    return {
+        sample_idx: sorted(edges, key=lambda x: x["abs_score"], reverse=True)[:n]
+        for sample_idx, edges in sample_edges_by_sample.items()
+    }
+
+
+def find_top_token_edges_by_sample(scores, token_level_n=10):
+    """
+    Sample-specific token-level edge ranking.
+    Requires per-token score tensors.
+    """
+    source_names = _require_source_names(scores)
+    token_edges_by_sample = {}
+
+    for dest_name, matrix in scores.items():
+        if dest_name == "source_names" or not isinstance(matrix, torch.Tensor):
+            continue
+        dest_meta = _parse_node_name(dest_name)
+
+        if matrix.dim() == 4:  # [B, Pos, Head, Src]
+            bsz, _, n_heads, n_srcs = matrix.shape
+            for sample_idx in range(bsz):
+                sample_abs = matrix[sample_idx].abs()  # [Pos, Head, Src]
+                k_tok = min(token_level_n, sample_abs.numel())
+                if k_tok == 0:
+                    raise ValueError(f"token_level_n is {token_level_n}, but sample_abs has no elements. Check the shape of your score tensors and the value of token_level_n.")
+                top_vals, top_idx = sample_abs.reshape(-1).topk(k_tok)
+                for abs_val, flat_idx in zip(top_vals.tolist(), top_idx.tolist()):
+                    src_idx = flat_idx % n_srcs
+                    tmp = flat_idx // n_srcs
+                    head_idx = tmp % n_heads
+                    pos_idx = tmp // n_heads
+                    source_meta = _parse_node_name(source_names[src_idx])
+                    token_edges_by_sample.setdefault(int(sample_idx), []).append(
+                        _make_edge(
+                            source_meta=source_meta,
+                            destination_meta={**dest_meta, "head": int(head_idx)},
+                            score=matrix[sample_idx, pos_idx, head_idx, src_idx].item(),
+                            sample_idx=int(sample_idx),
+                            position=int(pos_idx),
+                        )
+                    )
+        elif matrix.dim() == 3:  # [B, Pos, Src]
+            bsz, _, n_srcs = matrix.shape
+            for sample_idx in range(bsz):
+                sample_abs = matrix[sample_idx].abs()  # [Pos, Src]
+                k_tok = min(token_level_n, sample_abs.numel())
+                if k_tok == 0:
+                    raise ValueError(f"token_level_n is {token_level_n}, but sample_abs has no elements. Check the shape of your score tensors and the value of token_level_n.")
+                top_vals, top_idx = sample_abs.reshape(-1).topk(k_tok)
+                for abs_val, flat_idx in zip(top_vals.tolist(), top_idx.tolist()):
+                    src_idx = flat_idx % n_srcs
+                    pos_idx = flat_idx // n_srcs
+                    source_meta = _parse_node_name(source_names[src_idx])
+                    token_edges_by_sample.setdefault(int(sample_idx), []).append(
+                        _make_edge(
+                            source_meta=source_meta,
+                            destination_meta=dest_meta,
+                            score=matrix[sample_idx, pos_idx, src_idx].item(),
+                            sample_idx=int(sample_idx),
+                            position=int(pos_idx),
+                        )
+                    )
+
+    return {
+        sample_idx: sorted(edges, key=lambda x: x["abs_score"], reverse=True)[:token_level_n]
+        for sample_idx, edges in token_edges_by_sample.items()
+    }
 
 # --- Model Component Registries ---
 
@@ -671,6 +946,7 @@ class EAPGraph:
         metric_fn: Callable,
         integrated_gradients: Optional[int] = None,
         corrupted_input_ids: Optional[torch.Tensor] = None,
+        return_per_token_scores: bool = False,
     ):
         """
         Core EAP/EAP-IG execution using pre-processed tensors.
@@ -679,6 +955,7 @@ class EAPGraph:
         metric_fn: Callable that maps (logits, reference_logits, input_length) -> scalar metric/loss.
         integrated_gradients: If None, run EAP. If int>0, run EAP-IG with this many steps.
         corrupted_input_ids: [Batch, Seq] corrupted baseline inputs.
+        return_per_token_scores: if True, include per-sample/per-position edge scores.
         """
         if integrated_gradients is None:
             activation_differences, clean_grads = self.get_activations(
@@ -730,8 +1007,12 @@ class EAPGraph:
                     continue
 
                 grad = clean_grads[dest_name].to(self.main_device)
-                score_matrix = torch.einsum("bsid,bshd->ih", src_view, grad)
-                scores[dest_name] = score_matrix.T.detach().cpu()
+                score_tensor = torch.einsum("bsid,bshd->bshi", src_view, grad)
+                if return_per_token_scores:
+                    scores[dest_name] = score_tensor.permute(0, 1, 3, 2).detach().cpu()
+                else:
+                    score_matrix = score_tensor.sum(dim=(0, 1))
+                    scores[dest_name] = score_matrix.T.detach().cpu()
 
             res_name = f"blocks.{layer}.attn.hook_result"
             if res_name in activation_differences:
@@ -746,8 +1027,12 @@ class EAPGraph:
             mlp_dest_name = f"blocks.{layer}.hook_mlp_in"
             if mlp_dest_name in clean_grads:
                 grad = clean_grads[mlp_dest_name].to(self.main_device)
-                score_vec = torch.einsum("bsid,bsd->i", src_view, grad)
-                scores[mlp_dest_name] = score_vec.detach().cpu()
+                score_tensor = torch.einsum("bsid,bsd->bsi", src_view, grad)
+                if return_per_token_scores:
+                    scores[mlp_dest_name] = score_tensor.detach().cpu()
+                else:
+                    score_vec = score_tensor.sum(dim=(0, 1))
+                    scores[mlp_dest_name] = score_vec.detach().cpu()
 
             mlp_out_name = f"blocks.{layer}.hook_mlp_out"
             if mlp_out_name in activation_differences:
@@ -759,8 +1044,12 @@ class EAPGraph:
                 if resid_name in clean_grads:
                     src_view = src_buffer[:, :, :n_src, :] # shape [B, S, Src, D]
                     grad = clean_grads[resid_name].to(self.main_device) # shape [B, S, D]
-                    score_vec = torch.einsum("bsid,bsd->i", src_view, grad)
-                    scores[resid_name] = score_vec.detach().cpu()
+                    score_tensor = torch.einsum("bsid,bsd->bsi", src_view, grad)
+                    if return_per_token_scores:
+                        scores[resid_name] = score_tensor.detach().cpu()
+                    else:
+                        score_vec = score_tensor.sum(dim=(0, 1))
+                        scores[resid_name] = score_vec.detach().cpu()
 
         scores["source_names"] = source_names[:n_src]
         return scores
@@ -777,14 +1066,15 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
+    import json
     # EAP Wrapper
     eap = EAPGraph(model)
     
     prompts = [
-        "Suppose John lives in a houseboat, Ellie Kemper lives in an apartment, and Keanu Reeves lives in a cabin. Therefore, the person who lives in an apartment is a citizen of",
+        "Suppose John lives on a houseboat, Ellie Kemper lives in an apartment, and Cillian Murphy lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ]
     corrupted_prompts = [
-        "Suppose John lives in a houseboat, Keanu Reeves lives in an apartment, and Ellie Kemper lives in a cabin. Therefore, the person who lives in an apartment is a citizen of",
+        "Suppose John lives on a houseboat, Cillian Murphy lives in an apartment, and Ellie Kemper lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ]
     
     # Pre-process inputs
@@ -800,10 +1090,17 @@ if __name__ == "__main__":
 
     kl_div_metric = get_kl_div_metric()
 
-    results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, integrated_gradients=5)
+    results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, integrated_gradients=5, return_per_token_scores=True)
     
-    # Standalone analysis
-    find_peak_mlp_hubs(results)
-    print_top_edges(results)
+    # Structured analysis outputs for downstream fine-tuning decisions
+    mlp_hubs_token_by_sample = find_peak_mlp_hubs_token_by_sample(results, per_token_top_k=5)
+    top_edges_aggregated = find_top_edges_aggregated(results, n=3)
+    top_edges_by_sample = find_top_edges_by_sample(results, n=3)
+    top_token_edges_by_sample = find_top_token_edges_by_sample(results, token_level_n=3)
+
+    print("Top aggregated edge candidates:\n", json.dumps(top_edges_aggregated, indent=4))
+    print("Top edge candidates by sample:\n", json.dumps(top_edges_by_sample, indent=4))
+    print("Top token edges by sample:\n", json.dumps(top_token_edges_by_sample, indent=4))
+    print("MLP hub token by sample:\n", json.dumps(mlp_hubs_token_by_sample, indent=4))
 
 # %%

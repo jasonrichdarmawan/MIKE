@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers_eap.eap_graph import EAPGraph, find_peak_mlp_hubs, print_top_edges, get_nll_metric, get_logit_diff_metric
+from transformers_eap.eap_graph import EAPGraph, find_peak_mlp_hubs, find_top_edges, get_nll_metric, get_logit_diff_metric
 from transformers_eap.tokenizer import EAPTokenizer
 
 def test_eap_with_noise():
@@ -46,7 +46,7 @@ def test_eap_with_noise():
     assert len(results_std) > 0
     print("Standard EAP run successful.")
     find_peak_mlp_hubs(results_std)
-    print_top_edges(results_std, n=5)
+    find_top_edges(results_std, n=5)
 
     # Run EAP-IG
     results_ig = eap.run_eap(
@@ -60,7 +60,7 @@ def test_eap_with_noise():
     assert len(results_ig) > 0
     print("EAP-IG run successful.")
     find_peak_mlp_hubs(results_ig)
-    print_top_edges(results_ig, n=5)
+    find_top_edges(results_ig, n=5)
 
 def test_eap_with_corrupted_prompt():
     print("\nTesting EAP with Corrupted Prompt...")
@@ -116,7 +116,7 @@ def test_eap_with_corrupted_prompt():
     assert len(results_std) > 0
     print("Standard EAP with Corrupted Prompt run successful.")
     find_peak_mlp_hubs(results_std)
-    print_top_edges(results_std, n=5)
+    find_top_edges(results_std, n=5)
 
     # Run EAP-IG with explicit corrupted input
     results_ig = eap.run_eap(
@@ -130,7 +130,7 @@ def test_eap_with_corrupted_prompt():
     assert len(results_ig) > 0
     print("EAP-IG with Corrupted Prompt run successful.")
     find_peak_mlp_hubs(results_ig)
-    print_top_edges(results_ig, n=5)
+    find_top_edges(results_ig, n=5)
 
 def test_eap_with_logit_diff():
     print("\nTesting EAP with Logit Difference (Target - Foil)...")
@@ -170,7 +170,7 @@ def test_eap_with_logit_diff():
     assert len(results) > 0
     print("EAP with Logit Difference run successful.")
     find_peak_mlp_hubs(results)
-    print_top_edges(results, n=5)
+    find_top_edges(results, n=5)
 
 def test_eap_logit_diff_with_corrupted_prompt():
     print("\nTesting EAP Logit Difference (Target - Foil) with Explicit Corrupted Prompt...")
@@ -216,7 +216,7 @@ def test_eap_logit_diff_with_corrupted_prompt():
     assert len(results) > 0
     print("EAP Logit Diff + Corrupted Prompt successful.")
     find_peak_mlp_hubs(results)
-    print_top_edges(results, n=5)
+    find_top_edges(results, n=5)
 
 
 if __name__ == "__main__":
