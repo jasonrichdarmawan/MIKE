@@ -75,26 +75,26 @@ def find_peak_mlp_hubs_aggregated(scores):
     mlp_sums = []
     for layer_idx in range(n_layers):
         key = f"blocks.{layer_idx}.hook_mlp_in"
-        if key in scores and isinstance(scores[key], torch.Tensor):
-            mlp_sums.append(float(scores[key].abs().sum().item()))
-        else:
-            mlp_sums.append(0.0)
+        if not (key in scores and isinstance(scores[key], torch.Tensor)):
+            raise ValueError(f"Missing or invalid MLP input scores for layer {layer_idx}. Expected a tensor.")
+        mlp_sums.append(float(scores[key].abs().sum().item()))
 
     global_peaks = []
     for layer_idx in range(1, len(mlp_sums) - 1):
         curr = mlp_sums[layer_idx]
         prev = mlp_sums[layer_idx - 1]
         nxt = mlp_sums[layer_idx + 1]
-        if curr > prev and curr > nxt:
-            global_peaks.append({
-                "layer": layer_idx,
-                "module": "mlp_in",
-                "score": curr,
-                "neighbor_scores": {
-                    "prev": prev,
-                    "next": nxt,
-                },
-            })
+        if not (curr > prev and curr > nxt):
+            continue
+        global_peaks.append({
+            "layer": layer_idx,
+            "module": "mlp_in",
+            "score": curr,
+            "neighbor_scores": {
+                "prev": prev,
+                "next": nxt,
+            },
+        })
 
     return global_peaks
 
@@ -129,69 +129,8 @@ def find_peak_mlp_hubs_by_sample(scores):
             curr = float(layer_strength[sample_idx, layer_idx].item())
             prev = float(layer_strength[sample_idx, layer_idx - 1].item())
             nxt = float(layer_strength[sample_idx, layer_idx + 1].item())
-            if curr > prev and curr > nxt:
-                peaks_by_sample[sample_idx].append({
-                    "layer": layer_idx,
-                    "module": "mlp_in",
-                    "score": curr,
-                    "neighbor_scores": {
-                        "prev": prev,
-                        "next": nxt,
-                    },
-                })
-
-    return peaks_by_sample
-
-
-def find_peak_mlp_hubs_token_by_sample(scores, per_token_top_k=3):
-    """
-    Sample-specific MLP hub detection with token-level peak contributors.
-    """
-    n_layers = _infer_n_layers_from_scores(scores)
-
-    batch_size = None
-    for layer_idx in range(n_layers):
-        key = f"blocks.{layer_idx}.hook_mlp_in"
-        if key in scores and isinstance(scores[key], torch.Tensor) and scores[key].dim() == 3:
-            batch_size = scores[key].size(0)
-            break
-
-    if batch_size is None:
-        raise ValueError("Token-level MLP hub analysis requires per-token scores [B, S, Src].")
-
-    layer_strength = torch.zeros(batch_size, n_layers)
-    token_strength_by_layer = {}
-
-    for layer_idx in range(n_layers):
-        key = f"blocks.{layer_idx}.hook_mlp_in"
-        if key not in scores or not isinstance(scores[key], torch.Tensor) or scores[key].dim() != 3:
-            raise ValueError(f"Missing or invalid MLP input scores for layer {layer_idx}. Expected [B, S, Src].")
-        matrix = scores[key].abs()
-        layer_strength[:, layer_idx] = matrix.sum(dim=(1, 2))
-        token_strength_by_layer[layer_idx] = matrix.sum(dim=-1)
-
-    peaks_by_sample = {sample_idx: [] for sample_idx in range(batch_size)}
-    for sample_idx in range(batch_size):
-        for layer_idx in range(1, n_layers - 1):
-            curr = float(layer_strength[sample_idx, layer_idx].item())
-            prev = float(layer_strength[sample_idx, layer_idx - 1].item())
-            nxt = float(layer_strength[sample_idx, layer_idx + 1].item())
-
             if not (curr > prev and curr > nxt):
                 continue
-            
-            token_strength = token_strength_by_layer[layer_idx][sample_idx]
-            k = min(per_token_top_k, token_strength.numel())
-            if k == 0:
-                raise ValueError(f"per_token_top_k is {per_token_top_k}, but token_strength has no elements. Check the shape of your score tensors and the value of per_token_top_k.")
-            top_positions = []
-            top_vals, top_pos = token_strength.topk(k)
-            for pos_idx, val in zip(top_pos.tolist(), top_vals.tolist()):
-                top_positions.append({
-                    "position": int(pos_idx),
-                    "score": float(val),
-                })
-
             peaks_by_sample[sample_idx].append({
                 "layer": layer_idx,
                 "module": "mlp_in",
@@ -200,7 +139,59 @@ def find_peak_mlp_hubs_token_by_sample(scores, per_token_top_k=3):
                     "prev": prev,
                     "next": nxt,
                 },
-                "top_positions": top_positions,
+            })
+
+    return peaks_by_sample
+
+
+def find_peak_mlp_hubs_token_by_sample(scores, per_token_top_k=3):
+    """
+    Sample-specific MLP hub ranking over (token position, layer) pairs.
+    Uses top-k on absolute attribution summed over source nodes, without
+    neighbor-peak heuristics across layers.
+    """
+    if per_token_top_k <= 0:
+        raise ValueError(f"per_token_top_k must be > 0, got {per_token_top_k}.")
+
+    n_layers = _infer_n_layers_from_scores(scores)
+
+    batch_size = None
+    seq_len = None
+    for layer_idx in range(n_layers):
+        key = f"blocks.{layer_idx}.hook_mlp_in"
+        if key in scores and isinstance(scores[key], torch.Tensor) and scores[key].dim() == 3:
+            batch_size = scores[key].size(0)
+            seq_len = scores[key].size(1)
+            break
+
+    if batch_size is None:
+        raise ValueError("Token-level MLP hub analysis requires per-token scores [B, S, Src].")
+
+    token_layer_strength = torch.zeros(batch_size, seq_len, n_layers)
+
+    for layer_idx in range(n_layers):
+        key = f"blocks.{layer_idx}.hook_mlp_in"
+        if key not in scores or not isinstance(scores[key], torch.Tensor) or scores[key].dim() != 3:
+            raise ValueError(f"Missing or invalid MLP input scores for layer {layer_idx}. Expected [B, S, Src].")
+        matrix = scores[key].abs()
+        token_layer_strength[:, :, layer_idx] = matrix.sum(dim=-1)
+
+    peaks_by_sample = {sample_idx: [] for sample_idx in range(batch_size)}
+    for sample_idx in range(batch_size):
+        sample_hub_strength = token_layer_strength[sample_idx]
+        k = min(per_token_top_k, sample_hub_strength.numel())
+        if k == 0:
+            raise ValueError(f"per_token_top_k is {per_token_top_k}, but sample_hub_strength has no elements. Check the shape of your score tensors and the value of per_token_top_k.")
+
+        top_vals, top_idx = sample_hub_strength.reshape(-1).topk(k)
+        for flat_idx, val in zip(top_idx.tolist(), top_vals.tolist()):
+            layer_idx = int(flat_idx % n_layers)
+            pos_idx = int(flat_idx // n_layers)
+            peaks_by_sample[sample_idx].append({
+                "position": pos_idx,
+                "layer": layer_idx,
+                "module": "mlp_in",
+                "score": float(val),
             })
 
     return peaks_by_sample
@@ -1066,7 +1057,6 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    import json
     # EAP Wrapper
     eap = EAPGraph(model)
     
@@ -1090,17 +1080,34 @@ if __name__ == "__main__":
 
     kl_div_metric = get_kl_div_metric()
 
-    results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, integrated_gradients=5, return_per_token_scores=True)
+    return_per_token_scores = True
+    results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, integrated_gradients=5, return_per_token_scores=return_per_token_scores)
     
+# %%
+
+if __name__ == "__main__":
+    import json
     # Structured analysis outputs for downstream fine-tuning decisions
-    mlp_hubs_token_by_sample = find_peak_mlp_hubs_token_by_sample(results, per_token_top_k=5)
+    mlp_hubs_aggregated = find_peak_mlp_hubs_aggregated(results)
+    print("MLP hubs aggregated:\n", json.dumps(mlp_hubs_aggregated, indent=4))
+    
+    if return_per_token_scores:
+        mlp_hubs_by_sample = find_peak_mlp_hubs_by_sample(results)
+        mlp_hubs_token_by_sample = find_peak_mlp_hubs_token_by_sample(results, per_token_top_k=5)
+    
+        print("MLP hubs by sample:\n", json.dumps(mlp_hubs_by_sample, indent=4))
+        print("MLP hub token by sample:\n", json.dumps(mlp_hubs_token_by_sample, indent=4))
+
+# %%
+
+if __name__ == "__main__":
+    
     top_edges_aggregated = find_top_edges_aggregated(results, n=3)
     top_edges_by_sample = find_top_edges_by_sample(results, n=3)
     top_token_edges_by_sample = find_top_token_edges_by_sample(results, token_level_n=3)
-
+    
     print("Top aggregated edge candidates:\n", json.dumps(top_edges_aggregated, indent=4))
     print("Top edge candidates by sample:\n", json.dumps(top_edges_by_sample, indent=4))
     print("Top token edges by sample:\n", json.dumps(top_token_edges_by_sample, indent=4))
-    print("MLP hub token by sample:\n", json.dumps(mlp_hubs_token_by_sample, indent=4))
 
 # %%
