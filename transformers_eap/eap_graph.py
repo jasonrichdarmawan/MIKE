@@ -967,9 +967,21 @@ class EAPGraph:
                 self.get_gradient_hook(f"blocks.{i}.hook_resid_post", type="resid_post", layer_idx=i)
             ))
 
-    def _prepare_activations(self, input_ids, attention_mask, corrupted_input_ids):
+    def _prepare_activations(self, input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask):
         if corrupted_input_ids is None:
             raise ValueError("corrupted_input_ids is required. Noise-based corruption is no longer supported.")
+
+        # Provide a clearer error message listing which samples differ in length
+        input_lengths = attention_mask.sum(-1).cpu()
+        corrupted_lengths = corrupted_attention_mask.sum(-1).cpu()
+        unequal = input_lengths != corrupted_lengths
+        if torch.any(unequal):
+            mismatched = torch.where(unequal)[0].tolist()
+            raise ValueError(
+                f"Pair of clean and corrupted prompts must have the same token length. "
+                f"Mismatched sample indices: {mismatched}. "
+                f"Clean lengths: {input_lengths.tolist()}, Corrupted lengths: {corrupted_lengths.tolist()}"
+            )
 
         self.model.eval()
         self.model.zero_grad()
@@ -979,7 +991,7 @@ class EAPGraph:
         attention_mask = attention_mask.to(self.main_device)
         input_length = attention_mask.sum(dim=-1)
         corrupted_input_ids = corrupted_input_ids.to(self.main_device)
-
+        
         self.register_forward_hooks()
         with torch.no_grad():
             self.model(input_ids)
@@ -1008,8 +1020,6 @@ class EAPGraph:
         self.reset_hooks()
 
         corrupted_wte = embed_acts[0]
-        if corrupted_wte.shape != clean_wte.shape:
-            raise ValueError(f"Shape mismatch: Clean {clean_wte.shape} vs Corrupt {corrupted_wte.shape}")
 
         activation_differences = {}
         for name, clean_act in clean_acts.items():
@@ -1060,8 +1070,8 @@ class EAPGraph:
 
         return avg_grads
 
-    def get_activations(self, input_ids, attention_mask, corrupted_input_ids, metric_fn: Callable):
-        prepared = self._prepare_activations(input_ids, attention_mask, corrupted_input_ids)
+    def get_activations(self, input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn: Callable):
+        prepared = self._prepare_activations(input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask)
         gradients = self._compute_gradients(
             prepared["input_ids"],
             prepared["input_length"],
@@ -1073,11 +1083,11 @@ class EAPGraph:
         )
         return prepared["activation_differences"], gradients
 
-    def get_activations_ig(self, input_ids, attention_mask, corrupted_input_ids, metric_fn: Callable, steps: int = 30):
+    def get_activations_ig(self, input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn: Callable, steps: int = 30):
         if steps <= 0:
             raise ValueError(f"integrated_gradients must be > 0, got {steps}")
 
-        prepared = self._prepare_activations(input_ids, attention_mask, corrupted_input_ids)
+        prepared = self._prepare_activations(input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask)
         gradients = self._compute_gradients(
             prepared["input_ids"],
             prepared["input_length"],
@@ -1096,6 +1106,7 @@ class EAPGraph:
         metric_fn: Callable,
         integrated_gradients: Optional[int] = None,
         corrupted_input_ids: Optional[torch.Tensor] = None,
+        corrupted_attention_mask: Optional[torch.Tensor] = None,
         return_per_token_scores: bool = False,
     ):
         """
@@ -1109,11 +1120,11 @@ class EAPGraph:
         """
         if integrated_gradients is None:
             activation_differences, clean_grads = self.get_activations(
-                input_ids, attention_mask, corrupted_input_ids, metric_fn
+                input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn
             )
         else:
             activation_differences, clean_grads = self.get_activations_ig(
-                input_ids, attention_mask, corrupted_input_ids, metric_fn, steps=integrated_gradients
+                input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn, steps=integrated_gradients
             )
 
         attention_mask = attention_mask.to(self.main_device)
@@ -1220,10 +1231,10 @@ if __name__ == "__main__":
     eap = EAPGraph(model)
     
     prompts = [
-        "Suppose John lives on a houseboat, Ellie Kemper lives in an apartment, and Cillian Murphy lives in a cabin. Therefore, the person living in the apartment is a citizen of",
+        "Suppose John lives on a houseboat, Ellie Kemper lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ]
     corrupted_prompts = [
-        "Suppose John lives on a houseboat, Cillian Murphy lives in an apartment, and Ellie Kemper lives in a cabin. Therefore, the person living in the apartment is a citizen of",
+        "Suppose John lives on a houseboat, Cillian Murphy lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ]
     
     # Pre-process inputs
@@ -1236,11 +1247,12 @@ if __name__ == "__main__":
     input_ids = tokenized["input_ids"][:batch_size]
     attention_mask = tokenized["attention_mask"][:batch_size]
     corrupted_input_ids = tokenized["input_ids"][batch_size:]
+    corrupted_attention_mask = tokenized["attention_mask"][batch_size:]
 
     kl_div_metric = get_kl_div_metric()
 
-    return_per_token_scores = False
-    results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, integrated_gradients=5, return_per_token_scores=return_per_token_scores)
+    return_per_token_scores = True
+    results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, corrupted_attention_mask=corrupted_attention_mask, integrated_gradients=5, return_per_token_scores=return_per_token_scores)
     
 # %%
 
