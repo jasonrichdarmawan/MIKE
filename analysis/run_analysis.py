@@ -20,6 +20,7 @@ Usage:
 
 # %%
 
+import json
 import os
 import sys
 
@@ -176,7 +177,7 @@ def run_postedit_analyses(model, tokenizer, dataset: pd.DataFrame,
     hf_dataset = Dataset.from_pandas(dataset, preserve_index=False)
 
     def outputs_exist(subdir, filename):
-        return all((out_dir / name / subdir / filename).exists() for name in analysis_subsets)
+        return not args.force and all((out_dir / name / subdir / filename).exists() for name in analysis_subsets)
 
     # ── Method 1: Sublayer projection — attention ─────────────────────────────
     if outputs_exist("sublayer_projection", "attention_projections.csv"):
@@ -256,7 +257,7 @@ def run_preedit(args):
 
     # ── Evaluate base model ───────────────────────────────────────────────────
     evaluated_path = data_dir / "two_hop.csv"
-    if evaluated_path.exists():
+    if not args.force and evaluated_path.exists():
         print(f"Loading existing evaluation from {evaluated_path} ...")
         evaluated = pd.read_csv(evaluated_path, index_col=0)
     else:
@@ -298,7 +299,7 @@ def run_preedit(args):
 
         # ── Method 1: Sublayer projection — attention ─────────────────────────
         out = subset_dir / "sublayer_projection" / "attention_projections.csv"
-        if out.exists():
+        if not args.force and out.exists():
             print(f"\n=== Method 1/4: Sublayer projection (attention) — SKIP (exists) ===")
         else:
             print("\n=== Method 1/4: Sublayer projection (attention) ===")
@@ -313,7 +314,7 @@ def run_preedit(args):
 
         # ── Method 2: Sublayer projection — MLP ───────────────────────────────
         out = subset_dir / "sublayer_projection" / "mlp_projections.csv"
-        if out.exists():
+        if not args.force and out.exists():
             print(f"\n=== Method 2/4: Sublayer projection (MLP) — SKIP (exists) ===")
         else:
             print("\n=== Method 2/4: Sublayer projection (MLP) ===")
@@ -328,7 +329,7 @@ def run_preedit(args):
 
         # ── Method 3: Attention knockout ──────────────────────────────────────
         out = subset_dir / "attention_knockout" / "last_e1_attention_knockout_k3_composition.csv"
-        if out.exists():
+        if not args.force and out.exists():
             print(f"\n=== Method 3/4: Attention knockout — SKIP (exists) ===")
         else:
             print("\n=== Method 3/4: Attention knockout ===")
@@ -350,7 +351,7 @@ def run_preedit(args):
             hf_ps = Dataset.from_pandas(dataset_ps, preserve_index=False)
             for source in ["e1", "last"]:
                 out = subset_dir / "entity_description" / f"{source}_entity_description_s0.csv"
-                if out.exists():
+                if not args.force and out.exists():
                     print(f"\n=== Method 4/4: PatchScopes source={source} — SKIP (exists) ===")
                     continue
                 print(f"\n=== Method 4/4: PatchScopes source={source} ===")
@@ -396,26 +397,31 @@ def run_alphaedit(args):
     dataset["e2_answers"] = dataset.apply(lambda r: get_answers(r, "e2")["e2_answers"], axis=1)
     dataset["e3_answers"] = dataset.apply(lambda r: get_answers(r, "e3")["e3_answers"], axis=1)
 
-    if ckpt_path.exists():
+    weight_names = [
+        f"{hparams.rewrite_module_tmp.format(layer)}.weight"
+        for layer in hparams.layers
+    ]
+
+    if not args.force and ckpt_path.exists():
         load_checkpoint(model, ckpt_path, device)
     else:
         requests = []
         for _, row in dataset.iterrows():
             requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
             requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
-        print(f"Applying AlphaEdit ({len(requests)} facts across {len(dataset)} examples)...")
+        # AlphaEdit handles internal batching via edit_batch_size (controls z-vector computation).
+        # All requests are passed at once so cache_c accumulates correctly over the full dataset.
+        print(f"Applying AlphaEdit ({len(requests)} facts across {len(dataset)} examples, "
+              f"z-batch-size={args.ae_edit_batch_size})...")
         apply_algo(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False,
-                   edit_batch_size=args.edit_batch_size)
-        weight_names = [
-            f"{hparams.rewrite_module_tmp.format(layer)}.weight"
-            for layer in hparams.layers
-        ]
+                   edit_batch_size=args.ae_edit_batch_size)
         weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
         torch.save(weights, ckpt_path)
         print(f"Checkpoint saved at {ckpt_path}")
+        torch.cuda.empty_cache()
 
     evaluated_path = out_dir / "evaluated_two_hop.csv"
-    if not evaluated_path.exists():
+    if args.force or not evaluated_path.exists():
         print("Running evaluation on edited model ...")
         fn_kwargs = {"model": model, "tokenizer": tokenizer}
         hf_eval = Dataset.from_pandas(dataset, preserve_index=False)
@@ -476,9 +482,23 @@ def run_ifmet(args):
     dataset["e2_answers"] = dataset.apply(lambda r: get_answers(r, "e2")["e2_answers"], axis=1)
     dataset["e3_answers"] = dataset.apply(lambda r: get_answers(r, "e3")["e3_answers"], axis=1)
 
-    if ckpt_path.exists():
+    weight_names = set()
+    for hp in [hparams_s, hparams_d]:
+        for layer in hp.layers:
+            weight_names.add(f"{hp.rewrite_module_tmp.format(layer)}.weight")
+
+    progress_path = ckpt_path.with_suffix(".progress.json")
+
+    if not args.force and ckpt_path.exists():
         load_checkpoint(model, ckpt_path, device)
+        start_phase = json.load(open(progress_path))["phase"]      if progress_path.exists() else None
+        start_batch = json.load(open(progress_path))["next_batch"] if progress_path.exists() else None
+        if start_phase is not None:
+            print(f"Resuming IFMET from phase {start_phase}, batch {start_batch} ...")
     else:
+        start_phase, start_batch = 1, 0
+
+    if start_phase is not None:
         standard_requests = []
         for _, row in dataset.iterrows():
             standard_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"],
@@ -491,26 +511,42 @@ def run_ifmet(args):
             indirect_requests.append({"prompt": prompt, "subject": prompt,
                                       "target_new": row["e3_label"]})
 
-        print(f"Phase 1: MEMIT shallow — {len(standard_requests)} fact edits ...")
-        hparams_s.batch_size = len(standard_requests)
-        apply_algo(model, tokenizer, standard_requests, hparams_s,
-                   copy=False, return_orig_weights=False)
+        def save_ckpt(phase, next_batch, total):
+            weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
+            torch.save(weights, ckpt_path)
+            json.dump({"phase": phase, "next_batch": next_batch, "total_batches": total},
+                      open(progress_path, "w"))
 
-        print(f"Phase 2: MEMIT deep — {len(indirect_requests)} indirect edits ...")
-        hparams_d.batch_size = len(indirect_requests)
-        apply_algo(model, tokenizer, indirect_requests, hparams_d,
-                   copy=False, return_orig_weights=False)
+        if start_phase == 1:
+            hparams_s.batch_size = args.edit_batch_size
+            n = (len(standard_requests) + args.edit_batch_size - 1) // args.edit_batch_size
+            print(f"Phase 1: MEMIT shallow — {len(standard_requests)} fact edits, batch={args.edit_batch_size} ({n} batches)...")
+            for b, i in enumerate(range(0, len(standard_requests), args.edit_batch_size)):
+                if b < start_batch:
+                    continue
+                apply_algo(model, tokenizer, standard_requests[i:i+args.edit_batch_size], hparams_s,
+                           copy=False, return_orig_weights=False)
+                save_ckpt(phase=1, next_batch=b + 1, total=n)
+                print(f"  Phase 1 batch {b+1}/{n} done, checkpoint saved")
+            start_batch = 0  # reset for phase 2
 
-        weight_names = set()
-        for hparams in [hparams_s, hparams_d]:
-            for layer in hparams.layers:
-                weight_names.add(f"{hparams.rewrite_module_tmp.format(layer)}.weight")
-        weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
-        torch.save(weights, ckpt_path)
-        print(f"Checkpoint saved at {ckpt_path}")
+        hparams_d.batch_size = args.edit_batch_size
+        n = (len(indirect_requests) + args.edit_batch_size - 1) // args.edit_batch_size
+        print(f"Phase 2: MEMIT deep — {len(indirect_requests)} indirect edits, batch={args.edit_batch_size} ({n} batches)...")
+        for b, i in enumerate(range(0, len(indirect_requests), args.edit_batch_size)):
+            if b < start_batch:
+                continue
+            apply_algo(model, tokenizer, indirect_requests[i:i+args.edit_batch_size], hparams_d,
+                       copy=False, return_orig_weights=False)
+            save_ckpt(phase=2, next_batch=b + 1, total=n)
+            print(f"  Phase 2 batch {b+1}/{n} done, checkpoint saved")
+
+        progress_path.unlink(missing_ok=True)
+        print(f"Checkpoint finalised at {ckpt_path}")
+        torch.cuda.empty_cache()
 
     evaluated_path = out_dir / "evaluated_two_hop.csv"
-    if not evaluated_path.exists():
+    if args.force or not evaluated_path.exists():
         print("Running evaluation on edited model ...")
         fn_kwargs = {"model": model, "tokenizer": tokenizer}
         hf_eval = Dataset.from_pandas(dataset, preserve_index=False)
@@ -591,9 +627,14 @@ if __name__ == "__main__":
     parser.add_argument("--max-examples",    type=int, default=None)
     parser.add_argument("--skip-patchscopes", action="store_true",
                         help="Skip PatchScopes (method 4) to save time")
-    parser.add_argument("--batch-size",      type=int, default=32)
-    parser.add_argument("--edit-batch-size", type=int, default=4,
-                        help="Facts per AlphaEdit forward pass (higher = faster, more VRAM)")
+    parser.add_argument("--force", action="store_true",
+                        help="Rerun and overwrite all existing outputs (ignore checkpoints and cached files)")
+    parser.add_argument("--batch-size",        type=int, default=100)
+    parser.add_argument("--edit-batch-size",   type=int, default=10,
+                        help="Facts per IFMET editing batch (outer loop batch size)")
+    parser.add_argument("--ae-edit-batch-size", type=int, default=10,
+                        help="AlphaEdit internal z-vector batch size (controls compute_z_batched; "
+                             "~10 safe on A100 40GB with Llama-3-8B)")
     parser.add_argument("--device",          type=int, default=0)
 
     main(parser.parse_args())
