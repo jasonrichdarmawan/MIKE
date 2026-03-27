@@ -459,7 +459,6 @@ def run_ifmet(args):
     data_dir      = Path(args.data_dir)
     incorrect_dir = data_dir / "composition_incorrect"
     out_dir       = data_dir / "composition_incorrect_ifmet"
-    ckpt_path     = out_dir / "editing_checkpoint.pt"
     device        = f"cuda:{args.device}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -467,6 +466,7 @@ def run_ifmet(args):
     model     = load_model(args.model)
     model.eval()
     tokenizer = load_tokenizer(args.model)
+    tokenizer.padding_side = "left"
 
     from EasyEdit.easyeditor import MEMITHyperParams
     from EasyEdit.easyeditor.util import nethook
@@ -487,92 +487,178 @@ def run_ifmet(args):
         for layer in hp.layers:
             weight_names.add(f"{hp.rewrite_module_tmp.format(layer)}.weight")
 
-    progress_path = ckpt_path.with_suffix(".progress.json")
+    if args.restore_weights_ifmet:
+        # ── Per-batch: Edit → Evaluate → Analyze → Restore ───────────────────
+        # Each batch is edited independently on the original model weights.
+        orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
+                        for k in weight_names}
 
-    if not args.force and ckpt_path.exists():
-        load_checkpoint(model, ckpt_path, device)
-        start_phase = json.load(open(progress_path))["phase"]      if progress_path.exists() else None
-        start_batch = json.load(open(progress_path))["next_batch"] if progress_path.exists() else None
-        if start_phase is not None:
-            print(f"Resuming IFMET from phase {start_phase}, batch {start_batch} ...")
-    else:
-        start_phase, start_batch = 1, 0
+        n_batches = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
+        all_evaluated     = []
+        all_sublayer_attn = []
+        all_sublayer_mlp  = []
+        all_knockout      = []
+        all_patch         = {source: [] for source in ["e1", "last"]}
 
-    if start_phase is not None:
-        standard_requests = []
-        for _, row in dataset.iterrows():
-            standard_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"],
-                                      "target_new": row["e2_label"]})
-            standard_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"],
-                                      "target_new": row["e3_label"]})
-        indirect_requests = []
-        for _, row in dataset.iterrows():
-            prompt = row["source_prompt"]
-            indirect_requests.append({"prompt": prompt, "subject": prompt,
-                                      "target_new": row["e3_label"]})
+        for b, start_idx in enumerate(range(0, len(dataset), args.edit_batch_size)):
+            batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
+            print(f"\n--- IFMET Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-        def save_ckpt(phase, next_batch, total):
-            weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
-            torch.save(weights, ckpt_path)
-            json.dump({"phase": phase, "next_batch": next_batch, "total_batches": total},
-                      open(progress_path, "w"))
+            standard_requests_b, indirect_requests_b = [], []
+            for _, row in batch_df.iterrows():
+                standard_requests_b.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
+                standard_requests_b.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+                indirect_requests_b.append({"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]})
 
-        if start_phase == 1:
-            hparams_s.batch_size = args.edit_batch_size
-            n = (len(standard_requests) + args.edit_batch_size - 1) // args.edit_batch_size
-            print(f"Phase 1: MEMIT shallow — {len(standard_requests)} fact edits, batch={args.edit_batch_size} ({n} batches)...")
-            for b, i in enumerate(range(0, len(standard_requests), args.edit_batch_size)):
-                if b < start_batch:
-                    continue
-                apply_algo(model, tokenizer, standard_requests[i:i+args.edit_batch_size], hparams_s,
-                           copy=False, return_orig_weights=False)
-                save_ckpt(phase=1, next_batch=b + 1, total=n)
-                print(f"  Phase 1 batch {b+1}/{n} done, checkpoint saved")
-            start_batch = 0  # reset for phase 2
+            hparams_s.batch_size = len(standard_requests_b)
+            print(f"  Phase 1: MEMIT shallow — {len(standard_requests_b)} fact edits ...")
+            apply_algo(model, tokenizer, standard_requests_b, hparams_s, copy=False, return_orig_weights=False)
 
-        hparams_d.batch_size = args.edit_batch_size
-        n = (len(indirect_requests) + args.edit_batch_size - 1) // args.edit_batch_size
-        print(f"Phase 2: MEMIT deep — {len(indirect_requests)} indirect edits, batch={args.edit_batch_size} ({n} batches)...")
-        for b, i in enumerate(range(0, len(indirect_requests), args.edit_batch_size)):
-            if b < start_batch:
-                continue
-            apply_algo(model, tokenizer, indirect_requests[i:i+args.edit_batch_size], hparams_d,
-                       copy=False, return_orig_weights=False)
-            save_ckpt(phase=2, next_batch=b + 1, total=n)
-            print(f"  Phase 2 batch {b+1}/{n} done, checkpoint saved")
+            hparams_d.batch_size = len(indirect_requests_b)
+            print(f"  Phase 2: MEMIT deep — {len(indirect_requests_b)} indirect edits ...")
+            apply_algo(model, tokenizer, indirect_requests_b, hparams_d, copy=False, return_orig_weights=False)
 
-        progress_path.unlink(missing_ok=True)
-        print(f"Checkpoint finalised at {ckpt_path}")
-        torch.cuda.empty_cache()
+            fn_kwargs = {"model": model, "tokenizer": tokenizer}
+            hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
+            hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_b = hf_b.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_b = hf_b.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_b = hf_b.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_b = hf_b.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            all_evaluated.append(hf_b.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True))
 
-    evaluated_path = out_dir / "evaluated_two_hop.csv"
-    if args.force or not evaluated_path.exists():
-        print("Running evaluation on edited model ...")
-        fn_kwargs = {"model": model, "tokenizer": tokenizer}
-        hf_eval = Dataset.from_pandas(dataset, preserve_index=False)
-        hf_eval = hf_eval.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-        hf_eval = hf_eval.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-        hf_eval = hf_eval.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-        hf_eval = hf_eval.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-        hf_eval = hf_eval.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-        evaluated = hf_eval.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True)
+            hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+            all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
+                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
+                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            all_knockout.append(hf_analysis.map(
+                generate_answer_with_attention_knockout,
+                fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
+                           "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
+
+            if not args.skip_patchscopes:
+                batch_ps = batch_df.copy()
+                batch_ps["target_prompt"] = TARGET_PROMPT
+                hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
+                for source in ["e1", "last"]:
+                    all_patch[source].append(hf_ps.map(
+                        generate_entity_description_with_patching,
+                        fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
+                        batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+
+            with torch.no_grad():
+                for k, v in orig_weights.items():
+                    nethook.get_parameter(model, k)[...] = v.to(device)
+            torch.cuda.empty_cache()
+            print(f"  Weights restored to original.")
+
+        # Aggregate and save
+        evaluated_path = out_dir / "evaluated_two_hop.csv"
+        evaluated = pd.concat(all_evaluated).reset_index(drop=True)
         evaluated.to_csv(evaluated_path)
         print(f"Saved {evaluated_path}")
+
+        subsets = split_subsets(evaluated)
+        for name, df in subsets.items():
+            (out_dir / name).mkdir(parents=True, exist_ok=True)
+            df.to_csv(out_dir / name / "two_hop.csv")
+            print(f"Saved {out_dir / name / 'two_hop.csv'}")
+
+        analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
+        save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
+                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
+        save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
+                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
+        save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
+                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+        if not args.skip_patchscopes:
+            for source in ["e1", "last"]:
+                save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
+                               "entity_description", f"{source}_entity_description_s0.csv",
+                               ["id", "source_layer", "target_layer"])
+
     else:
-        evaluated = pd.read_csv(evaluated_path, index_col=0)
-    if args.max_examples:
-        evaluated = evaluated.head(args.max_examples)
+        # ── Accumulate edits across all batches, then evaluate and analyze ────
+        ckpt_path     = out_dir / "editing_checkpoint.pt"
+        progress_path = ckpt_path.with_suffix(".progress.json")
 
-    subsets = split_subsets(evaluated)
-    for name, df in subsets.items():
-        path = out_dir / name / "two_hop.csv"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(path)
-        print(f"Saved {path}")
+        if not args.force and ckpt_path.exists():
+            load_checkpoint(model, ckpt_path, device)
+            start_phase = json.load(open(progress_path))["phase"]      if progress_path.exists() else None
+            start_batch = json.load(open(progress_path))["next_batch"] if progress_path.exists() else None
+            if start_phase is not None:
+                print(f"Resuming IFMET from phase {start_phase}, batch {start_batch} ...")
+        else:
+            start_phase, start_batch = 1, 0
 
-    analysis_subsets = {k: v for k, v in subsets.items()
-                        if k not in ("still_inconsistent", "broken_hops")}
-    run_postedit_analyses(model, tokenizer, dataset, analysis_subsets, out_dir, args)
+        if start_phase is not None:
+            standard_requests, indirect_requests = [], []
+            for _, row in dataset.iterrows():
+                standard_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
+                standard_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+                indirect_requests.append({"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]})
+
+            def save_ckpt(phase, next_batch, total):
+                weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
+                torch.save(weights, ckpt_path)
+                json.dump({"phase": phase, "next_batch": next_batch, "total_batches": total}, open(progress_path, "w"))
+
+            if start_phase == 1:
+                hparams_s.batch_size = args.edit_batch_size
+                n = (len(standard_requests) + args.edit_batch_size - 1) // args.edit_batch_size
+                print(f"Phase 1: MEMIT shallow — {len(standard_requests)} fact edits, batch={args.edit_batch_size} ({n} batches)...")
+                for b, i in enumerate(range(0, len(standard_requests), args.edit_batch_size)):
+                    if b < start_batch:
+                        continue
+                    apply_algo(model, tokenizer, standard_requests[i:i+args.edit_batch_size], hparams_s, copy=False, return_orig_weights=False)
+                    save_ckpt(phase=1, next_batch=b + 1, total=n)
+                    print(f"  Phase 1 batch {b+1}/{n} done, checkpoint saved")
+                start_batch = 0
+
+            hparams_d.batch_size = args.edit_batch_size
+            n = (len(indirect_requests) + args.edit_batch_size - 1) // args.edit_batch_size
+            print(f"Phase 2: MEMIT deep — {len(indirect_requests)} indirect edits, batch={args.edit_batch_size} ({n} batches)...")
+            for b, i in enumerate(range(0, len(indirect_requests), args.edit_batch_size)):
+                if b < start_batch:
+                    continue
+                apply_algo(model, tokenizer, indirect_requests[i:i+args.edit_batch_size], hparams_d, copy=False, return_orig_weights=False)
+                save_ckpt(phase=2, next_batch=b + 1, total=n)
+                print(f"  Phase 2 batch {b+1}/{n} done, checkpoint saved")
+
+            progress_path.unlink(missing_ok=True)
+            print(f"Checkpoint finalised at {ckpt_path}")
+            torch.cuda.empty_cache()
+
+        evaluated_path = out_dir / "evaluated_two_hop.csv"
+        if args.force or not evaluated_path.exists():
+            fn_kwargs = {"model": model, "tokenizer": tokenizer}
+            hf_eval = Dataset.from_pandas(dataset, preserve_index=False)
+            hf_eval = hf_eval.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_eval = hf_eval.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_eval = hf_eval.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_eval = hf_eval.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            hf_eval = hf_eval.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+            evaluated = hf_eval.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True)
+            evaluated.to_csv(evaluated_path)
+            print(f"Saved {evaluated_path}")
+        else:
+            evaluated = pd.read_csv(evaluated_path, index_col=0)
+        if args.max_examples:
+            evaluated = evaluated.head(args.max_examples)
+
+        subsets = split_subsets(evaluated)
+        for name, df in subsets.items():
+            path = out_dir / name / "two_hop.csv"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path)
+            print(f"Saved {path}")
+
+        analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
+        run_postedit_analyses(model, tokenizer, dataset, analysis_subsets, out_dir, args)
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
@@ -629,12 +715,16 @@ if __name__ == "__main__":
                         help="Skip PatchScopes (method 4) to save time")
     parser.add_argument("--force", action="store_true",
                         help="Rerun and overwrite all existing outputs (ignore checkpoints and cached files)")
-    parser.add_argument("--batch-size",        type=int, default=100)
-    parser.add_argument("--edit-batch-size",   type=int, default=10,
+    parser.add_argument("--batch-size",        type=int, default=64)
+    parser.add_argument("--edit-batch-size",   type=int, default=8,
                         help="Facts per IFMET editing batch (outer loop batch size)")
-    parser.add_argument("--ae-edit-batch-size", type=int, default=10,
+    parser.add_argument("--ae-edit-batch-size", type=int, default=8,
                         help="AlphaEdit internal z-vector batch size (controls compute_z_batched; "
                              "~10 safe on A100 40GB with Llama-3-8B)")
+    parser.add_argument("--restore-weights-ifmet", action="store_true",
+                        help="If set, IFMET edits one batch at a time, runs analysis, then "
+                             "restores weights to base model before the next batch. "
+                             "No checkpoints are saved in this mode.")
     parser.add_argument("--device",          type=int, default=0)
 
     main(parser.parse_args())
