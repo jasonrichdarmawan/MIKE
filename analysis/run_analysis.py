@@ -504,19 +504,19 @@ def run_ifmet(args):
             batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
             print(f"\n--- IFMET Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-            standard_requests_b, indirect_requests_b = [], []
-            for _, row in batch_df.iterrows():
-                standard_requests_b.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
-                standard_requests_b.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
-                indirect_requests_b.append({"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]})
-
-            hparams_s.batch_size = len(standard_requests_b)
-            print(f"  Phase 1: MEMIT shallow — {len(standard_requests_b)} fact edits ...")
-            apply_algo(model, tokenizer, standard_requests_b, hparams_s, copy=False, return_orig_weights=False)
-
-            hparams_d.batch_size = len(indirect_requests_b)
-            print(f"  Phase 2: MEMIT deep — {len(indirect_requests_b)} indirect edits ...")
-            apply_algo(model, tokenizer, indirect_requests_b, hparams_d, copy=False, return_orig_weights=False)
+            for i, (_, row) in enumerate(batch_df.iterrows()):
+                standard_requests_item = [
+                    {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
+                    {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
+                ]
+                indirect_requests_item = [
+                    {"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]},
+                ]
+                hparams_s.batch_size = len(standard_requests_item)
+                apply_algo(model, tokenizer, standard_requests_item, hparams_s, copy=False, return_orig_weights=False)
+                hparams_d.batch_size = len(indirect_requests_item)
+                apply_algo(model, tokenizer, indirect_requests_item, hparams_d, copy=False, return_orig_weights=False)
+                print(f"  Item {i+1}/{len(batch_df)} edited.")
 
             fn_kwargs = {"model": model, "tokenizer": tokenizer}
             hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
@@ -589,45 +589,46 @@ def run_ifmet(args):
         if not args.force and ckpt_path.exists():
             load_checkpoint(model, ckpt_path, device)
             start_phase = json.load(open(progress_path))["phase"]      if progress_path.exists() else None
-            start_batch = json.load(open(progress_path))["next_batch"] if progress_path.exists() else None
+            start_item  = json.load(open(progress_path))["next_item"]  if progress_path.exists() else None
             if start_phase is not None:
-                print(f"Resuming IFMET from phase {start_phase}, batch {start_batch} ...")
+                print(f"Resuming IFMET from phase {start_phase}, item {start_item} ...")
         else:
-            start_phase, start_batch = 1, 0
+            start_phase, start_item = 1, 0
 
         if start_phase is not None:
-            standard_requests, indirect_requests = [], []
-            for _, row in dataset.iterrows():
-                standard_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
-                standard_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
-                indirect_requests.append({"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]})
+            n = len(dataset)
 
-            def save_ckpt(phase, next_batch, total):
+            def save_ckpt(phase, next_item):
                 weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
                 torch.save(weights, ckpt_path)
-                json.dump({"phase": phase, "next_batch": next_batch, "total_batches": total}, open(progress_path, "w"))
+                json.dump({"phase": phase, "next_item": next_item, "total": n}, open(progress_path, "w"))
 
             if start_phase == 1:
-                hparams_s.batch_size = args.edit_batch_size
-                n = (len(standard_requests) + args.edit_batch_size - 1) // args.edit_batch_size
-                print(f"Phase 1: MEMIT shallow — {len(standard_requests)} fact edits, batch={args.edit_batch_size} ({n} batches)...")
-                for b, i in enumerate(range(0, len(standard_requests), args.edit_batch_size)):
-                    if b < start_batch:
+                print(f"Phase 1: MEMIT shallow — {n} items ...")
+                for i, (_, row) in enumerate(dataset.iterrows()):
+                    if i < start_item:
                         continue
-                    apply_algo(model, tokenizer, standard_requests[i:i+args.edit_batch_size], hparams_s, copy=False, return_orig_weights=False)
-                    save_ckpt(phase=1, next_batch=b + 1, total=n)
-                    print(f"  Phase 1 batch {b+1}/{n} done, checkpoint saved")
-                start_batch = 0
+                    requests_item = [
+                        {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
+                        {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
+                    ]
+                    hparams_s.batch_size = len(requests_item)
+                    apply_algo(model, tokenizer, requests_item, hparams_s, copy=False, return_orig_weights=False)
+                    save_ckpt(phase=1, next_item=i + 1)
+                    print(f"  Phase 1 item {i+1}/{n} done, checkpoint saved")
+                start_item = 0
 
-            hparams_d.batch_size = args.edit_batch_size
-            n = (len(indirect_requests) + args.edit_batch_size - 1) // args.edit_batch_size
-            print(f"Phase 2: MEMIT deep — {len(indirect_requests)} indirect edits, batch={args.edit_batch_size} ({n} batches)...")
-            for b, i in enumerate(range(0, len(indirect_requests), args.edit_batch_size)):
-                if b < start_batch:
+            print(f"Phase 2: MEMIT deep — {n} items ...")
+            for i, (_, row) in enumerate(dataset.iterrows()):
+                if i < start_item:
                     continue
-                apply_algo(model, tokenizer, indirect_requests[i:i+args.edit_batch_size], hparams_d, copy=False, return_orig_weights=False)
-                save_ckpt(phase=2, next_batch=b + 1, total=n)
-                print(f"  Phase 2 batch {b+1}/{n} done, checkpoint saved")
+                indirect_item = [
+                    {"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]},
+                ]
+                hparams_d.batch_size = len(indirect_item)
+                apply_algo(model, tokenizer, indirect_item, hparams_d, copy=False, return_orig_weights=False)
+                save_ckpt(phase=2, next_item=i + 1)
+                print(f"  Phase 2 item {i+1}/{n} done, checkpoint saved")
 
             progress_path.unlink(missing_ok=True)
             print(f"Checkpoint finalised at {ckpt_path}")
