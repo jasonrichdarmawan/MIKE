@@ -214,6 +214,166 @@ def _make_edge(source_meta, destination_meta, score, sample_idx=None, position=N
     }
 
 
+def _make_hub(destination_meta, score, sample_idx=None, position=None):
+    return {
+        "score": float(score),
+        "abs_score": float(abs(score)),
+        "source": None,
+        "destination": destination_meta,
+        "sample_idx": sample_idx,
+        "position": position,
+    }
+
+
+def find_top_hubs_aggregated(scores, n=30):
+    """
+    Global hub ranking regardless of module type.
+    Aggregates per-token tensors over batch and position, and always sums over source dimension.
+    """
+    hub_candidates = []
+
+    for dest_name, matrix in scores.items():
+        if dest_name == "source_names" or not isinstance(matrix, torch.Tensor):
+            continue
+
+        dest_meta = _parse_node_name(dest_name)
+
+        if matrix.dim() == 2:  # [Head, Src]
+            n_heads, _ = matrix.shape
+            for head_idx in range(n_heads):
+                hub_score = matrix[head_idx].sum().item()
+                hub_candidates.append(
+                    _make_hub(destination_meta={**dest_meta, "head": int(head_idx)}, score=hub_score)
+                )
+        elif matrix.dim() == 1:  # [Src]
+            hub_score = matrix.sum().item()
+            hub_candidates.append(_make_hub(destination_meta=dest_meta, score=hub_score))
+        elif matrix.dim() == 4:  # [B, Pos, Head, Src]
+            agg = matrix.sum(dim=(0, 1))
+            n_heads, _ = agg.shape
+            for head_idx in range(n_heads):
+                hub_score = agg[head_idx].sum().item()
+                hub_candidates.append(
+                    _make_hub(destination_meta={**dest_meta, "head": int(head_idx)}, score=hub_score)
+                )
+        elif matrix.dim() == 3:  # [B, Pos, Src]
+            agg = matrix.sum(dim=(0, 1))
+            hub_score = agg.sum().item()
+            hub_candidates.append(_make_hub(destination_meta=dest_meta, score=hub_score))
+
+    return sorted(hub_candidates, key=lambda x: x["abs_score"], reverse=True)[:n]
+
+
+def find_top_hubs_by_sample(scores, n=30):
+    """
+    Sample-specific hub ranking regardless of module type.
+    Requires per-token score tensors.
+    """
+    hub_candidates_by_sample = {}
+
+    for dest_name, matrix in scores.items():
+        if dest_name == "source_names" or not isinstance(matrix, torch.Tensor):
+            continue
+
+        dest_meta = _parse_node_name(dest_name)
+
+        if matrix.dim() == 4:  # [B, Pos, Head, Src]
+            bsz, _, n_heads, _ = matrix.shape
+            for sample_idx in range(bsz):
+                sample_agg = matrix[sample_idx].sum(dim=0)  # [Head, Src]
+                for head_idx in range(n_heads):
+                    hub_score = sample_agg[head_idx].sum().item()
+                    hub_candidates_by_sample.setdefault(int(sample_idx), []).append(
+                        _make_hub(
+                            destination_meta={**dest_meta, "head": int(head_idx)},
+                            score=hub_score,
+                            sample_idx=int(sample_idx),
+                            position=None,
+                        )
+                    )
+        elif matrix.dim() == 3:  # [B, Pos, Src]
+            bsz, _, _ = matrix.shape
+            for sample_idx in range(bsz):
+                sample_agg = matrix[sample_idx].sum(dim=0)  # [Src]
+                hub_score = sample_agg.sum().item()
+                hub_candidates_by_sample.setdefault(int(sample_idx), []).append(
+                    _make_hub(
+                        destination_meta=dest_meta,
+                        score=hub_score,
+                        sample_idx=int(sample_idx),
+                        position=None,
+                    )
+                )
+
+    return {
+        sample_idx: sorted(hubs, key=lambda x: x["abs_score"], reverse=True)[:n]
+        for sample_idx, hubs in hub_candidates_by_sample.items()
+    }
+
+
+def find_top_hubs_by_token_sample(scores, token_level_n=10):
+    """
+    Sample-specific token-level hub ranking regardless of module type.
+    Requires per-token score tensors.
+    """
+    if token_level_n <= 0:
+        raise ValueError(f"token_level_n must be > 0, got {token_level_n}.")
+
+    hub_candidates_by_sample = {}
+
+    for dest_name, matrix in scores.items():
+        if dest_name == "source_names" or not isinstance(matrix, torch.Tensor):
+            continue
+
+        dest_meta = _parse_node_name(dest_name)
+
+        if matrix.dim() == 4:  # [B, Pos, Head, Src]
+            bsz, _, n_heads, _ = matrix.shape
+            token_strength = matrix.sum(dim=-1)  # [B, Pos, Head]
+            for sample_idx in range(bsz):
+                sample_flat = token_strength[sample_idx].reshape(-1)
+                k = min(token_level_n, sample_flat.numel())
+                if k == 0:
+                    continue
+                top_vals, top_idx = sample_flat.abs().topk(k)
+                for abs_val, flat_idx in zip(top_vals.tolist(), top_idx.tolist()):
+                    pos_idx = int(flat_idx // n_heads)
+                    head_idx = int(flat_idx % n_heads)
+                    signed_score = token_strength[sample_idx, pos_idx, head_idx].item()
+                    hub_candidates_by_sample.setdefault(int(sample_idx), []).append(
+                        _make_hub(
+                            destination_meta={**dest_meta, "head": head_idx},
+                            score=signed_score,
+                            sample_idx=int(sample_idx),
+                            position=pos_idx,
+                        )
+                    )
+        elif matrix.dim() == 3:  # [B, Pos, Src]
+            bsz, _, _ = matrix.shape
+            token_strength = matrix.sum(dim=-1)  # [B, Pos]
+            for sample_idx in range(bsz):
+                sample_flat = token_strength[sample_idx]
+                k = min(token_level_n, sample_flat.numel())
+                if k == 0:
+                    continue
+                top_vals, top_idx = sample_flat.abs().topk(k)
+                for abs_val, pos_idx in zip(top_vals.tolist(), top_idx.tolist()):
+                    signed_score = token_strength[sample_idx, pos_idx].item()
+                    hub_candidates_by_sample.setdefault(int(sample_idx), []).append(
+                        _make_hub(
+                            destination_meta=dest_meta,
+                            score=signed_score,
+                            sample_idx=int(sample_idx),
+                            position=int(pos_idx),
+                        )
+                    )
+
+    return {
+        sample_idx: sorted(hubs, key=lambda x: x["abs_score"], reverse=True)[:token_level_n]
+        for sample_idx, hubs in hub_candidates_by_sample.items()
+    }
+
+
 def find_top_edges_aggregated(scores, n=30):
     """
     Global edge ranking. Uses aggregated tensors directly, and aggregates per-token tensors over batch+position.
@@ -1079,7 +1239,7 @@ if __name__ == "__main__":
 
     kl_div_metric = get_kl_div_metric()
 
-    return_per_token_scores = True
+    return_per_token_scores = False
     results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, integrated_gradients=5, return_per_token_scores=return_per_token_scores)
     
 # %%
@@ -1087,26 +1247,41 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     import json
     # Structured analysis outputs for downstream fine-tuning decisions
-    mlp_hubs_aggregated = find_top_mlp_hubs_aggregated(results, n=5)
-    print("MLP hubs aggregated:\n", json.dumps(mlp_hubs_aggregated, indent=4))
+    top_mlp_hubs_aggregated = find_top_mlp_hubs_aggregated(results, n=5)
+    print("Top MLP hubs by aggregation:\n", json.dumps(top_mlp_hubs_aggregated, indent=4))
     
     if return_per_token_scores:
-        mlp_hubs_by_sample = find_top_mlp_hubs_by_sample(results, n=5)
-        mlp_hubs_token_by_sample = find_top_mlp_hubs_by_token_sample(results, token_level_n=5)
+        top_mlp_hubs_by_sample = find_top_mlp_hubs_by_sample(results, n=5)
+        top_mlp_hubs_by_token_sample = find_top_mlp_hubs_by_token_sample(results, token_level_n=5)
     
-        print("MLP hubs by sample:\n", json.dumps(mlp_hubs_by_sample, indent=4))
-        print("MLP hub token by sample:\n", json.dumps(mlp_hubs_token_by_sample, indent=4))
+        print("Top MLP hubs by sample:\n", json.dumps(top_mlp_hubs_by_sample, indent=4))
+        print("Top MLP hubs by token and sample:\n", json.dumps(top_mlp_hubs_by_token_sample, indent=4))
+
+# %%
+
+if __name__ == "__main__":
+    top_hubs_aggregated = find_top_hubs_aggregated(results, n=5)
+    print("Top hubs by aggregation:\n", json.dumps(top_hubs_aggregated, indent=4))
+    
+    if return_per_token_scores:
+        top_hubs_by_sample = find_top_hubs_by_sample(results, n=5)
+        top_token_hubs_by_sample = find_top_hubs_by_token_sample(results, token_level_n=5)
+        
+        print("Top hubs by sample:\n", json.dumps(top_hubs_by_sample, indent=4))
+        print("Top token hubs by sample:\n", json.dumps(top_token_hubs_by_sample, indent=4))
 
 # %%
 
 if __name__ == "__main__":
     
     top_edges_aggregated = find_top_edges_aggregated(results, n=3)
-    top_edges_by_sample = find_top_edges_by_sample(results, n=3)
-    top_token_edges_by_sample = find_top_edges_by_token_sample(results, token_level_n=3)
+    print("Top edges by aggregation:\n", json.dumps(top_edges_aggregated, indent=4))
     
-    print("Top aggregated edge candidates:\n", json.dumps(top_edges_aggregated, indent=4))
-    print("Top edge candidates by sample:\n", json.dumps(top_edges_by_sample, indent=4))
-    print("Top token edges by sample:\n", json.dumps(top_token_edges_by_sample, indent=4))
+    if return_per_token_scores:
+        top_edges_by_token_sample = find_top_edges_by_token_sample(results, token_level_n=3)
+        top_edges_by_sample = find_top_edges_by_sample(results, n=3)
+    
+        print("Top edge by sample:\n", json.dumps(top_edges_by_sample, indent=4))
+        print("Top edges by token and sample:\n", json.dumps(top_edges_by_token_sample, indent=4))
 
 # %%

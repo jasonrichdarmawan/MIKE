@@ -48,7 +48,7 @@ micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 
 ```
 pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 ```
--
+
 ```
 pip install transformers==5.3.0
 
@@ -59,6 +59,11 @@ pip install opencv-python==4.8.0.76 fairscale==0.4.13
 micromamba install beartype jaxtyping pytest
 
 pip install zhipuai sniffio
+```
+
+Install transformers_eap
+```
+pip install -e .
 ```
 
 ## 📚Analyze
