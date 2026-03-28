@@ -20,7 +20,6 @@ Usage:
 
 # %%
 
-import json
 import os
 import sys
 
@@ -158,91 +157,6 @@ def split_subsets(evaluated: pd.DataFrame) -> dict:
     }
 
 
-def load_checkpoint(model, ckpt_path: Path, device: str):
-    weights = torch.load(ckpt_path, map_location=device)
-    with torch.no_grad():
-        for k, v in weights.items():
-            nethook.get_parameter(model, k)[...] = v.to(device)
-    print(f"Loaded edited weights from {ckpt_path}")
-
-
-# %% Shared post-edit analysis runner
-
-def run_postedit_analyses(model, tokenizer, dataset: pd.DataFrame,
-                          analysis_subsets: dict, out_dir: Path, args):
-    """
-    Run methods 1–4 on a post-edit model, saving results split by subset.
-    dataset must already have e2_answers and e3_answers columns.
-    """
-    hf_dataset = Dataset.from_pandas(dataset, preserve_index=False)
-
-    def outputs_exist(subdir, filename):
-        return not args.force and all((out_dir / name / subdir / filename).exists() for name in analysis_subsets)
-
-    # ── Method 1: Sublayer projection — attention ─────────────────────────────
-    if outputs_exist("sublayer_projection", "attention_projections.csv"):
-        print("\n=== Method 1/4: Sublayer projection (attention) — SKIP (exists) ===")
-    else:
-        print("\n=== Method 1/4: Sublayer projection (attention) ===")
-        sublayer_attn = to_sublayer_df(hf_dataset.map(
-            project_attention,
-            fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
-            batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
-        ))
-        save_by_subset(sublayer_attn, analysis_subsets, out_dir,
-                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
-
-    # ── Method 2: Sublayer projection — MLP ───────────────────────────────────
-    if outputs_exist("sublayer_projection", "mlp_projections.csv"):
-        print("\n=== Method 2/4: Sublayer projection (MLP) — SKIP (exists) ===")
-    else:
-        print("\n=== Method 2/4: Sublayer projection (MLP) ===")
-        sublayer_mlp = to_sublayer_df(hf_dataset.map(
-            project_attention,
-            fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
-            batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
-        ))
-        save_by_subset(sublayer_mlp, analysis_subsets, out_dir,
-                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
-
-    # ── Method 3: Attention knockout ──────────────────────────────────────────
-    if outputs_exist("attention_knockout", "last_e1_attention_knockout_k3_composition.csv"):
-        print("\n=== Method 3/4: Attention knockout — SKIP (exists) ===")
-    else:
-        print("\n=== Method 3/4: Attention knockout ===")
-        knockout = hf_dataset.map(
-            generate_answer_with_attention_knockout,
-            fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
-                       "knockout_source": "last", "knockout_target": "e1", "k": 3,
-                       "prompt": "composition"},
-            batched=True, batch_size=args.batch_size, remove_columns=hf_dataset.column_names,
-        ).to_pandas()
-        save_by_subset(knockout, analysis_subsets, out_dir,
-                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv",
-                       ["id", "layer"])
-
-    # ── Method 4: PatchScopes (optional, slow) ────────────────────────────────
-    if not args.skip_patchscopes:
-        dataset_ps = dataset.copy()
-        dataset_ps["target_prompt"] = TARGET_PROMPT
-        hf_ps = Dataset.from_pandas(dataset_ps, preserve_index=False)
-        for source in ["e1", "last"]:
-            if outputs_exist("entity_description", f"{source}_entity_description_s0.csv"):
-                print(f"\n=== Method 4/4: PatchScopes source={source} — SKIP (exists) ===")
-                continue
-            print(f"\n=== Method 4/4: PatchScopes source={source} ===")
-            patch = hf_ps.map(
-                generate_entity_description_with_patching,
-                fn_kwargs={"model": model, "tokenizer": tokenizer,
-                           "source": source, "do_sample": False},
-                batched=True, batch_size=args.batch_size,
-                remove_columns=hf_ps.column_names,
-            ).to_pandas()
-            save_by_subset(patch, analysis_subsets, out_dir,
-                           "entity_description", f"{source}_entity_description_s0.csv",
-                           ["id", "source_layer", "target_layer"])
-
-
 # %% Per-method runners
 
 def run_preedit(args):
@@ -375,7 +289,6 @@ def run_alphaedit(args):
     data_dir      = Path(args.data_dir)
     incorrect_dir = data_dir / "composition_incorrect"
     out_dir       = data_dir / "composition_incorrect_alphaedit"
-    ckpt_path     = out_dir / "editing_checkpoint.pt"
     device        = f"cuda:{args.device}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -402,9 +315,7 @@ def run_alphaedit(args):
         for layer in hparams.layers
     ]
 
-    if args.restore_weights_alphaedit:
-        # ── Per-batch: Edit → Evaluate → Analyze → Restore ───────────────────
-        orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
+    orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
                         for k in weight_names}
 
         n_batches     = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
@@ -491,55 +402,6 @@ def run_alphaedit(args):
                                    "entity_description", f"{source}_entity_description_s0.csv",
                                    ["id", "source_layer", "target_layer"])
 
-    else:
-        # ── Accumulate all edits, then evaluate and analyze ───────────────────
-        if not args.force and ckpt_path.exists():
-            load_checkpoint(model, ckpt_path, device)
-        else:
-            requests = []
-            for _, row in dataset.iterrows():
-                requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
-                requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
-            # AlphaEdit handles internal batching via ae_edit_batch_size (controls z-vector computation).
-            # All requests are passed at once so cache_c accumulates correctly over the full dataset.
-            print(f"Applying AlphaEdit ({len(requests)} facts across {len(dataset)} examples, "
-                  f"z-batch-size={args.ae_edit_batch_size})...")
-            apply_algo(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False,
-                       edit_batch_size=args.ae_edit_batch_size)
-            weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
-            torch.save(weights, ckpt_path)
-            print(f"Checkpoint saved at {ckpt_path}")
-            torch.cuda.empty_cache()
-
-        evaluated_path = out_dir / "evaluated_two_hop.csv"
-        if args.force or not evaluated_path.exists():
-            print("Running evaluation on edited model ...")
-            fn_kwargs = {"model": model, "tokenizer": tokenizer}
-            hf_eval = Dataset.from_pandas(dataset, preserve_index=False)
-            hf_eval = hf_eval.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            evaluated = hf_eval.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True)
-            evaluated.to_csv(evaluated_path)
-            print(f"Saved {evaluated_path}")
-        else:
-            evaluated = pd.read_csv(evaluated_path, index_col=0)
-        if args.max_examples:
-            evaluated = evaluated.head(args.max_examples)
-
-        subsets = split_subsets(evaluated)
-        for name, df in subsets.items():
-            path = out_dir / name / "two_hop.csv"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path)
-            print(f"Saved {path}")
-
-        analysis_subsets = {k: v for k, v in subsets.items()
-                            if k not in ("still_inconsistent", "broken_hops")}
-        run_postedit_analyses(model, tokenizer, dataset, analysis_subsets, out_dir, args)
-
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
           f"now_correct:{out_dir}/now_correct "
@@ -578,10 +440,7 @@ def run_ifmet(args):
         for layer in hp.layers:
             weight_names.add(f"{hp.rewrite_module_tmp.format(layer)}.weight")
 
-    if args.restore_weights_ifmet:
-        # ── Per-batch: Edit → Evaluate → Analyze → Restore ───────────────────
-        # Each batch is edited independently on the original model weights.
-        orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
+    orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
                         for k in weight_names}
 
         n_batches = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
@@ -672,86 +531,6 @@ def run_ifmet(args):
                                "entity_description", f"{source}_entity_description_s0.csv",
                                ["id", "source_layer", "target_layer"])
 
-    else:
-        # ── Accumulate edits across all batches, then evaluate and analyze ────
-        ckpt_path     = out_dir / "editing_checkpoint.pt"
-        progress_path = ckpt_path.with_suffix(".progress.json")
-
-        if not args.force and ckpt_path.exists():
-            load_checkpoint(model, ckpt_path, device)
-            start_phase = json.load(open(progress_path))["phase"]      if progress_path.exists() else None
-            start_item  = json.load(open(progress_path))["next_item"]  if progress_path.exists() else None
-            if start_phase is not None:
-                print(f"Resuming IFMET from phase {start_phase}, item {start_item} ...")
-        else:
-            start_phase, start_item = 1, 0
-
-        if start_phase is not None:
-            n = len(dataset)
-
-            def save_ckpt(phase, next_item):
-                weights = {k: nethook.get_parameter(model, k).detach().cpu() for k in weight_names}
-                torch.save(weights, ckpt_path)
-                json.dump({"phase": phase, "next_item": next_item, "total": n}, open(progress_path, "w"))
-
-            if start_phase == 1:
-                print(f"Phase 1: MEMIT shallow — {n} items ...")
-                for i, (_, row) in enumerate(dataset.iterrows()):
-                    if i < start_item:
-                        continue
-                    requests_item = [
-                        {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
-                        {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
-                    ]
-                    hparams_s.batch_size = len(requests_item)
-                    apply_algo(model, tokenizer, requests_item, hparams_s, copy=False, return_orig_weights=False)
-                    save_ckpt(phase=1, next_item=i + 1)
-                    print(f"  Phase 1 item {i+1}/{n} done, checkpoint saved")
-                start_item = 0
-
-            print(f"Phase 2: MEMIT deep — {n} items ...")
-            for i, (_, row) in enumerate(dataset.iterrows()):
-                if i < start_item:
-                    continue
-                indirect_item = [
-                    {"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]},
-                ]
-                hparams_d.batch_size = len(indirect_item)
-                apply_algo(model, tokenizer, indirect_item, hparams_d, copy=False, return_orig_weights=False)
-                save_ckpt(phase=2, next_item=i + 1)
-                print(f"  Phase 2 item {i+1}/{n} done, checkpoint saved")
-
-            progress_path.unlink(missing_ok=True)
-            print(f"Checkpoint finalised at {ckpt_path}")
-            torch.cuda.empty_cache()
-
-        evaluated_path = out_dir / "evaluated_two_hop.csv"
-        if args.force or not evaluated_path.exists():
-            fn_kwargs = {"model": model, "tokenizer": tokenizer}
-            hf_eval = Dataset.from_pandas(dataset, preserve_index=False)
-            hf_eval = hf_eval.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_eval = hf_eval.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            evaluated = hf_eval.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True)
-            evaluated.to_csv(evaluated_path)
-            print(f"Saved {evaluated_path}")
-        else:
-            evaluated = pd.read_csv(evaluated_path, index_col=0)
-        if args.max_examples:
-            evaluated = evaluated.head(args.max_examples)
-
-        subsets = split_subsets(evaluated)
-        for name, df in subsets.items():
-            path = out_dir / name / "two_hop.csv"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path)
-            print(f"Saved {path}")
-
-        analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
-        run_postedit_analyses(model, tokenizer, dataset, analysis_subsets, out_dir, args)
-
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
           f"now_correct:{out_dir}/now_correct "
@@ -813,12 +592,6 @@ if __name__ == "__main__":
     parser.add_argument("--ae-edit-batch-size", type=int, default=8,
                         help="AlphaEdit internal z-vector batch size (controls compute_z_batched; "
                              "~10 safe on A100 40GB with Llama-3-8B)")
-    parser.add_argument("--restore-weights-alphaedit", action=argparse.BooleanOptionalAction, default=True,
-                        help="Edit one batch at a time, analyze, then restore weights (default: on). "
-                             "Use --no-restore-weights-alphaedit to accumulate all edits before analyzing.")
-    parser.add_argument("--restore-weights-ifmet", action=argparse.BooleanOptionalAction, default=True,
-                        help="Edit one batch at a time, analyze, then restore weights (default: on). "
-                             "Use --no-restore-weights-ifmet to accumulate all edits before analyzing.")
     parser.add_argument("--device",          type=int, default=0)
 
     main(parser.parse_args())
