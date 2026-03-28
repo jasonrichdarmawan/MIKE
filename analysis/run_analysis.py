@@ -316,91 +316,94 @@ def run_alphaedit(args):
     ]
 
     orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
-                        for k in weight_names}
+                    for k in weight_names}
 
-        n_batches     = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
-        all_evaluated     = []
-        all_sublayer_attn = []
-        all_sublayer_mlp  = []
-        all_knockout      = []
-        all_patch         = {source: [] for source in ["e1", "last"]}
+    n_batches     = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
+    all_evaluated     = []
+    all_sublayer_attn = []
+    all_sublayer_mlp  = []
+    all_knockout      = []
+    all_patch         = {source: [] for source in ["e1", "last"]}
 
-        for b, start_idx in enumerate(range(0, len(dataset), args.edit_batch_size)):
-            batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
-            print(f"\n--- AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+    for b, start_idx in enumerate(range(0, len(dataset), args.edit_batch_size)):
+        batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
+        print(f"\n--- AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-            for i, (_, row) in enumerate(batch_df.iterrows()):
-                requests_item = [
-                    {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
-                    {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
-                ]
-                hparams.batch_size = len(requests_item)
-                apply_algo(model, tokenizer, requests_item, hparams, copy=False, return_orig_weights=False,
-                           edit_batch_size=args.ae_edit_batch_size)
-                print(f"  Item {i+1}/{len(batch_df)} edited.")
+        # Edit
+        for i, (_, row) in enumerate(batch_df.iterrows()):
+            requests_item = [
+                {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
+                {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
+            ]
+            hparams.batch_size = len(requests_item)
+            apply_algo(model, tokenizer, requests_item, hparams, copy=False, return_orig_weights=False,
+                       edit_batch_size=args.ae_edit_batch_size)
+            print(f"  Item {i+1}/{len(batch_df)} edited.")
 
-            fn_kwargs = {"model": model, "tokenizer": tokenizer}
-            hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
-            hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            all_evaluated.append(hf_b.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True))
+        # Evaluate
+        fn_kwargs = {"model": model, "tokenizer": tokenizer}
+        hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
+        hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        all_evaluated.append(hf_b.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True))
 
-            hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
-            all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
-                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
-            all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
-                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
-            all_knockout.append(hf_analysis.map(
-                generate_answer_with_attention_knockout,
-                fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
-                           "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
-
-            if not args.skip_patchscopes:
-                batch_ps = batch_df.copy()
-                batch_ps["target_prompt"] = TARGET_PROMPT
-                hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
-                for source in ["e1", "last"]:
-                    all_patch[source].append(hf_ps.map(
-                        generate_entity_description_with_patching,
-                        fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
-                        batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
-
-            with torch.no_grad():
-                for k, v in orig_weights.items():
-                    nethook.get_parameter(model, k)[...] = v.to(device)
-            torch.cuda.empty_cache()
-            print(f"  Weights restored to original.")
-
-        evaluated_path = out_dir / "evaluated_two_hop.csv"
-        evaluated = pd.concat(all_evaluated).reset_index(drop=True)
-        evaluated.to_csv(evaluated_path)
-        print(f"Saved {evaluated_path}")
-
-        subsets = split_subsets(evaluated)
-        for name, df in subsets.items():
-            (out_dir / name).mkdir(parents=True, exist_ok=True)
-            df.to_csv(out_dir / name / "two_hop.csv")
-            print(f"Saved {out_dir / name / 'two_hop.csv'}")
-
-        analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
-        save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
-                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
-        save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
-                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
-        save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
-                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+        # Analyze
+        hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+        all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
+            project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+        all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
+            project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+        all_knockout.append(hf_analysis.map(
+            generate_answer_with_attention_knockout,
+            fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
+                       "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
         if not args.skip_patchscopes:
+            batch_ps = batch_df.copy()
+            batch_ps["target_prompt"] = TARGET_PROMPT
+            hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
             for source in ["e1", "last"]:
-                if all_patch[source]:
-                    save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
-                                   "entity_description", f"{source}_entity_description_s0.csv",
-                                   ["id", "source_layer", "target_layer"])
+                all_patch[source].append(hf_ps.map(
+                    generate_entity_description_with_patching,
+                    fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
+                    batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+
+        # Restore
+        with torch.no_grad():
+            for k, v in orig_weights.items():
+                nethook.get_parameter(model, k)[...] = v.to(device)
+        torch.cuda.empty_cache()
+        print(f"  Weights restored to original.")
+
+    evaluated_path = out_dir / "evaluated_two_hop.csv"
+    evaluated = pd.concat(all_evaluated).reset_index(drop=True)
+    evaluated.to_csv(evaluated_path)
+    print(f"Saved {evaluated_path}")
+
+    subsets = split_subsets(evaluated)
+    for name, df in subsets.items():
+        (out_dir / name).mkdir(parents=True, exist_ok=True)
+        df.to_csv(out_dir / name / "two_hop.csv")
+        print(f"Saved {out_dir / name / 'two_hop.csv'}")
+
+    analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
+    save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
+                   "sublayer_projection", "attention_projections.csv", ["id", "layer"])
+    save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
+                   "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
+    save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
+                   "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+    if not args.skip_patchscopes:
+        for source in ["e1", "last"]:
+            if all_patch[source]:
+                save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
+                               "entity_description", f"{source}_entity_description_s0.csv",
+                               ["id", "source_layer", "target_layer"])
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
@@ -441,95 +444,97 @@ def run_ifmet(args):
             weight_names.add(f"{hp.rewrite_module_tmp.format(layer)}.weight")
 
     orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
-                        for k in weight_names}
+                    for k in weight_names}
 
-        n_batches = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
-        all_evaluated     = []
-        all_sublayer_attn = []
-        all_sublayer_mlp  = []
-        all_knockout      = []
-        all_patch         = {source: [] for source in ["e1", "last"]}
+    n_batches     = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
+    all_evaluated     = []
+    all_sublayer_attn = []
+    all_sublayer_mlp  = []
+    all_knockout      = []
+    all_patch         = {source: [] for source in ["e1", "last"]}
 
-        for b, start_idx in enumerate(range(0, len(dataset), args.edit_batch_size)):
-            batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
-            print(f"\n--- IFMET Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+    for b, start_idx in enumerate(range(0, len(dataset), args.edit_batch_size)):
+        batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
+        print(f"\n--- IFMET Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-            for i, (_, row) in enumerate(batch_df.iterrows()):
-                standard_requests_item = [
-                    {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
-                    {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
-                ]
-                indirect_requests_item = [
-                    {"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]},
-                ]
-                hparams_s.batch_size = len(standard_requests_item)
-                apply_algo(model, tokenizer, standard_requests_item, hparams_s, copy=False, return_orig_weights=False)
-                hparams_d.batch_size = len(indirect_requests_item)
-                apply_algo(model, tokenizer, indirect_requests_item, hparams_d, copy=False, return_orig_weights=False)
-                print(f"  Item {i+1}/{len(batch_df)} edited.")
+        # Edit
+        for i, (_, row) in enumerate(batch_df.iterrows()):
+            standard_requests_item = [
+                {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
+                {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
+            ]
+            indirect_requests_item = [
+                {"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]},
+            ]
+            hparams_s.batch_size = len(standard_requests_item)
+            apply_algo(model, tokenizer, standard_requests_item, hparams_s, copy=False, return_orig_weights=False)
+            hparams_d.batch_size = len(indirect_requests_item)
+            apply_algo(model, tokenizer, indirect_requests_item, hparams_d, copy=False, return_orig_weights=False)
+            print(f"  Item {i+1}/{len(batch_df)} edited.")
 
-            fn_kwargs = {"model": model, "tokenizer": tokenizer}
-            hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
-            hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            hf_b = hf_b.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
-            all_evaluated.append(hf_b.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True))
+        # Evaluate
+        fn_kwargs = {"model": model, "tokenizer": tokenizer}
+        hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
+        hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        all_evaluated.append(hf_b.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True))
 
-            hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
-            all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
-                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
-            all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
-                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
-            all_knockout.append(hf_analysis.map(
-                generate_answer_with_attention_knockout,
-                fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
-                           "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
-
-            if not args.skip_patchscopes:
-                batch_ps = batch_df.copy()
-                batch_ps["target_prompt"] = TARGET_PROMPT
-                hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
-                for source in ["e1", "last"]:
-                    all_patch[source].append(hf_ps.map(
-                        generate_entity_description_with_patching,
-                        fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
-                        batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
-
-            with torch.no_grad():
-                for k, v in orig_weights.items():
-                    nethook.get_parameter(model, k)[...] = v.to(device)
-            torch.cuda.empty_cache()
-            print(f"  Weights restored to original.")
-
-        # Aggregate and save
-        evaluated_path = out_dir / "evaluated_two_hop.csv"
-        evaluated = pd.concat(all_evaluated).reset_index(drop=True)
-        evaluated.to_csv(evaluated_path)
-        print(f"Saved {evaluated_path}")
-
-        subsets = split_subsets(evaluated)
-        for name, df in subsets.items():
-            (out_dir / name).mkdir(parents=True, exist_ok=True)
-            df.to_csv(out_dir / name / "two_hop.csv")
-            print(f"Saved {out_dir / name / 'two_hop.csv'}")
-
-        analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
-        save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
-                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
-        save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
-                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
-        save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
-                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+        # Analyze
+        hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+        all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
+            project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+        all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
+            project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+        all_knockout.append(hf_analysis.map(
+            generate_answer_with_attention_knockout,
+            fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
+                       "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
+            batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
         if not args.skip_patchscopes:
+            batch_ps = batch_df.copy()
+            batch_ps["target_prompt"] = TARGET_PROMPT
+            hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
             for source in ["e1", "last"]:
-                save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
-                               "entity_description", f"{source}_entity_description_s0.csv",
-                               ["id", "source_layer", "target_layer"])
+                all_patch[source].append(hf_ps.map(
+                    generate_entity_description_with_patching,
+                    fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
+                    batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+
+        # Restore
+        with torch.no_grad():
+            for k, v in orig_weights.items():
+                nethook.get_parameter(model, k)[...] = v.to(device)
+        torch.cuda.empty_cache()
+        print(f"  Weights restored to original.")
+
+    evaluated_path = out_dir / "evaluated_two_hop.csv"
+    evaluated = pd.concat(all_evaluated).reset_index(drop=True)
+    evaluated.to_csv(evaluated_path)
+    print(f"Saved {evaluated_path}")
+
+    subsets = split_subsets(evaluated)
+    for name, df in subsets.items():
+        (out_dir / name).mkdir(parents=True, exist_ok=True)
+        df.to_csv(out_dir / name / "two_hop.csv")
+        print(f"Saved {out_dir / name / 'two_hop.csv'}")
+
+    analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
+    save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
+                   "sublayer_projection", "attention_projections.csv", ["id", "layer"])
+    save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
+                   "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
+    save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
+                   "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+    if not args.skip_patchscopes:
+        for source in ["e1", "last"]:
+            save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
+                           "entity_description", f"{source}_entity_description_s0.csv",
+                           ["id", "source_layer", "target_layer"])
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
