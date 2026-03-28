@@ -9,11 +9,6 @@ import re
 
 # %%
 
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
-# %%
-
 # --- Standalone Utility Functions ---
 
 def _parse_node_name(name: str):
@@ -65,6 +60,53 @@ def _infer_n_layers_from_scores(scores):
         raise ValueError("Could not infer number of layers from scores. No keys matching pattern 'blocks.<layer>.' found.")
     return max_layer + 1
 
+def format_prompt(
+    tokenizer,
+    prompts: list[str],
+    chat_format: bool = False,
+):
+    """
+    Format prompts for model input. If chat_format is True, wraps prompts in a conversational format.
+    """
+    if chat_format:
+        formatted_prompts = []
+        for prompt in prompts:
+            messages = [
+                {"role": "user", "content": prompt},
+            ]
+            formatted_prompts.append(tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True))
+        return formatted_prompts
+    else:
+        return prompts
+
+def encode_prompt(
+    tokenizer,
+    prompts: list[str],
+    subjects: Optional[list[str]] = None,
+):
+    """
+    Find token spans (start, end) for subject strings in each sample.
+    """
+    encoded = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True)
+    
+    if subjects is not None and len(subjects) != len(prompts):
+        raise ValueError(f"Length of subjects must match length of prompts. Got {len(subjects)} subjects and {len(prompts)} prompts.")
+
+    spans = []
+    if subjects is not None:
+        for i in range(len(prompts)):
+            start_char = prompts[i].find(subjects[i])
+            end_char = start_char + len(subjects[i]) - 1
+            
+            start_tok = encoded.char_to_token(i, start_char)
+            end_tok = encoded.char_to_token(i, end_char)
+            
+            if start_tok is None or end_tok is None:
+                raise ValueError(f"Could not find token span for subject '{subjects[i]}' in prompt '{prompts[i]}'. Check that the subject is a substring of the prompt and that the tokenizer can map characters to tokens correctly.")
+            
+            spans.append((start_tok, end_tok))
+
+    return encoded, spans
 
 def _make_mlp_hub(layer_idx, score, sample_idx=None, position=None):
     destination_meta = {
@@ -586,11 +628,34 @@ def get_gptj_components(model, layer_idx):
     }, embed
 
 COMPONENT_REGISTRY = {
-    "gpt2": get_gpt2_components,
-    "llama_like": get_llama_like_components,
-    "gptj": get_gptj_components
+    "GPT2LMHeadModel": get_gpt2_components,
+    "Qwen3ForCausalLM": get_llama_like_components,
 }
 
+def get_gpt2_config(model):
+    config = model.config
+    return {
+        "n_layers": config.n_layer,
+        "n_heads": config.n_head,
+        "n_kv_heads": config.n_head,
+        "hidden_size": config.n_embd,
+        "head_dim": config.n_embd // config.n_head,
+    }
+
+def get_qwen3_config(model):
+    config = model.config
+    return {
+        "n_layers": config.num_hidden_layers,
+        "n_heads": config.num_attention_heads,
+        "n_kv_heads": config.num_key_value_heads,
+        "hidden_size": config.hidden_size,
+        "head_dim": config.head_dim,
+    }
+
+CONFIG_REGISTRY = {
+    "GPT2LMHeadModel": get_gpt2_config,
+    "Qwen3ForCausalLM": get_qwen3_config,
+}
 
 # --- Metric Factories ---
 
@@ -676,24 +741,24 @@ class EAPGraph:
         if graph_type:
             self.arch_type = graph_type
         else:
-            self.arch_type = self._detect_architecture(self.model)
+            self.arch_type = self._detect_architecture()
 
         if self.arch_type not in COMPONENT_REGISTRY:
             raise ValueError(f"Architecture '{self.arch_type}' not supported or registered. "
                              f"Available: {list(COMPONENT_REGISTRY.keys())}")
 
-        self.config = self.model.config
-        self.n_layers = self.config.num_hidden_layers
-        self.n_heads = self.config.num_attention_heads
-        self.hidden_size = self.config.hidden_size
-        self.head_dim = self.hidden_size // self.n_heads
+        self.config = self._get_config()
+        # self.n_layers = self.config.num_hidden_layers
+        # self.n_heads = self.config.num_attention_heads
+        # self.hidden_size = self.config.hidden_size
+        # self.head_dim = self.config.head_dim
         
-        if hasattr(self.config, "num_key_value_heads"):
-            self.n_kv_heads = self.config.num_key_value_heads
-        else:
-            self.n_kv_heads = self.n_heads
+        # if hasattr(self.config, "num_key_value_heads"):
+        #     self.n_kv_heads = self.config.num_key_value_heads
+        # else:
+        #     self.n_kv_heads = self.n_heads
             
-        print(f"Initialized EAPGraph for {self.arch_type}. Layers: {self.n_layers}, Heads: {self.n_heads}")
+        print(f"Initialized EAPGraph for {self.arch_type}. Layers: {self.config['n_layers']}, Heads: {self.config['n_heads']}")
         
         # Storage
         self.activations = {}
@@ -701,12 +766,18 @@ class EAPGraph:
         self.norm_io = {}
         self.handles = []
 
-    def _detect_architecture(self, model):
-        name = model.__class__.__name__.lower()
-        if "gpt2" in name: return "gpt2"
-        if "llama" in name or "qwen" in name: return "llama_like"
-        if "gptj" in name: return "gptj"
-        return "unknown"
+    def _detect_architecture(self):
+        name = self.model.__class__.__name__
+        if name in COMPONENT_REGISTRY:
+            return name
+        raise ValueError(f"Could not detect architecture from model class name '{name}'. Please specify graph_type explicitly.")
+
+    def _get_config(self):
+        name = self.model.__class__.__name__
+        if name not in CONFIG_REGISTRY:
+            raise ValueError(f"No config getter registered for architecture '{name}'. Available: {list(CONFIG_REGISTRY.keys())}")
+        getter = CONFIG_REGISTRY[self.arch_type]
+        return getter(self.model)
 
     def _get_layer_components(self, layer_idx):
         getter = COMPONENT_REGISTRY[self.arch_type]
@@ -786,17 +857,17 @@ class EAPGraph:
                 w_o = comps["o"].weight 
                 
                 # Reshape x to [B, S, H, D]
-                x_heads = x.view(b, s, self.n_heads, self.head_dim)
+                x_heads = x.view(b, s, self.config["n_heads"], self.config["head_dim"])
                 
                 if comps["is_conv1d"]:
                     # Conv1D: Y = X @ W + b. W is [Hidden, Hidden] -> [In, Out]
-                    w_reshaped = w_o.view(self.n_heads, self.head_dim, self.hidden_size)
+                    w_reshaped = w_o.view(self.config["n_heads"], self.config["head_dim"], self.config["hidden_size"])
                     results = torch.einsum("bshd,hdo->bsho", x_heads, w_reshaped)
                 else: 
                     # Linear: Y = X @ W.T. W is [Out, In] -> [Hidden, Hidden]
                     # Note: w_o is [Hidden, Hidden] for 'o_proj'.
                     # For Llama o_proj[Out, In] -> [Hidden, Hidden]. In=Hidden, Out=Hidden.
-                    w_reshaped = w_o.view(self.hidden_size, self.n_heads, self.head_dim)
+                    w_reshaped = w_o.view(self.config["hidden_size"], self.config["n_heads"], self.config["head_dim"])
                     results = torch.einsum("bshd,ohd->bsho", x_heads, w_reshaped)
                     
                 self.activations[name] = results.detach().cpu()
@@ -823,7 +894,7 @@ class EAPGraph:
                 gy = grad_output[0].detach() 
                 w = comps["fused_qkv"].weight 
                 
-                split_size = self.hidden_size
+                split_size = self.config["hidden_size"]
                 g_q, g_k, g_v = gy.split(split_size, dim=-1)
                 
                 b, s, _ = g_q.shape
@@ -831,13 +902,13 @@ class EAPGraph:
                 if comps["is_conv1d"]:
                     w_q, w_k, w_v = w.split(split_size, dim=1)
                     
-                    g_q_heads = g_q.view(b, s, self.n_heads, self.head_dim)
-                    g_k_heads = g_k.view(b, s, self.n_kv_heads, self.head_dim)
-                    g_v_heads = g_v.view(b, s, self.n_kv_heads, self.head_dim)
+                    g_q_heads = g_q.view(b, s, self.config["n_heads"], self.config["head_dim"])
+                    g_k_heads = g_k.view(b, s, self.config["n_kv_heads"], self.config["head_dim"])
+                    g_v_heads = g_v.view(b, s, self.config["n_kv_heads"], self.config["head_dim"])
                     
-                    w_q_heads = w_q.view(self.hidden_size, self.n_heads, self.head_dim)
-                    w_k_heads = w_k.view(self.hidden_size, self.n_kv_heads, self.head_dim)
-                    w_v_heads = w_v.view(self.hidden_size, self.n_kv_heads, self.head_dim)
+                    w_q_heads = w_q.view(self.config["hidden_size"], self.config["n_heads"], self.config["head_dim"])
+                    w_k_heads = w_k.view(self.config["hidden_size"], self.config["n_kv_heads"], self.config["head_dim"])
+                    w_v_heads = w_v.view(self.config["hidden_size"], self.config["n_kv_heads"], self.config["head_dim"])
                     
                     # einsum: b s h d_out, d_in h d_out -> b s h d_in
                     gx_q = torch.einsum("bsho,iho->bshi", g_q_heads, w_q_heads)
@@ -872,16 +943,16 @@ class EAPGraph:
                 b, s, out_dim = gy.shape
                 
                 if type == "q_input":
-                    n_heads = self.n_heads
+                    n_heads = self.config["n_heads"]
                 else:
-                    n_heads = self.n_kv_heads
+                    n_heads = self.config["n_kv_heads"]
                 
                 # View gradients: [B, S, H, D]
-                gy_heads = gy.view(b, s, n_heads, self.head_dim)
+                gy_heads = gy.view(b, s, n_heads, self.config["head_dim"])
                 
                 # View weights: [Out, In] -> [H, D, In] (Transposed logic handled in einsum)
                 # Linear weights are (Out, In). Llama/GPTJ usually [H*D, Hidden]
-                w_heads = w.view(n_heads, self.head_dim, self.hidden_size)
+                w_heads = w.view(n_heads, self.config["head_dim"], self.config["hidden_size"])
                 
                 # Compute gradient w.r.t input of Linear (Post-LN)
                 # dL/dX_h = dL/dY_h @ W_h
@@ -912,7 +983,7 @@ class EAPGraph:
 
     def register_forward_hooks(self):
         self.reset_hooks()
-        for i in range(self.n_layers):
+        for i in range(self.config["n_layers"]):
             comps, _ = self._get_layer_components(i)
             # 1. Resid Pre (Block Input)
             self.handles.append(comps["layer_block"].register_forward_pre_hook(
@@ -940,7 +1011,7 @@ class EAPGraph:
             ))
 
     def register_backward_hooks(self):
-        for i in range(self.n_layers):
+        for i in range(self.config["n_layers"]):
             comps, _ = self._get_layer_components(i)
             # 1. Q, K, V Inputs
             if comps["is_fused_qkv"]:
@@ -967,21 +1038,34 @@ class EAPGraph:
                 self.get_gradient_hook(f"blocks.{i}.hook_resid_post", type="resid_post", layer_idx=i)
             ))
 
-    def _prepare_activations(self, input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask):
-        if corrupted_input_ids is None:
-            raise ValueError("corrupted_input_ids is required. Noise-based corruption is no longer supported.")
+    def _prepare_activations(
+        self,
+        input_ids,
+        attention_mask,
+        corrupted_input_ids,
+        corrupted_attention_mask,
+        subject_spans,
+    ):
+        use_subject_noise_baseline = corrupted_input_ids is None
 
-        # Provide a clearer error message listing which samples differ in length
-        input_lengths = attention_mask.sum(-1).cpu()
-        corrupted_lengths = corrupted_attention_mask.sum(-1).cpu()
-        unequal = input_lengths != corrupted_lengths
-        if torch.any(unequal):
-            mismatched = torch.where(unequal)[0].tolist()
-            raise ValueError(
-                f"Pair of clean and corrupted prompts must have the same token length. "
-                f"Mismatched sample indices: {mismatched}. "
-                f"Clean lengths: {input_lengths.tolist()}, Corrupted lengths: {corrupted_lengths.tolist()}"
-            )
+        if use_subject_noise_baseline and subject_spans is None:
+            raise ValueError("subject_spans is required when corrupted_input_ids is None for the noise baseline approach.")
+            
+        if not use_subject_noise_baseline and (corrupted_input_ids is None or corrupted_attention_mask is None):
+            raise ValueError("corrupted_input_ids and corrupted_attention_mask are required when not using the noise baseline approach.")
+
+        if corrupted_attention_mask is not None:
+            # Provide a clearer error message listing which samples differ in length
+            input_lengths = attention_mask.sum(-1).cpu()
+            corrupted_lengths = corrupted_attention_mask.sum(-1).cpu()
+            unequal = input_lengths != corrupted_lengths
+            if torch.any(unequal):
+                mismatched = torch.where(unequal)[0].tolist()
+                raise ValueError(
+                    f"Pair of clean and corrupted prompts must have the same token length. "
+                    f"Mismatched sample indices: {mismatched}. "
+                    f"Clean lengths: {input_lengths.tolist()}, Corrupted lengths: {corrupted_lengths.tolist()}"
+                )
 
         self.model.eval()
         self.model.zero_grad()
@@ -990,7 +1074,8 @@ class EAPGraph:
         input_ids = input_ids.to(self.main_device)
         attention_mask = attention_mask.to(self.main_device)
         input_length = attention_mask.sum(dim=-1)
-        corrupted_input_ids = corrupted_input_ids.to(self.main_device)
+        if not use_subject_noise_baseline:
+            corrupted_input_ids = corrupted_input_ids.to(self.main_device)
         
         self.register_forward_hooks()
         with torch.no_grad():
@@ -1010,16 +1095,37 @@ class EAPGraph:
         h.remove()
         clean_wte = embed_acts[0]
 
-        embed_acts = []
-        h = embed.register_forward_hook(stat_hook)
-        self.register_forward_hooks()
-        with torch.no_grad():
-            corrupted_logits = self.model(corrupted_input_ids).logits.detach()
-            corrupt_acts = self.activations.copy()
-        h.remove()
-        self.reset_hooks()
+        if not use_subject_noise_baseline:
+            embed_acts = []
+            h = embed.register_forward_hook(stat_hook)
+            self.register_forward_hooks()
+            with torch.no_grad():
+                corrupted_logits = self.model(corrupted_input_ids).logits.detach()
+                corrupt_acts = self.activations.copy()
+            h.remove()
+            self.reset_hooks()
 
-        corrupted_wte = embed_acts[0]
+            corrupted_wte = embed_acts[0]
+        else:
+            subject_tokens = []
+            for i, (start, end) in enumerate(subject_spans):
+                subject_tokens.append(clean_wte[i, start:end]) # shape [Subject_Tokens, D_model]
+            subject_tokens = torch.cat(subject_tokens, dim=0) # [Total_Subject_Tokens, D_model]
+            std = subject_tokens.std().item()
+            corrupted_wte = clean_wte.clone()
+            for i, (start, end) in enumerate(subject_spans):
+                corrupted_wte[i, start:end] += std
+
+            def noisy_embed_hook(module, input, output):
+                return corrupted_wte
+
+            h = embed.register_forward_hook(noisy_embed_hook)
+            self.register_forward_hooks()
+            with torch.no_grad():
+                corrupted_logits = self.model(input_ids).logits.detach()
+                corrupt_acts = self.activations.copy()
+            h.remove()
+            self.reset_hooks()
 
         activation_differences = {}
         for name, clean_act in clean_acts.items():
@@ -1070,8 +1176,22 @@ class EAPGraph:
 
         return avg_grads
 
-    def get_activations(self, input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn: Callable):
-        prepared = self._prepare_activations(input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask)
+    def get_activations(
+        self,
+        input_ids,
+        attention_mask,
+        corrupted_input_ids,
+        corrupted_attention_mask,
+        subject_spans,
+        metric_fn: Callable,
+    ):
+        prepared = self._prepare_activations(
+            input_ids,
+            attention_mask,
+            corrupted_input_ids,
+            corrupted_attention_mask,
+            subject_spans,
+        )
         gradients = self._compute_gradients(
             prepared["input_ids"],
             prepared["input_length"],
@@ -1083,11 +1203,26 @@ class EAPGraph:
         )
         return prepared["activation_differences"], gradients
 
-    def get_activations_ig(self, input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn: Callable, steps: int = 30):
+    def get_activations_ig(
+        self,
+        input_ids,
+        attention_mask,
+        corrupted_input_ids,
+        corrupted_attention_mask,
+        subject_spans,
+        metric_fn: Callable,
+        steps: int = 30,
+    ):
         if steps <= 0:
             raise ValueError(f"integrated_gradients must be > 0, got {steps}")
 
-        prepared = self._prepare_activations(input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask)
+        prepared = self._prepare_activations(
+            input_ids,
+            attention_mask,
+            corrupted_input_ids,
+            corrupted_attention_mask,
+            subject_spans,
+        )
         gradients = self._compute_gradients(
             prepared["input_ids"],
             prepared["input_length"],
@@ -1107,6 +1242,7 @@ class EAPGraph:
         integrated_gradients: Optional[int] = None,
         corrupted_input_ids: Optional[torch.Tensor] = None,
         corrupted_attention_mask: Optional[torch.Tensor] = None,
+        subject_spans: Optional[list[tuple[int, int]]] = None,
         return_per_token_scores: bool = False,
     ):
         """
@@ -1116,15 +1252,29 @@ class EAPGraph:
         metric_fn: Callable that maps (logits, reference_logits, input_length) -> scalar metric/loss.
         integrated_gradients: If None, run EAP. If int>0, run EAP-IG with this many steps.
         corrupted_input_ids: [Batch, Seq] corrupted baseline inputs.
-        return_per_token_scores: if True, include per-sample/per-position edge scores.
+            If None, a prompts-only baseline is created by noising subject token embeddings.
+        corrupted_attention_mask: [Batch, Seq] attention mask for corrupted_input_ids.
+        subject_spans: Optional[list[tuple[int, int]]] = None,
+        return_per_token_scores: bool = False,
         """
         if integrated_gradients is None:
             activation_differences, clean_grads = self.get_activations(
-                input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn
+                input_ids,
+                attention_mask,
+                corrupted_input_ids,
+                corrupted_attention_mask,
+                subject_spans,
+                metric_fn,
             )
         else:
             activation_differences, clean_grads = self.get_activations_ig(
-                input_ids, attention_mask, corrupted_input_ids, corrupted_attention_mask, metric_fn, steps=integrated_gradients
+                input_ids,
+                attention_mask,
+                corrupted_input_ids,
+                corrupted_attention_mask,
+                subject_spans,
+                metric_fn,
+                steps=integrated_gradients,
             )
 
         attention_mask = attention_mask.to(self.main_device)
@@ -1137,11 +1287,11 @@ class EAPGraph:
         d0 = activation_differences["blocks.0.hook_resid_pre"] * mask
 
         bsz, seq_len, d_model = d0.shape
-        max_sources = 1 + (self.n_layers * self.n_heads) + self.n_layers
+        max_sources = 1 + (self.config["n_layers"] * self.config["n_heads"]) + self.config["n_layers"]
         src_buffer = torch.empty(
             (bsz, seq_len, max_sources, d_model),
             device=self.main_device,
-            dtype=d0.dtype,
+            dtype=self.model.dtype,
         )
         source_names = [None] * max_sources
         n_src = 0
@@ -1154,7 +1304,7 @@ class EAPGraph:
 
         append_source(d0, "blocks.0.hook_resid_pre")
 
-        for layer in tqdm(range(self.n_layers), desc="Scoring"):
+        for layer in tqdm(range(self.config["n_layers"]), desc="Scoring"):
             src_view = src_buffer[:, :, :n_src, :]
 
             head_dests = [
@@ -1200,7 +1350,7 @@ class EAPGraph:
                 d = activation_differences[mlp_out_name] * mask
                 append_source(d, f"blocks.{layer}.hook_mlp_out")
 
-            if layer == self.n_layers - 1:
+            if layer == self.config["n_layers"] - 1:
                 resid_name = f"blocks.{layer}.hook_resid_post"
                 if resid_name in clean_grads:
                     src_view = src_buffer[:, :, :n_src, :] # shape [B, S, Src, D]
@@ -1218,41 +1368,66 @@ class EAPGraph:
 # %%
 
 if __name__ == "__main__":
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    
     # Example Usage
-    model_id = "gpt2"
+    
+    # model_id = "gpt2"
+    # chat_format = False
+    
+    model_id = "Qwen/Qwen3-4B-Instruct-2507"
+    chat_format = True
+    
     print(f"Loading {model_id}...")
+    
     model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     
 # %%
 
 if __name__ == "__main__":
-    # EAP Wrapper
+    use_subject_noise_baseline = True
+    return_per_token_scores = True
+    
     eap = EAPGraph(model)
     
     prompts = [
-        "Suppose John lives on a houseboat, Ellie Kemper lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
+        "Suppose Albert Einstein lives on a houseboat, Ellie Kemper lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
+    ]
+    subjects = [
+        "Ellie Kemper",
     ]
     corrupted_prompts = [
-        "Suppose John lives on a houseboat, Cillian Murphy lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
+        "Suppose Albert Einstein lives on a houseboat, Cillian Murphy lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ]
     
     # Pre-process inputs
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-    tokenized = tokenizer(prompts + corrupted_prompts, return_tensors="pt", padding="longest")
-
-    batch_size = len(prompts)
-    input_ids = tokenized["input_ids"][:batch_size]
-    attention_mask = tokenized["attention_mask"][:batch_size]
-    corrupted_input_ids = tokenized["input_ids"][batch_size:]
-    corrupted_attention_mask = tokenized["attention_mask"][batch_size:]
+    
+    formatted_prompts = format_prompt(tokenizer, prompts, chat_format=chat_format)
+    clean, subject_spans = encode_prompt(tokenizer, formatted_prompts, subjects)
+    input_ids = clean["input_ids"]
+    attention_mask = clean["attention_mask"]
+    
+    print("Formatted prompts:\n", formatted_prompts[0])
 
     kl_div_metric = get_kl_div_metric()
-
-    return_per_token_scores = True
-    results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, corrupted_attention_mask=corrupted_attention_mask, integrated_gradients=5, return_per_token_scores=return_per_token_scores)
+    
+    if not use_subject_noise_baseline:
+        corrupted_formatted_prompts = format_prompt(tokenizer, corrupted_prompts, chat_format=chat_format)
+        corrupted, _ = encode_prompt(tokenizer, corrupted_formatted_prompts)
+        corrupted_input_ids = corrupted["input_ids"]
+        corrupted_attention_mask = corrupted["attention_mask"]
+        
+        print("Corrupted prompts:\n", corrupted_formatted_prompts[0])
+        
+        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, corrupted_attention_mask=corrupted_attention_mask, integrated_gradients=5, return_per_token_scores=return_per_token_scores)
+    elif use_subject_noise_baseline:
+        print("Using subject noise baseline...")
+        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=None, corrupted_attention_mask=None, subject_spans=subject_spans, return_per_token_scores=return_per_token_scores)
     
 # %%
 
