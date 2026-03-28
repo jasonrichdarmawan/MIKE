@@ -72,6 +72,7 @@ def format_prompt(
         formatted_prompts = []
         for prompt in prompts:
             messages = [
+                {"role": "system", "content": "Only respond with the answer. Do not include any explanations."},
                 {"role": "user", "content": prompt},
             ]
             formatted_prompts.append(tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True))
@@ -85,7 +86,7 @@ def encode_prompt(
     subjects: Optional[list[str]] = None,
 ):
     """
-    Find token spans (start, end) for subject strings in each sample.
+    Find token spans (start, end] for subject strings in each sample.
     """
     encoded = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True)
     
@@ -96,7 +97,7 @@ def encode_prompt(
     if subjects is not None:
         for i in range(len(prompts)):
             start_char = prompts[i].find(subjects[i])
-            end_char = start_char + len(subjects[i]) - 1
+            end_char = start_char + len(subjects[i])
             
             start_tok = encoded.char_to_token(i, start_char)
             end_tok = encoded.char_to_token(i, end_char)
@@ -629,6 +630,7 @@ def get_gptj_components(model, layer_idx):
 
 COMPONENT_REGISTRY = {
     "GPT2LMHeadModel": get_gpt2_components,
+    "LlamaForCausalLM": get_llama_like_components,
     "Qwen3ForCausalLM": get_llama_like_components,
 }
 
@@ -642,7 +644,7 @@ def get_gpt2_config(model):
         "head_dim": config.n_embd // config.n_head,
     }
 
-def get_qwen3_config(model):
+def get_llama_like_config(model):
     config = model.config
     return {
         "n_layers": config.num_hidden_layers,
@@ -654,7 +656,8 @@ def get_qwen3_config(model):
 
 CONFIG_REGISTRY = {
     "GPT2LMHeadModel": get_gpt2_config,
-    "Qwen3ForCausalLM": get_qwen3_config,
+    "LlamaForCausalLM": get_llama_like_config,
+    "Qwen3ForCausalLM": get_llama_like_config,
 }
 
 # --- Metric Factories ---
@@ -1374,6 +1377,7 @@ if __name__ == "__main__":
     # Example Usage
     
     # model_id = "gpt2"
+    # model_id = "meta-llama/Meta-Llama-3-8B"
     # chat_format = False
     
     model_id = "Qwen/Qwen3-4B-Instruct-2507"
@@ -1381,7 +1385,7 @@ if __name__ == "__main__":
     
     print(f"Loading {model_id}...")
     
-    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     
 # %%
@@ -1432,6 +1436,16 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
+    input_ids = input_ids.to(model.device)
+    
+    with torch.no_grad():
+        generated = model.generate(input_ids)
+    
+    print("Generated output:\n", tokenizer.decode(generated[0]))
+
+# %%
+
+if __name__ == "__main__":
     import json
     # Structured analysis outputs for downstream fine-tuning decisions
     top_mlp_hubs_aggregated = find_top_mlp_hubs_aggregated(results, n=5)
@@ -1443,8 +1457,10 @@ if __name__ == "__main__":
     
         print("Top MLP hubs by sample:\n", json.dumps(top_mlp_hubs_by_sample, indent=4))
         print("Top MLP hubs by token and sample:\n", json.dumps(top_mlp_hubs_by_token_sample, indent=4))
+        start = 32
+        print("Top token:\n", tokenizer.decode(input_ids[0][start:]))
 
-# %%
+ # %%
 
 if __name__ == "__main__":
     top_hubs_aggregated = find_top_hubs_aggregated(results, n=5)
