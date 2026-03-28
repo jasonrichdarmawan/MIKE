@@ -341,6 +341,7 @@ def run_alphaedit(args):
             print(f"  Item {i+1}/{len(batch_df)} edited.")
 
         # Evaluate
+        print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
         fn_kwargs = {"model": model, "tokenizer": tokenizer}
         hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
         hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
@@ -353,18 +354,22 @@ def run_alphaedit(args):
         # Analyze
         if not args.skip_analysis:
             hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+            print(f"  [Phase: Sublayer-Attn] Batch {b+1}/{n_batches}")
             all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
                 project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
                 batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Sublayer-MLP] Batch {b+1}/{n_batches}")
             all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
                 project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
                 batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Knockout] Batch {b+1}/{n_batches}")
             all_knockout.append(hf_analysis.map(
                 generate_answer_with_attention_knockout,
                 fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
                            "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
                 batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
             if not args.skip_patchscopes:
+                print(f"  [Phase: PatchScopes] Batch {b+1}/{n_batches}")
                 batch_ps = batch_df.copy()
                 batch_ps["target_prompt"] = TARGET_PROMPT
                 hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
@@ -375,6 +380,7 @@ def run_alphaedit(args):
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
 
         # Restore
+        print(f"  [Phase: Restore] Batch {b+1}/{n_batches}")
         with torch.no_grad():
             for k, v in orig_weights.items():
                 nethook.get_parameter(model, k)[...] = v.to(device)
@@ -475,6 +481,7 @@ def run_ifmet(args):
             print(f"  Item {i+1}/{len(batch_df)} edited.")
 
         # Evaluate
+        print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
         fn_kwargs = {"model": model, "tokenizer": tokenizer}
         hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
         hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
@@ -487,18 +494,22 @@ def run_ifmet(args):
         # Analyze
         if not args.skip_analysis:
             hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+            print(f"  [Phase: Sublayer-Attn] Batch {b+1}/{n_batches}")
             all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
                 project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
                 batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Sublayer-MLP] Batch {b+1}/{n_batches}")
             all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
                 project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
                 batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Knockout] Batch {b+1}/{n_batches}")
             all_knockout.append(hf_analysis.map(
                 generate_answer_with_attention_knockout,
                 fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
                            "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
                 batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
             if not args.skip_patchscopes:
+                print(f"  [Phase: PatchScopes] Batch {b+1}/{n_batches}")
                 batch_ps = batch_df.copy()
                 batch_ps["target_prompt"] = TARGET_PROMPT
                 hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
@@ -509,6 +520,7 @@ def run_ifmet(args):
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
 
         # Restore
+        print(f"  [Phase: Restore] Batch {b+1}/{n_batches}")
         with torch.no_grad():
             for k, v in orig_weights.items():
                 nethook.get_parameter(model, k)[...] = v.to(device)
