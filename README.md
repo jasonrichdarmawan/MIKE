@@ -46,17 +46,24 @@ micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 
 ```
 
 ```
-micromamba install -c nvidia pytorch==2.1.0
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 ```
 
 ```
-micromamba install tqdm==4.62.3 transformers==4.44.2 openai==2.24.0 peft==0.7.1 timm==0.9.7 iopath==0.1.10 sentencepiece seaborn
+pip install transformers==5.3.0
+
+micromamba install tqdm==4.62.3 openai==2.24.0 peft==0.7.1 timm==0.9.7 iopath==0.1.10 sentencepiece seaborn
 
 pip install opencv-python==4.8.0.76 fairscale==0.4.13
 
-micromamba install beartype jaxtyping
+micromamba install beartype jaxtyping pytest
 
 pip install zhipuai sniffio
+```
+
+Install transformers_eap
+```
+pip install -e .
 ```
 
 ## 📚Analyze
