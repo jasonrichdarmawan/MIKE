@@ -938,7 +938,8 @@ class EAPGraph:
                 w_o = comps["o"].weight
                 w_o = w_o.view(self.config["hidden_size"], self.config["n_heads"], self.config["head_dim"])
                 
-                self.activations[name] = torch.einsum("bshd,ohd->bsho", x, w_o).detach()
+                y = torch.einsum("bshd,ohd->bsho", x, w_o)
+                self.activations[name] = y.detach()
             elif hook_type in ["hook_mlp_out"]:
                 self.activations[name] = output.detach()
             
@@ -994,9 +995,9 @@ class EAPGraph:
                 gx_k = self._norm_vjp(f"blocks.{layer_idx}.ln_1", gx_k)
                 gx_v = self._norm_vjp(f"blocks.{layer_idx}.ln_1", gx_v)
                 
-                self.gradients[f"blocks.{layer_idx}.hook_q_input"] = gx_q.detach().cpu()
-                self.gradients[f"blocks.{layer_idx}.hook_k_input"] = gx_k.detach().cpu()
-                self.gradients[f"blocks.{layer_idx}.hook_v_input"] = gx_v.detach().cpu()
+                self.gradients[f"blocks.{layer_idx}.hook_q_input"] = gx_q.detach()
+                self.gradients[f"blocks.{layer_idx}.hook_k_input"] = gx_k.detach()
+                self.gradients[f"blocks.{layer_idx}.hook_v_input"] = gx_v.detach()
                 
             elif hook_type in ["hook_q_input", "hook_k_input", "hook_v_input"]:
                 if hook_type == "hook_q_input":
@@ -1013,15 +1014,15 @@ class EAPGraph:
                 
                 gx = torch.einsum("bsho,hoi->bshi", gy, w)
                 gx = self._norm_vjp(f"blocks.{layer_idx}.ln_1", gx)
-                self.gradients[name] = gx.detach().cpu()
+                self.gradients[name] = gx.detach()
                 
             elif hook_type == "hook_mlp_in":
                 gx = grad_input[0]
                 gx = self._norm_vjp(f"blocks.{layer_idx}.ln_2", gx)
-                self.gradients[name] = gx.detach().cpu()
+                self.gradients[name] = gx.detach()
             
             elif hook_type == "hook_resid_post":
-                self.gradients[name] = grad_output[0].detach().cpu()
+                self.gradients[name] = grad_output[0].detach()
             
             else:
                 raise ValueError(f"Unsupported hook type '{hook_type}' for gradient hook '{name}'.")
@@ -1047,25 +1048,18 @@ class EAPGraph:
             self.handles.append(comps["mlp_out"].register_forward_hook(
                 self.get_activation_hook(f"blocks.{i}.hook_mlp_out")
             ))
-            
-            # 4. Attention Pre-LN Input (Resid Pre)
-            # Necessary for accurate Attention Head attribution
-            self.handles.append(comps["ln_1"].register_forward_hook(
-                self.get_activation_hook(f"blocks.{i}.ln_1")
-            ))
-            
-            # 5. MLP Pre-LN Input (Resid Mid)
-            # Necessary for accurate MLP attribution
-            if "ln_2" in comps and comps["ln_2"] is not None:
-                self.handles.append(comps["ln_2"].register_forward_hook(
-                    self.get_activation_hook(f"blocks.{i}.ln_2")
-                ))
 
     def register_backward_hooks(self):
         for i in range(self.config["n_layers"]):
             comps, _ = self._get_layer_components(i)
             
-            # 1. Q, K, V Inputs
+            # 1. Attention Pre-LN Input (Resid Pre)
+            # Necessary for accurate Attention Head attribution
+            self.handles.append(comps["ln_1"].register_forward_hook(
+                self.get_activation_hook(f"blocks.{i}.ln_1")
+            ))
+            
+            # 2. Q, K, V Inputs
             if self.config["is_qkv_fused"]:
                 self.handles.append(comps["qkv"].register_full_backward_hook(
                     self.get_gradient_hook(f"blocks.{i}.hook_attn_in")
@@ -1081,12 +1075,19 @@ class EAPGraph:
                     self.get_gradient_hook(f"blocks.{i}.hook_v_input")
                 ))
             
-            # 2. MLP Input
+            # 3. MLP Pre-LN Input (Resid Mid)
+            # Necessary for accurate MLP attribution
+            if "ln_2" in comps and comps["ln_2"] is not None:
+                self.handles.append(comps["ln_2"].register_forward_hook(
+                    self.get_activation_hook(f"blocks.{i}.ln_2")
+                ))
+            
+            # 4. MLP Input
             self.handles.append(comps["mlp_in"].register_full_backward_hook(
                 self.get_gradient_hook(f"blocks.{i}.hook_mlp_in")
             ))
             
-            # 3. Resid Post
+            # 5. Resid Post
             self.handles.append(comps["layer_block"].register_full_backward_hook(
                 self.get_gradient_hook(f"blocks.{i}.hook_resid_post")
             ))
@@ -1100,6 +1101,7 @@ class EAPGraph:
         subject_spans,
         profile = False,
     ):
+        stage = "prepare_activations"
         phase_start = self.profiler.begin(profile, reset_peak=True)
     
         use_subject_noise_baseline = corrupted_input_ids is None
@@ -1112,8 +1114,8 @@ class EAPGraph:
 
         if corrupted_attention_mask is not None:
             # Provide a clearer error message listing which samples differ in length
-            input_lengths = attention_mask.sum(-1).cpu()
-            corrupted_lengths = corrupted_attention_mask.sum(-1).cpu()
+            input_lengths = attention_mask.sum(-1)
+            corrupted_lengths = corrupted_attention_mask.sum(-1)
             unequal = input_lengths != corrupted_lengths
             if torch.any(unequal):
                 mismatched = torch.where(unequal)[0].tolist()
@@ -1132,21 +1134,16 @@ class EAPGraph:
         if not use_subject_noise_baseline:
             corrupted_input_ids = corrupted_input_ids.to(self.main_device)
         
-        self.register_forward_hooks()
-        with torch.no_grad():
-            self.model(input_ids)
-            clean_acts = self.activations.copy()
-        self.reset_hooks()
-
         _, embed = self._get_layer_components(0)
         embed_acts = []
-
         def stat_hook(m, i, o):
             embed_acts.append(o.detach())
-
         h = embed.register_forward_hook(stat_hook)
+        self.register_forward_hooks()
         with torch.no_grad():
-            clean_logits = self.model(input_ids).logits.detach()
+            clean_logits = self.model(input_ids, use_cache=False).logits
+            clean_acts = self.activations.copy()
+        self.reset_hooks()
         h.remove()
         clean_wte = embed_acts[0]
 
@@ -1155,7 +1152,7 @@ class EAPGraph:
             h = embed.register_forward_hook(stat_hook)
             self.register_forward_hooks()
             with torch.no_grad():
-                corrupted_logits = self.model(corrupted_input_ids).logits.detach()
+                corrupted_logits = self.model(corrupted_input_ids, use_cache=False).logits
                 corrupt_acts = self.activations.copy()
             h.remove()
             self.reset_hooks()
@@ -1167,7 +1164,7 @@ class EAPGraph:
                 subject_tokens.append(clean_wte[i, start:end]) # shape [Subject_Tokens, D_model]
             subject_tokens = torch.cat(subject_tokens, dim=0) # [Total_Subject_Tokens, D_model]
             std = subject_tokens.std().item()
-            corrupted_wte = clean_wte.clone()
+            corrupted_wte = clean_wte.detach().clone()
             for i, (start, end) in enumerate(subject_spans):
                 corrupted_wte[i, start:end] += std
 
@@ -1177,24 +1174,30 @@ class EAPGraph:
             h = embed.register_forward_hook(noisy_embed_hook)
             self.register_forward_hooks()
             with torch.no_grad():
-                corrupted_logits = self.model(input_ids).logits.detach()
+                corrupted_logits = self.model(input_ids, use_cache=False).logits
                 corrupt_acts = self.activations.copy()
             h.remove()
             self.reset_hooks()
 
+        diff_start = self.profiler.begin(profile, reset_peak=False)
         activation_differences = {}
         for name, clean_act in clean_acts.items():
             if name not in corrupt_acts:
                 raise ValueError(f"Missing activation for '{name}' in corrupted forward pass.")
             if clean_act.dim() == 3:
-                mask = attention_mask.unsqueeze(-1).to(clean_act.device)
+                mask = attention_mask.to(clean_act.device).reshape(attention_mask.shape + (1,))
             elif clean_act.dim() == 4:
-                mask = attention_mask.unsqueeze(-1).unsqueeze(-1).to(clean_act.device)
+                mask = attention_mask.to(clean_act.device).reshape(attention_mask.shape + (1, 1))
             else:
-                raise ValueError(f"Unsupported activation rank {clean_act.dim()} for '{name}'.")
-            activation_differences[name] = (corrupt_acts[name] - clean_act) * mask
+                raise ValueError(f"Unsupported attention_mask rank {attention_mask.dim()} for activation masking.")
+            diff = corrupt_acts[name].sub(clean_act)
+            diff.mul_(mask)
+            activation_differences[name] = diff.detach().cpu()
+        self.profiler.end(profile, diff_start, f"{stage}.act_diff", report_peak=False)
 
-        self.profiler.end(profile, phase_start, "prepare_activations", report_peak=True)
+        self.reset_hooks()
+
+        self.profiler.end(profile, phase_start, stage, report_peak=True)
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -1208,15 +1211,15 @@ class EAPGraph:
 
     def _compute_gradients(self, input_ids, input_length, clean_wte, corrupted_wte, metric_fn: Callable, reference_logits, steps: int, profile = False):
         phase_start = self.profiler.begin(profile, reset_peak=True)
+        
         _, embed = self._get_layer_components(0)
+        
         avg_grads = {}
-
         for step in range(1, steps + 1):
             step_tag = f"compute_gradients.step{step}/{steps}"
 
             self.reset_hooks()
             self.model.zero_grad()
-            self.register_forward_hooks()
             self.register_backward_hooks()
 
             def interpolation_hook(module, input, output):
@@ -1227,7 +1230,7 @@ class EAPGraph:
             h_interp = embed.register_forward_hook(interpolation_hook)
 
             fwd_start = self.profiler.begin(profile, reset_peak=False)
-            logits = self.model(input_ids).logits
+            logits = self.model(input_ids, use_cache=False).logits
             loss = metric_fn(logits, reference_logits, input_length)
             self.profiler.end(profile, fwd_start, f"{step_tag}.forward_loss", report_peak=False)
 
@@ -1239,13 +1242,16 @@ class EAPGraph:
             acc_start = self.profiler.begin(profile, reset_peak=False)
             for name, grad in self.gradients.items():
                 if name not in avg_grads:
-                    avg_grads[name] = grad.detach().cpu()
+                    avg_grads[name] = grad.detach()
                 else:
-                    avg_grads[name] += grad
+                    avg_grads[name] += grad.detach()
             self.profiler.end(profile, acc_start, f"{step_tag}.accumulate", report_peak=False)
 
         for name in avg_grads:
             avg_grads[name] /= steps
+            avg_grads[name] = avg_grads[name].cpu()
+            
+        self.reset_hooks()
 
         self.profiler.end(profile, phase_start, "compute_gradients", report_peak=True)
         return avg_grads
@@ -1339,6 +1345,8 @@ class EAPGraph:
         return_per_token_scores: bool = False,
         profile: if True, print phase runtime and CUDA peak memory.
         """
+        self.reset_hooks()
+        
         if profile:
             self.profiler.reset_header()
 
@@ -1365,7 +1373,7 @@ class EAPGraph:
             )
 
         phase_start = self.profiler.begin(profile, reset_peak=True)
-        
+
         resid_pre_name = "blocks.0.hook_resid_pre"
         if resid_pre_name not in activation_differences:
             raise ValueError("Missing required activation difference for blocks.0.hook_resid_pre")
@@ -1374,7 +1382,6 @@ class EAPGraph:
         scores = {}
         
         # 1. Source: Resid Pre Layer 0
-        # activation_difference[resid_pre_name] shape [Batch, Seq, D_model]
         d0 = activation_differences[resid_pre_name]
 
         bsz, seq_len, _ = d0.shape
@@ -1393,7 +1400,7 @@ class EAPGraph:
 
         append_source(d0, "blocks.0.hook_resid_pre")
 
-        for layer in tqdm(range(self.config["n_layers"]), desc="Scoring"):
+        for layer in range(self.config["n_layers"]):
             src_view = src_buffer[:, :, :curr_src_idx, :]
 
             head_dests = [
@@ -1417,7 +1424,6 @@ class EAPGraph:
             res_name = f"blocks.{layer}.attn.hook_result"
             if res_name not in activation_differences:
                 raise ValueError(f"Missing required activation difference for {res_name} to compute attention output contributions. Check if forward hooks are registered correctly and activations are being captured.")
- 
             res_diff = activation_differences[res_name]
             n_new = res_diff.shape[2]
             src_buffer[:, :, curr_src_idx:curr_src_idx + n_new, :].copy_(res_diff.to(self.main_device))
@@ -1468,7 +1474,7 @@ class EAPGraph:
 
 if __name__ == "__main__":
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
     
     dtype = torch.bfloat16
     
@@ -1506,7 +1512,7 @@ if __name__ == "__main__":
 
     eap = EAPGraph(model)
     
-    batch_size = 8
+    batch_size = 16
     prompts = [
         "Suppose Albert Einstein lives on a houseboat, Ellie Kemper lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ] * batch_size
