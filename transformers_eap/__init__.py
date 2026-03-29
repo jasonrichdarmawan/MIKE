@@ -1,6 +1,7 @@
 from .eap_graph import (
 	EAPGraph,
-	encode,
+	format_prompt,
+	encode_prompt,
 	find_top_hubs_aggregated,
 	find_top_hubs_by_sample,
 	find_top_hubs_by_token_sample,
