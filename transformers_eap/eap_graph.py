@@ -6,8 +6,112 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 from typing import Callable, Optional
 import re
+import time
 
 # %%
+
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# %%
+
+
+class ProfileTracker:
+    def __init__(self, device: torch.device, logger=None, stage_width: int = 36):
+        self.device = device
+        self.logger = logger or logging.getLogger(__name__)
+        self.stage_width = stage_width
+        self.header_printed = False
+
+    def reset_header(self):
+        self.header_printed = False
+
+    def begin(self, enabled: bool, reset_peak: bool = True):
+        if not enabled:
+            return None
+        if torch.cuda.is_available() and self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+            start_alloc = torch.cuda.memory_allocated(self.device)
+            start_reserved = torch.cuda.memory_reserved(self.device)
+            if reset_peak:
+                torch.cuda.reset_peak_memory_stats(self.device)
+            return {
+                "t0": time.perf_counter(),
+                "start_alloc": start_alloc,
+                "start_reserved": start_reserved,
+            }
+        return {
+            "t0": time.perf_counter(),
+            "start_alloc": None,
+            "start_reserved": None,
+        }
+
+    def end(self, enabled: bool, start_time, stage_name: str, report_peak: bool = True):
+        if not enabled:
+            return
+        if start_time is None:
+            raise ValueError("start_time is None. Ensure that begin() was called and returned a valid timestamp when profiling is enabled.")
+
+        if len(stage_name) > self.stage_width:
+            stage_label = stage_name[:self.stage_width - 3] + "..."
+        else:
+            stage_label = stage_name
+
+        elapsed = time.perf_counter() - start_time["t0"]
+
+        if torch.cuda.is_available() and self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+            start_alloc = start_time["start_alloc"]
+            start_reserved = start_time["start_reserved"]
+
+            end_alloc = torch.cuda.memory_allocated(self.device)
+            end_reserved = torch.cuda.memory_reserved(self.device)
+            end_alloc_delta = end_alloc - start_alloc
+            end_reserved_delta = end_reserved - start_reserved
+
+            if not self.header_printed:
+                self.logger.debug(
+                    "[PROFILE] "
+                    f"{'stage':<{self.stage_width}} {'sec':>7} | "
+                    f"{'a_start':>8} {'a_end':>8} {'a_dlt':>8} {'a_peak':>8} | "
+                    f"{'r_start':>8} {'r_end':>8} {'r_dlt':>8} {'r_peak':>8}"
+                )
+                self.header_printed = True
+
+            a_start = start_alloc / (1024 ** 3)
+            a_end = end_alloc / (1024 ** 3)
+            a_dlt = end_alloc_delta / (1024 ** 3)
+            r_start = start_reserved / (1024 ** 3)
+            r_end = end_reserved / (1024 ** 3)
+            r_dlt = end_reserved_delta / (1024 ** 3)
+
+            if report_peak:
+                peak_alloc = torch.cuda.max_memory_allocated(self.device)
+                peak_reserved = torch.cuda.max_memory_reserved(self.device)
+                peak_alloc_delta = max(0, peak_alloc - start_alloc)
+                peak_reserved_delta = max(0, peak_reserved - start_reserved)
+                a_peak = peak_alloc_delta / (1024 ** 3)
+                r_peak = peak_reserved_delta / (1024 ** 3)
+
+                self.logger.debug(
+                    "[PROFILE] "
+                    f"{stage_label:<{self.stage_width}} {elapsed:7.3f} | "
+                    f"{a_start:8.3f} {a_end:8.3f} {a_dlt:+8.3f} {a_peak:8.3f} | "
+                    f"{r_start:8.3f} {r_end:8.3f} {r_dlt:+8.3f} {r_peak:8.3f}"
+                )
+            else:
+                self.logger.debug(
+                    "[PROFILE] "
+                    f"{stage_label:<{self.stage_width}} {elapsed:7.3f} | "
+                    f"{a_start:8.3f} {a_end:8.3f} {a_dlt:+8.3f} {'-':>8} | "
+                    f"{r_start:8.3f} {r_end:8.3f} {r_dlt:+8.3f} {'-':>8}"
+                )
+        else:
+            if not self.header_printed:
+                self.logger.debug(f"[PROFILE] {'stage':<{self.stage_width}} {'sec':>7}")
+                self.header_printed = True
+            self.logger.debug(f"[PROFILE] {stage_label:<{self.stage_width}} {elapsed:7.3f}")
+
 
 # --- Standalone Utility Functions ---
 
@@ -730,15 +834,15 @@ class EAPGraph:
         self.model = model
         
         if hasattr(self.model, "hf_device_map"):
-             # For sharded models, main_device is a bit murky, but we need *some* device for tensors
-             d = list(self.model.hf_device_map.values())[0]
-             # Handle string outputs like 'cpu' or 'cuda:0'
-             if isinstance(d, str):
-                  self.main_device = torch.device(d)
-             else:
-                  self.main_device = d
+            # For sharded models, main_device is a bit murky, but we need *some* device for tensors
+            d = list(self.model.hf_device_map.values())[0]
+            # Handle string outputs like 'cpu' or 'cuda:0'
+            if isinstance(d, str):
+                self.main_device = torch.device(d)
+            else:
+                self.main_device = d
         else:
-             self.main_device = self.model.device
+            self.main_device = self.model.device
         
         # Arch detection
         if graph_type:
@@ -751,23 +855,16 @@ class EAPGraph:
                              f"Available: {list(COMPONENT_REGISTRY.keys())}")
 
         self.config = self._get_config()
-        # self.n_layers = self.config.num_hidden_layers
-        # self.n_heads = self.config.num_attention_heads
-        # self.hidden_size = self.config.hidden_size
-        # self.head_dim = self.config.head_dim
         
-        # if hasattr(self.config, "num_key_value_heads"):
-        #     self.n_kv_heads = self.config.num_key_value_heads
-        # else:
-        #     self.n_kv_heads = self.n_heads
-            
-        print(f"Initialized EAPGraph for {self.arch_type}. Layers: {self.config['n_layers']}, Heads: {self.config['n_heads']}")
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"Initialized EAPGraph for {self.arch_type}. Layers: {self.config['n_layers']}, Heads: {self.config['n_heads']}")
         
         # Storage
         self.activations = {}
         self.gradients = {}
         self.norm_io = {}
         self.handles = []
+        self.profiler = ProfileTracker(self.main_device)
 
     def _detect_architecture(self):
         name = self.model.__class__.__name__
@@ -919,7 +1016,7 @@ class EAPGraph:
                     gx_v = torch.einsum("bsho,iho->bshi", g_v_heads, w_v_heads)
                 else:
                     raise NotImplementedError("Fused QKV non-Conv1D path is not implemented.")
-                
+
                 norm_key = f"blocks.{layer_idx}.ln_1"
                 gx_q = self._norm_vjp(norm_key, gx_q)
                 gx_k = self._norm_vjp(norm_key, gx_k)
@@ -1002,7 +1099,7 @@ class EAPGraph:
             ))
 
             # 3. MLP Pre-LN Input (Resid Mid)
-            # Necessary for accurate MLP attribution w/ manual LN backprop
+            # Necessary for accurate MLP attribution
             if "ln_2" in comps and comps["ln_2"] is not None:
                 self.handles.append(comps["ln_2"].register_forward_hook(
                     self.get_activation_hook(f"blocks.{i}.ln_2", type="norm_io")
@@ -1048,7 +1145,10 @@ class EAPGraph:
         corrupted_input_ids,
         corrupted_attention_mask,
         subject_spans,
+        profile = False,
     ):
+        phase_start = self.profiler.begin(profile, reset_peak=True)
+    
         use_subject_noise_baseline = corrupted_input_ids is None
 
         if use_subject_noise_baseline and subject_spans is None:
@@ -1071,9 +1171,8 @@ class EAPGraph:
                 )
 
         self.model.eval()
-        self.model.zero_grad()
         self.reset_hooks()
-
+        
         input_ids = input_ids.to(self.main_device)
         attention_mask = attention_mask.to(self.main_device)
         input_length = attention_mask.sum(dim=-1)
@@ -1135,6 +1234,7 @@ class EAPGraph:
             if name in corrupt_acts:
                 activation_differences[name] = corrupt_acts[name] - clean_act
 
+        self.profiler.end(profile, phase_start, "prepare_activations", report_peak=True)
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -1146,11 +1246,14 @@ class EAPGraph:
             "activation_differences": activation_differences,
         }
 
-    def _compute_gradients(self, input_ids, input_length, clean_wte, corrupted_wte, metric_fn: Callable, reference_logits, steps: int):
+    def _compute_gradients(self, input_ids, input_length, clean_wte, corrupted_wte, metric_fn: Callable, reference_logits, steps: int, profile = False):
+        phase_start = self.profiler.begin(profile, reset_peak=True)
         _, embed = self._get_layer_components(0)
         avg_grads = {}
 
         for step in range(1, steps + 1):
+            step_tag = f"compute_gradients.step{step}/{steps}"
+
             self.reset_hooks()
             self.model.zero_grad()
             self.register_forward_hooks()
@@ -1163,20 +1266,28 @@ class EAPGraph:
 
             h_interp = embed.register_forward_hook(interpolation_hook)
 
+            fwd_start = self.profiler.begin(profile, reset_peak=False)
             logits = self.model(input_ids).logits
             loss = metric_fn(logits, reference_logits, input_length)
+            self.profiler.end(profile, fwd_start, f"{step_tag}.forward_loss", report_peak=False)
+
+            bwd_start = self.profiler.begin(profile, reset_peak=False)
             loss.backward()
+            self.profiler.end(profile, bwd_start, f"{step_tag}.backward", report_peak=False)
             h_interp.remove()
 
+            acc_start = self.profiler.begin(profile, reset_peak=False)
             for name, grad in self.gradients.items():
                 if name not in avg_grads:
-                    avg_grads[name] = grad.clone()
+                    avg_grads[name] = grad.detach().cpu()
                 else:
                     avg_grads[name] += grad
+            self.profiler.end(profile, acc_start, f"{step_tag}.accumulate", report_peak=False)
 
         for name in avg_grads:
             avg_grads[name] /= steps
 
+        self.profiler.end(profile, phase_start, "compute_gradients", report_peak=True)
         return avg_grads
 
     def get_activations(
@@ -1187,6 +1298,7 @@ class EAPGraph:
         corrupted_attention_mask,
         subject_spans,
         metric_fn: Callable,
+        profile = False,
     ):
         prepared = self._prepare_activations(
             input_ids,
@@ -1194,6 +1306,7 @@ class EAPGraph:
             corrupted_input_ids,
             corrupted_attention_mask,
             subject_spans,
+            profile=profile,
         )
         gradients = self._compute_gradients(
             prepared["input_ids"],
@@ -1203,6 +1316,7 @@ class EAPGraph:
             metric_fn,
             prepared["corrupted_logits"],
             steps=1,
+            profile=profile,
         )
         return prepared["activation_differences"], gradients
 
@@ -1215,6 +1329,7 @@ class EAPGraph:
         subject_spans,
         metric_fn: Callable,
         steps: int = 30,
+        profile = False,
     ):
         if steps <= 0:
             raise ValueError(f"integrated_gradients must be > 0, got {steps}")
@@ -1225,6 +1340,7 @@ class EAPGraph:
             corrupted_input_ids,
             corrupted_attention_mask,
             subject_spans,
+            profile=profile,
         )
         gradients = self._compute_gradients(
             prepared["input_ids"],
@@ -1234,6 +1350,7 @@ class EAPGraph:
             metric_fn,
             prepared["clean_logits"],
             steps=steps,
+            profile=profile,
         )
         return prepared["activation_differences"], gradients
 
@@ -1247,6 +1364,7 @@ class EAPGraph:
         corrupted_attention_mask: Optional[torch.Tensor] = None,
         subject_spans: Optional[list[tuple[int, int]]] = None,
         return_per_token_scores: bool = False,
+        profile: bool = False,
     ):
         """
         Core EAP/EAP-IG execution using pre-processed tensors.
@@ -1259,7 +1377,11 @@ class EAPGraph:
         corrupted_attention_mask: [Batch, Seq] attention mask for corrupted_input_ids.
         subject_spans: Optional[list[tuple[int, int]]] = None,
         return_per_token_scores: bool = False,
+        profile: if True, print phase runtime and CUDA peak memory.
         """
+        if profile:
+            self.profiler.reset_header()
+
         if integrated_gradients is None:
             activation_differences, clean_grads = self.get_activations(
                 input_ids,
@@ -1268,6 +1390,7 @@ class EAPGraph:
                 corrupted_attention_mask,
                 subject_spans,
                 metric_fn,
+                profile=profile,
             )
         else:
             activation_differences, clean_grads = self.get_activations_ig(
@@ -1278,8 +1401,10 @@ class EAPGraph:
                 subject_spans,
                 metric_fn,
                 steps=integrated_gradients,
+                profile=profile,
             )
 
+        phase_start = self.profiler.begin(profile, reset_peak=True)
         attention_mask = attention_mask.to(self.main_device)
         mask = attention_mask.unsqueeze(-1).float().cpu()
 
@@ -1364,6 +1489,7 @@ class EAPGraph:
                     else:
                         score_vec = score_tensor.sum(dim=(0, 1))
                         scores[resid_name] = score_vec.detach().cpu()
+        self.profiler.end(profile, phase_start, "scoring", report_peak=True)
 
         scores["source_names"] = source_names[:n_src]
         return scores
@@ -1373,6 +1499,8 @@ class EAPGraph:
 if __name__ == "__main__":
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    
+    dtype = torch.bfloat16
     
     # Example Usage
     
@@ -1385,26 +1513,28 @@ if __name__ == "__main__":
     
     print(f"Loading {model_id}...")
     
-    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", dtype=torch.bfloat16)
+    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", dtype=dtype)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     
 # %%
 
 if __name__ == "__main__":
+    profile = True
     use_subject_noise_baseline = True
     return_per_token_scores = True
     
     eap = EAPGraph(model)
     
+    batch_size = 4
     prompts = [
         "Suppose Albert Einstein lives on a houseboat, Ellie Kemper lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
-    ]
+    ] * batch_size
     subjects = [
         "Ellie Kemper",
-    ]
+    ] * batch_size
     corrupted_prompts = [
         "Suppose Albert Einstein lives on a houseboat, Cillian Murphy lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
-    ]
+    ] * batch_size
     
     # Pre-process inputs
     if tokenizer.pad_token is None:
@@ -1416,6 +1546,7 @@ if __name__ == "__main__":
     input_ids = clean["input_ids"]
     attention_mask = clean["attention_mask"]
     
+    print(f"Computing attributions. input_ids shape: {input_ids.shape}")
     print("Formatted prompts:\n", formatted_prompts[0])
 
     kl_div_metric = get_kl_div_metric()
@@ -1428,10 +1559,10 @@ if __name__ == "__main__":
         
         print("Corrupted prompts:\n", corrupted_formatted_prompts[0])
         
-        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, corrupted_attention_mask=corrupted_attention_mask, integrated_gradients=5, return_per_token_scores=return_per_token_scores)
+        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, corrupted_attention_mask=corrupted_attention_mask, integrated_gradients=5, return_per_token_scores=return_per_token_scores, profile=profile)
     elif use_subject_noise_baseline:
         print("Using subject noise baseline...")
-        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=None, corrupted_attention_mask=None, subject_spans=subject_spans, return_per_token_scores=return_per_token_scores)
+        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=None, corrupted_attention_mask=None, subject_spans=subject_spans, integrated_gradients=5, return_per_token_scores=return_per_token_scores, profile=profile)
     
 # %%
 
