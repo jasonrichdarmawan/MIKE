@@ -12,8 +12,33 @@ import logging
 # %%
 
 class ProfileTracker:
-    def __init__(self, device: torch.device, logger=None, stage_width: int = 36):
-        self.device = device
+    def __init__(self, device: torch.device | str | int | list | tuple | set, logger=None, stage_width: int = 36):
+        if isinstance(device, (list, tuple, set)):
+            raw_devices = list(device)
+        else:
+            raw_devices = [device]
+
+        normalized_devices = []
+        for d in raw_devices:
+            if isinstance(d, torch.device):
+                td = d
+            else:
+                try:
+                    td = torch.device(d)
+                except (TypeError, RuntimeError, ValueError):
+                    continue
+            normalized_devices.append(td)
+
+        # Keep deterministic order and deduplicate devices.
+        unique_by_key = {}
+        for td in normalized_devices:
+            key = (td.type, td.index)
+            if key not in unique_by_key:
+                unique_by_key[key] = td
+
+        self.devices = list(unique_by_key.values())
+        self.cuda_devices = [d for d in self.devices if d.type == "cuda"]
+        self.device = self.cuda_devices[0] if self.cuda_devices else (self.devices[0] if self.devices else torch.device("cpu"))
         self.logger = logger or logging.getLogger(__name__)
         self.stage_width = stage_width
         self.header_printed = False
@@ -24,21 +49,24 @@ class ProfileTracker:
     def begin(self, enabled: bool, reset_peak: bool = True):
         if not enabled:
             return None
-        if torch.cuda.is_available() and self.device.type == "cuda":
-            torch.cuda.synchronize(self.device)
-            start_alloc = torch.cuda.memory_allocated(self.device)
-            start_reserved = torch.cuda.memory_reserved(self.device)
-            if reset_peak:
-                torch.cuda.reset_peak_memory_stats(self.device)
+        if torch.cuda.is_available() and len(self.cuda_devices) > 0:
+            by_device = {}
+            for device in self.cuda_devices:
+                torch.cuda.synchronize(device)
+
+                by_device[str(device)] = {
+                    "start_alloc": torch.cuda.memory_allocated(device),
+                    "start_reserved": torch.cuda.memory_reserved(device),
+                }
+                if reset_peak:
+                    torch.cuda.reset_peak_memory_stats(device)
             return {
                 "t0": time.perf_counter(),
-                "start_alloc": start_alloc,
-                "start_reserved": start_reserved,
+                "by_device": by_device,
             }
         return {
             "t0": time.perf_counter(),
-            "start_alloc": None,
-            "start_reserved": None,
+            "by_device": None,
         }
 
     def end(self, enabled: bool, start_time, stage_name: str, report_peak: bool = True):
@@ -54,53 +82,71 @@ class ProfileTracker:
 
         elapsed = time.perf_counter() - start_time["t0"]
 
-        if torch.cuda.is_available() and self.device.type == "cuda":
-            torch.cuda.synchronize(self.device)
-            start_alloc = start_time["start_alloc"]
-            start_reserved = start_time["start_reserved"]
-
-            end_alloc = torch.cuda.memory_allocated(self.device)
-            end_reserved = torch.cuda.memory_reserved(self.device)
-            end_alloc_delta = end_alloc - start_alloc
-            end_reserved_delta = end_reserved - start_reserved
+        if torch.cuda.is_available() and len(self.cuda_devices) > 0:
+            start_by_device = start_time.get("by_device") or {}
 
             if not self.header_printed:
                 self.logger.debug(
                     "[PROFILE] "
-                    f"{'stage':<{self.stage_width}} {'sec':>7} | "
+                    f"{'stage':<{self.stage_width}} {'device':>8} {'sec':>7} | "
                     f"{'a_start':>8} {'a_end':>8} {'a_dlt':>8} {'a_peak':>8} | "
-                    f"{'r_start':>8} {'r_end':>8} {'r_dlt':>8} {'r_peak':>8}"
+                    f"{'r_start':>8} {'r_end':>8} {'r_dlt':>8} {'r_peak':>8} | "
+                    f"{'free':>8} {'non_t':>8}"
                 )
                 self.header_printed = True
 
-            a_start = start_alloc / (1024 ** 3)
-            a_end = end_alloc / (1024 ** 3)
-            a_dlt = end_alloc_delta / (1024 ** 3)
-            r_start = start_reserved / (1024 ** 3)
-            r_end = end_reserved / (1024 ** 3)
-            r_dlt = end_reserved_delta / (1024 ** 3)
+            for device in self.cuda_devices:
+                device_key = str(device)
+                if device_key not in start_by_device:
+                    continue
 
-            if report_peak:
-                peak_alloc = torch.cuda.max_memory_allocated(self.device)
-                peak_reserved = torch.cuda.max_memory_reserved(self.device)
-                peak_alloc_delta = max(0, peak_alloc - start_alloc)
-                peak_reserved_delta = max(0, peak_reserved - start_reserved)
-                a_peak = peak_alloc_delta / (1024 ** 3)
-                r_peak = peak_reserved_delta / (1024 ** 3)
+                torch.cuda.synchronize(device)
 
-                self.logger.debug(
-                    "[PROFILE] "
-                    f"{stage_label:<{self.stage_width}} {elapsed:7.3f} | "
-                    f"{a_start:8.3f} {a_end:8.3f} {a_dlt:+8.3f} {a_peak:8.3f} | "
-                    f"{r_start:8.3f} {r_end:8.3f} {r_dlt:+8.3f} {r_peak:8.3f}"
-                )
-            else:
-                self.logger.debug(
-                    "[PROFILE] "
-                    f"{stage_label:<{self.stage_width}} {elapsed:7.3f} | "
-                    f"{a_start:8.3f} {a_end:8.3f} {a_dlt:+8.3f} {'-':>8} | "
-                    f"{r_start:8.3f} {r_end:8.3f} {r_dlt:+8.3f} {'-':>8}"
-                )
+                device_start_alloc = start_by_device[device_key]["start_alloc"]
+                device_start_reserved = start_by_device[device_key]["start_reserved"]
+                device_end_alloc = torch.cuda.memory_allocated(device)
+                device_end_reserved = torch.cuda.memory_reserved(device)
+                
+                device_end_free, device_end_total = torch.cuda.mem_get_info(device)
+
+                device_end_alloc_delta = device_end_alloc - device_start_alloc
+                device_end_reserved_delta = device_end_reserved - device_start_reserved
+
+                a_start = device_start_alloc / (1024 ** 3)
+                a_end = device_end_alloc / (1024 ** 3)
+                a_dlt = device_end_alloc_delta / (1024 ** 3)
+                r_start = device_start_reserved / (1024 ** 3)
+                r_end = device_end_reserved / (1024 ** 3)
+                r_dlt = device_end_reserved_delta / (1024 ** 3)
+
+                free_end = device_end_free / (1024 ** 3)
+
+                non_torch_used = max(0, (device_end_total - device_end_free) - device_end_reserved)
+                non_torch_used_gb = non_torch_used / (1024 ** 3)
+
+                if report_peak:
+                    device_peak_alloc = torch.cuda.max_memory_allocated(device)
+                    device_peak_reserved = torch.cuda.max_memory_reserved(device)
+                    peak_alloc_delta = max(0, device_peak_alloc - device_start_alloc)
+                    peak_reserved_delta = max(0, device_peak_reserved - device_start_reserved)
+                    a_peak = peak_alloc_delta / (1024 ** 3)
+                    r_peak = peak_reserved_delta / (1024 ** 3)
+
+                    self.logger.debug(
+                        "[PROFILE] "
+                        f"{stage_label:<{self.stage_width}} {device_key:>8} {elapsed:7.3f} | "
+                        f"{a_start:8.3f} {a_end:8.3f} {a_dlt:+8.3f} {a_peak:8.3f} | "
+                        f"{r_start:8.3f} {r_end:8.3f} {r_dlt:+8.3f} {r_peak:8.3f} | "
+                        f"{free_end:8.3f} {non_torch_used_gb:8.3f}"
+                    )
+                else:
+                    self.logger.debug(
+                        "[PROFILE] "
+                        f"{stage_label:<{self.stage_width}} {device_key:>8} {elapsed:7.3f} | "
+                        f"{a_start:8.3f} {a_end:8.3f} {a_dlt:+8.3f} {'-':>8} | "
+                        f"{r_start:8.3f} {r_end:8.3f} {r_dlt:+8.3f} {'-':>8} | "
+                        f"{free_end:8.3f} {non_torch_used_gb:8.3f}"
+                    )
         else:
             if not self.header_printed:
                 self.logger.debug(f"[PROFILE] {'stage':<{self.stage_width}} {'sec':>7}")
@@ -877,20 +923,34 @@ class EAPGraph:
     def __init__(self, model):
         """
         model: Pre-loaded HuggingFace model
-        graph_type: Optional string ('gpt2', 'llama_like', 'gptj'). If None, mostly auto-detected.
         """
         self.model = model
+
+        def _to_device(value):
+            if isinstance(value, torch.device):
+                return value
+            try:
+                return torch.device(value)
+            except (TypeError, RuntimeError, ValueError):
+                return None
         
         if hasattr(self.model, "hf_device_map"):
-            # For sharded models, main_device is a bit murky, but we need *some* device for tensors
-            d = list(self.model.hf_device_map.values())[0]
-            # Handle string outputs like 'cpu' or 'cuda:0'
-            if isinstance(d, str) or isinstance(d, int):
-                self.main_device = torch.device(d)
+            device_values = list(self.model.hf_device_map.values())
+            map_devices = [d for d in (_to_device(v) for v in device_values) if d is not None]
+            cuda_devices = [d for d in map_devices if d.type == "cuda"]
+
+            # Prefer CUDA device for tensor placement if available.
+            if len(cuda_devices) > 0:
+                self.main_device = cuda_devices[0]
+            elif len(map_devices) > 0:
+                self.main_device = map_devices[0]
             else:
-                self.main_device = d
+                self.main_device = self.model.device
+
+            profile_devices = cuda_devices if len(cuda_devices) > 0 else [self.main_device]
         else:
             self.main_device = self.model.device
+            profile_devices = [self.main_device]
         
         # Arch detection
         self.arch_type = self._detect_architecture()
@@ -906,7 +966,7 @@ class EAPGraph:
         self.norm_io = {}
         self.handles = []
         
-        self.profiler = ProfileTracker(self.main_device)
+        self.profiler = ProfileTracker(profile_devices)
 
     def _detect_architecture(self):
         name = self.model.__class__.__name__
@@ -1639,7 +1699,7 @@ if __name__ == "__main__":
 
     eap = EAPGraph(model)
     
-    batch_size = 8
+    batch_size = 16
     prompts = [
         "Suppose Albert Einstein lives on a houseboat, Ellie Kemper lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ] * batch_size
