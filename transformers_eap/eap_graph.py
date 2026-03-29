@@ -1655,12 +1655,16 @@ class EAPGraph:
 # %%
 
 if __name__ == "__main__":
+    import os
+    
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+    # Solve out-of-memory issues by allowing PyTorch to split large allocations into smaller segments that can be freed independently.
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    
     logging.basicConfig(level=logging.DEBUG)
 
     logger = logging.getLogger(__name__)
 
-    import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
     
     dtype = torch.bfloat16
     
@@ -1681,6 +1685,7 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
+    
     profile = True
     use_subject_noise_baseline = True
     return_per_head_attribution = True
