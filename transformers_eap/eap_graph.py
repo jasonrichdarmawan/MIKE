@@ -1639,7 +1639,7 @@ if __name__ == "__main__":
 
     eap = EAPGraph(model)
     
-    batch_size = 16
+    batch_size = 8
     prompts = [
         "Suppose Albert Einstein lives on a houseboat, Ellie Kemper lives in an apartment, and Elvis Presley lives in a cabin. Therefore, the person living in the apartment is a citizen of",
     ] * batch_size
