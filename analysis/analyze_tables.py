@@ -97,7 +97,8 @@ def build_layers_df(dataset_dir: str) -> pd.DataFrame:
     """
     tqdm.pandas()
 
-    entity_description = load_entity_description_generations(dataset_dir)
+    entity_description_dir = Path(dataset_dir) / "entity_description"
+    entity_description = load_entity_description_generations(dataset_dir) if entity_description_dir.exists() else {}
     knockout           = load_attention_knockouts(dataset_dir)
     sublayer           = load_sublayer_projections(dataset_dir)
 

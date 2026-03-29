@@ -104,6 +104,32 @@ def create_subsets(evaluated: pd.DataFrame, data_dir: Path) -> dict:
 
 # %% Post-edit shared helpers
 
+def filter_multi_target(df: pd.DataFrame, log_path: Path = None) -> pd.DataFrame:
+    """Remove rows where any (entity, relation) pair has more than one valid target.
+
+    Such ambiguous pairs cause false positives in still_incorrect / still_inconsistent /
+    broken_hops: the model may produce a different but equally valid answer that we
+    would wrongly label as incorrect.
+
+    If log_path is given, saves removed rows to that CSV for inspection.
+    """
+    t1 = df[["e1", "r1", "e2"]].rename(columns={"e1": "entity", "r1": "relation", "e2": "target"})
+    t2 = df[["e2", "r2", "e3"]].rename(columns={"e2": "entity", "r2": "relation", "e3": "target"})
+    target_counts = pd.concat([t1, t2]).groupby(["entity", "relation"])["target"].nunique()
+    valid_pairs = target_counts[target_counts == 1].index
+    idx1 = pd.MultiIndex.from_arrays([df["e1"], df["r1"]])
+    idx2 = pd.MultiIndex.from_arrays([df["e2"], df["r2"]])
+    mask = idx1.isin(valid_pairs) & idx2.isin(valid_pairs)
+    filtered = df[mask]
+    removed_df = df[~mask]
+    if len(removed_df):
+        print(f"  filter_multi_target: removed {len(removed_df)} rows ({len(filtered)} remaining)")
+        if log_path:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            removed_df.to_csv(log_path)
+            print(f"  Removed rows saved to {log_path}")
+    return filtered
+
 def to_sublayer_df(ds) -> pd.DataFrame:
     """Convert HuggingFace dataset to DataFrame with proper Python list columns."""
     df = ds.to_pandas()
@@ -305,6 +331,7 @@ def run_alphaedit(args):
     apply_algo = ALG_DICT["AlphaEdit"]
 
     dataset = pd.read_csv(str(incorrect_dir / "two_hop.csv"), index_col=0)
+    dataset = filter_multi_target(dataset, log_path=incorrect_dir / "filtered_multi_target.csv")
     if args.max_examples:
         dataset = dataset.head(args.max_examples)
     dataset["e2_answers"] = dataset.apply(lambda r: get_answers(r, "e2")["e2_answers"], axis=1)
@@ -441,6 +468,7 @@ def run_ifmet(args):
     apply_algo = ALG_DICT[hparams_s.alg_name]  # MEMIT
 
     dataset = pd.read_csv(str(incorrect_dir / "two_hop.csv"), index_col=0)
+    dataset = filter_multi_target(dataset, log_path=incorrect_dir / "filtered_multi_target.csv")
     if args.max_examples:
         dataset = dataset.head(args.max_examples)
     dataset["e2_answers"] = dataset.apply(lambda r: get_answers(r, "e2")["e2_answers"], axis=1)
