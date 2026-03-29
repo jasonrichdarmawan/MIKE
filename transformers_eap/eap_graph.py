@@ -3,19 +3,13 @@
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from tqdm import tqdm
 from typing import Callable, Optional
 import re
 import time
-import weakref
-
-# %%
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
 
 # %%
-
 
 class ProfileTracker:
     def __init__(self, device: torch.device, logger=None, stage_width: int = 36):
@@ -132,9 +126,8 @@ def _parse_node_name(name: str):
     if tail.startswith("attn.hook_result"):
         node["module"] = "attn_result"
         head_match = re.search(r"\[(\d+)\]", tail)
-        if not head_match:
-            raise ValueError(f"Missing head index in attention result node name: {name}. Expected format 'blocks.<layer>.attn.hook_result[<head>]'.")
-        node["head"] = int(head_match.group(1))
+        if head_match:
+            node["head"] = int(head_match.group(1))
     elif "hook_q_input" in tail:
         node["module"] = "q_input"
     elif "hook_k_input" in tail:
@@ -798,8 +791,6 @@ def get_gpt2_config(model):
         "hidden_size": config.n_embd,
         "head_dim": config.n_embd // config.n_head,
     }
-    n_src = 1 + (c["n_layers"] * c["n_heads"]) + c["n_layers"]
-    c["n_src"] = n_src
     return c
 
 def get_llama_like_config(model):
@@ -813,8 +804,6 @@ def get_llama_like_config(model):
         "hidden_size": config.hidden_size,
         "head_dim": config.head_dim,
     }
-    n_src = 1 + (c["n_layers"] * c["n_heads"]) + c["n_layers"]
-    c["n_src"] = n_src
     return c
 
 CONFIG_REGISTRY = {
@@ -978,7 +967,7 @@ class EAPGraph:
         raise ValueError(f"Unsupported grad_out rank {grad_out.dim()} for norm VJP")
 
     # --- Activation Hooks ---
-    def get_activation_hook(self, name):
+    def get_activation_hook(self, name, return_per_head_attribution: bool = True):
         """
         name: string in format "blocks.{layer_idx}.{component}.hook_type"
         
@@ -999,16 +988,19 @@ class EAPGraph:
             if hook_type in ["hook_resid_pre"]:
                 self.activations[name] = input[0].detach()
             elif hook_type == "hook_result":
-                x = input[0].detach()
-                b, s, _ = x.shape
-                x = x.view(b, s, self.config["n_heads"], self.config["head_dim"])
-                
-                comps, _ = self._get_layer_components(layer_idx)
-                w_o = comps["o"].weight
-                w_o = w_o.view(self.config["hidden_size"], self.config["n_heads"], self.config["head_dim"])
-                
-                y = torch.einsum("bshd,ohd->bsho", x, w_o)
-                self.activations[name] = y.detach()
+                if not return_per_head_attribution:
+                    self.activations[name] = output.detach()
+                else:
+                    x = input[0].detach()
+                    b, s, _ = x.shape
+                    x = x.view(b, s, self.config["n_heads"], self.config["head_dim"])
+                    
+                    comps, _ = self._get_layer_components(layer_idx)
+                    w_o = comps["o"].weight
+                    w_o = w_o.view(self.config["hidden_size"], self.config["n_heads"], self.config["head_dim"])
+                    
+                    y = torch.einsum("bshd,ohd->bsho", x, w_o)
+                    self.activations[name] = y.detach()
             elif hook_type in ["hook_mlp_out"]:
                 self.activations[name] = output.detach()
             
@@ -1025,7 +1017,7 @@ class EAPGraph:
 
     # --- Gradient Hooks ---
     # def get_gradient_hook(self, name):
-    def get_gradient_hook(self, name, type="std", layer_idx=None):
+    def get_gradient_hook(self, name, return_per_head_attribution: bool = True):
         """
         Retrieves gradients for attention heads and MLPs.
         
@@ -1043,27 +1035,35 @@ class EAPGraph:
                 w = module.weight
                 if self.config["is_qkv_conv1d"]:
                     w_q, w_k, w_v = w.t().split(self.config["hidden_size"], dim=0)
+                else:
+                    raise NotImplementedError("hook_attn_in gradient hook is only implemented for fused Conv1D QKV (e.g. GPT-2).")
+                
+                gy = grad_output[0]
+                gy_q, gy_k, gy_v = gy.split(self.config["hidden_size"], dim=-1)
+                
+                if not return_per_head_attribution:
+                    gx_q = torch.einsum("bsi,ih->bsh", gy_q, w_q)
+                    gx_k = torch.einsum("bsi,ih->bsh", gy_k, w_k)
+                    gx_v = torch.einsum("bsi,ih->bsh", gy_v, w_v)
+                else:
                     w_q = w_q.view(self.config["n_heads"], self.config["head_dim"], self.config["hidden_size"])
                     w_k = w_k.view(self.config["n_kv_heads"], self.config["head_dim"], self.config["hidden_size"])
                     w_v = w_v.view(self.config["n_kv_heads"], self.config["head_dim"], self.config["hidden_size"])
-                else:
-                    raise NotImplementedError("hook_attn_in gradient hook is only implemented for fused Conv1D QKV (e.g. GPT-2).")
-
-                gy = grad_output[0]
-                b, s, _ = gy.shape
-                gy_q, gy_k, gy_v = gy.split(self.config["hidden_size"], dim=-1)
-                gy_q = gy_q.view(b, s, self.config["n_heads"], self.config["head_dim"])
-                gy_k = gy_k.view(b, s, self.config["n_kv_heads"], self.config["head_dim"])
-                gy_v = gy_v.view(b, s, self.config["n_kv_heads"], self.config["head_dim"])
-                
-                gx_q = torch.einsum("bsho,hoi->bshi", gy_q, w_q)
-                gx_k = torch.einsum("bsho,hoi->bshi", gy_k, w_k)
-                gx_v = torch.einsum("bsho,hoi->bshi", gy_v, w_v)
+                    
+                    b, s, _ = gy.shape
+                    
+                    gy_q = gy_q.view(b, s, self.config["n_heads"], self.config["head_dim"])
+                    gy_k = gy_k.view(b, s, self.config["n_kv_heads"], self.config["head_dim"])
+                    gy_v = gy_v.view(b, s, self.config["n_kv_heads"], self.config["head_dim"])
+                    
+                    gx_q = torch.einsum("bsho,hoi->bshi", gy_q, w_q)
+                    gx_k = torch.einsum("bsho,hoi->bshi", gy_k, w_k)
+                    gx_v = torch.einsum("bsho,hoi->bshi", gy_v, w_v)
                 
                 gx_q = self._norm_vjp(f"blocks.{layer_idx}.ln_1", gx_q)
                 gx_k = self._norm_vjp(f"blocks.{layer_idx}.ln_1", gx_k)
                 gx_v = self._norm_vjp(f"blocks.{layer_idx}.ln_1", gx_v)
-                
+
                 self.gradients[f"blocks.{layer_idx}.hook_q_input"] = gx_q.detach()
                 self.gradients[f"blocks.{layer_idx}.hook_k_input"] = gx_k.detach()
                 self.gradients[f"blocks.{layer_idx}.hook_v_input"] = gx_v.detach()
@@ -1076,12 +1076,16 @@ class EAPGraph:
                 
                 gy = grad_output[0]
                 b, s, _ = gy.shape
-                gy = gy.view(b, s, n_heads, self.config["head_dim"])
                 
                 w = module.weight
-                w = w.view(n_heads, self.config["head_dim"], self.config["hidden_size"])
                 
-                gx = torch.einsum("bsho,hoi->bshi", gy, w)
+                if not return_per_head_attribution:
+                    gx = grad_input[0]
+                else:
+                    gy = gy.view(b, s, n_heads, self.config["head_dim"])
+                    w = w.view(n_heads, self.config["head_dim"], self.config["hidden_size"])
+                    gx = torch.einsum("bsho,hoi->bshi", gy, w)
+                
                 gx = self._norm_vjp(f"blocks.{layer_idx}.ln_1", gx)
                 self.gradients[name] = gx.detach()
                 
@@ -1098,7 +1102,7 @@ class EAPGraph:
 
         return hook
 
-    def register_forward_hooks(self):
+    def register_forward_hooks(self, return_per_head_attribution: bool = False):
         self.reset_hooks()
         for i in range(self.config["n_layers"]):
             comps, _ = self._get_layer_components(i)
@@ -1109,8 +1113,8 @@ class EAPGraph:
             ))
             
             # 2. Head Results (Source) - Hook Input to O_proj
-            self.handles.append(comps["o"].register_forward_pre_hook(
-                self.get_activation_hook(f"blocks.{i}.attn.hook_result")
+            self.handles.append(comps["o"].register_forward_hook(
+                self.get_activation_hook(f"blocks.{i}.attn.hook_result", return_per_head_attribution=return_per_head_attribution)
             ))
 
             # 3. MLP Out (Source)
@@ -1118,7 +1122,7 @@ class EAPGraph:
                 self.get_activation_hook(f"blocks.{i}.hook_mlp_out")
             ))
 
-    def register_backward_hooks(self):
+    def register_backward_hooks(self, return_per_head_attribution: bool = False):
         for i in range(self.config["n_layers"]):
             comps, _ = self._get_layer_components(i)
             
@@ -1131,17 +1135,29 @@ class EAPGraph:
             # 2. Q, K, V Inputs
             if self.config["is_qkv_fused"]:
                 self.handles.append(comps["qkv"].register_full_backward_hook(
-                    self.get_gradient_hook(f"blocks.{i}.hook_attn_in")
+                    self.get_gradient_hook(
+                        f"blocks.{i}.hook_attn_in",
+                        return_per_head_attribution=return_per_head_attribution,
+                    )
                 ))
             else:
                 self.handles.append(comps["q"].register_full_backward_hook(
-                    self.get_gradient_hook(f"blocks.{i}.hook_q_input")
+                    self.get_gradient_hook(
+                        f"blocks.{i}.hook_q_input",
+                        return_per_head_attribution=return_per_head_attribution,
+                    )
                 ))
                 self.handles.append(comps["k"].register_full_backward_hook(
-                    self.get_gradient_hook(f"blocks.{i}.hook_k_input")
+                    self.get_gradient_hook(
+                        f"blocks.{i}.hook_k_input",
+                        return_per_head_attribution=return_per_head_attribution,
+                    )
                 ))
                 self.handles.append(comps["v"].register_full_backward_hook(
-                    self.get_gradient_hook(f"blocks.{i}.hook_v_input")
+                    self.get_gradient_hook(
+                        f"blocks.{i}.hook_v_input",
+                        return_per_head_attribution=return_per_head_attribution,
+                    )
                 ))
             
             # 3. MLP Pre-LN Input (Resid Mid)
@@ -1153,12 +1169,18 @@ class EAPGraph:
             
             # 4. MLP Input
             self.handles.append(comps["mlp_in"].register_full_backward_hook(
-                self.get_gradient_hook(f"blocks.{i}.hook_mlp_in")
+                self.get_gradient_hook(
+                    f"blocks.{i}.hook_mlp_in",
+                    return_per_head_attribution=return_per_head_attribution,
+                )
             ))
             
             # 5. Resid Post
             self.handles.append(comps["layer_block"].register_full_backward_hook(
-                self.get_gradient_hook(f"blocks.{i}.hook_resid_post")
+                self.get_gradient_hook(
+                    f"blocks.{i}.hook_resid_post",
+                    return_per_head_attribution=return_per_head_attribution,
+                )
             ))
 
     def _prepare_activations(
@@ -1168,6 +1190,7 @@ class EAPGraph:
         corrupted_input_ids,
         corrupted_attention_mask,
         subject_spans,
+        return_per_head_attribution: bool = False,
         profile = False,
     ):
         stage = "prepare_activations"
@@ -1208,7 +1231,7 @@ class EAPGraph:
         def stat_hook(m, i, o):
             embed_acts.append(o.detach())
         h = embed.register_forward_hook(stat_hook)
-        self.register_forward_hooks()
+        self.register_forward_hooks(return_per_head_attribution=return_per_head_attribution)
         with torch.no_grad():
             clean_logits = self.model(input_ids, use_cache=False).logits
             clean_acts = self.activations.copy()
@@ -1219,7 +1242,7 @@ class EAPGraph:
         if not use_subject_noise_baseline:
             embed_acts = []
             h = embed.register_forward_hook(stat_hook)
-            self.register_forward_hooks()
+            self.register_forward_hooks(return_per_head_attribution=return_per_head_attribution)
             with torch.no_grad():
                 corrupted_logits = self.model(corrupted_input_ids, use_cache=False).logits
                 corrupt_acts = self.activations.copy()
@@ -1241,7 +1264,7 @@ class EAPGraph:
                 return corrupted_wte
 
             h = embed.register_forward_hook(noisy_embed_hook)
-            self.register_forward_hooks()
+            self.register_forward_hooks(return_per_head_attribution=return_per_head_attribution)
             with torch.no_grad():
                 corrupted_logits = self.model(input_ids, use_cache=False).logits
                 corrupt_acts = self.activations.copy()
@@ -1278,7 +1301,7 @@ class EAPGraph:
             "activation_differences": activation_differences,
         }
 
-    def _compute_gradients(self, input_ids, input_length, clean_wte, corrupted_wte, metric_fn: Callable, reference_logits, steps: int, profile = False):
+    def _compute_gradients(self, input_ids, input_length, clean_wte, corrupted_wte, metric_fn: Callable, reference_logits, steps: int, return_per_head_attribution: bool = False, profile = False):
         phase_start = self.profiler.begin(profile, reset_peak=True)
         
         _, embed = self._get_layer_components(0)
@@ -1289,7 +1312,7 @@ class EAPGraph:
 
             self.reset_hooks()
             self.model.zero_grad()
-            self.register_backward_hooks()
+            self.register_backward_hooks(return_per_head_attribution=return_per_head_attribution)
 
             def interpolation_hook(module, input, output):
                 interpolated = corrupted_wte + (step / steps) * (clean_wte - corrupted_wte)
@@ -1333,6 +1356,7 @@ class EAPGraph:
         corrupted_attention_mask,
         subject_spans,
         metric_fn: Callable,
+        return_per_head_attribution: bool = False,
         profile = False,
     ):
         prepared = self._prepare_activations(
@@ -1341,6 +1365,7 @@ class EAPGraph:
             corrupted_input_ids,
             corrupted_attention_mask,
             subject_spans,
+            return_per_head_attribution=return_per_head_attribution,
             profile=profile,
         )
         gradients = self._compute_gradients(
@@ -1351,6 +1376,7 @@ class EAPGraph:
             metric_fn,
             prepared["corrupted_logits"],
             steps=1,
+            return_per_head_attribution=return_per_head_attribution,
             profile=profile,
         )
         return prepared["activation_differences"], gradients
@@ -1364,6 +1390,7 @@ class EAPGraph:
         subject_spans,
         metric_fn: Callable,
         steps: int = 30,
+        return_per_head_attribution: bool = False,
         profile = False,
     ):
         if steps <= 0:
@@ -1375,6 +1402,7 @@ class EAPGraph:
             corrupted_input_ids,
             corrupted_attention_mask,
             subject_spans,
+            return_per_head_attribution=return_per_head_attribution,
             profile=profile,
         )
         gradients = self._compute_gradients(
@@ -1385,6 +1413,7 @@ class EAPGraph:
             metric_fn,
             prepared["clean_logits"],
             steps=steps,
+            return_per_head_attribution=return_per_head_attribution,
             profile=profile,
         )
         return prepared["activation_differences"], gradients
@@ -1399,6 +1428,7 @@ class EAPGraph:
         corrupted_attention_mask: Optional[torch.Tensor] = None,
         subject_spans: Optional[list[tuple[int, int]]] = None,
         return_per_token_scores: bool = False,
+        return_per_head_attribution: bool = False,
         profile: bool = False,
     ):
         """
@@ -1412,6 +1442,7 @@ class EAPGraph:
         corrupted_attention_mask: [Batch, Seq] attention mask for corrupted_input_ids.
         subject_spans: Optional[list[tuple[int, int]]] = None,
         return_per_token_scores: bool = False,
+        return_per_head_attribution: if False, aggregate Q/K/V destination attribution over heads to reduce memory.
         profile: if True, print phase runtime and CUDA peak memory.
         """
         self.reset_hooks()
@@ -1427,6 +1458,7 @@ class EAPGraph:
                 corrupted_attention_mask,
                 subject_spans,
                 metric_fn,
+                return_per_head_attribution=return_per_head_attribution,
                 profile=profile,
             )
         else:
@@ -1438,6 +1470,7 @@ class EAPGraph:
                 subject_spans,
                 metric_fn,
                 steps=integrated_gradients,
+                return_per_head_attribution=return_per_head_attribution,
                 profile=profile,
             )
 
@@ -1450,16 +1483,21 @@ class EAPGraph:
         # shape [Batch, Seq, Dest, Src]
         scores = {}
         
+        if not return_per_head_attribution:
+            n_srcs = 1 + self.config["n_layers"] + self.config["n_layers"] # Resid Pre + Attention Output + MLP Output per layer
+        else:
+            n_srcs = 1 + (self.config["n_layers"] * self.config["n_heads"]) + self.config["n_layers"]
+        
         # 1. Source: Resid Pre Layer 0
         d0 = activation_differences[resid_pre_name]
 
         bsz, seq_len, _ = d0.shape
         src_buffer = torch.empty(
-            (bsz, seq_len, self.config["n_src"], self.config["hidden_size"]),
+            (bsz, seq_len, n_srcs, self.config["hidden_size"]),
             device=self.main_device,
             dtype=self.model.dtype,
         )
-        source_names = [None] * self.config["n_src"]
+        source_names = [None] * n_srcs
         curr_src_idx = 0
         def append_source(src_tensor: torch.Tensor, name: str):
             nonlocal curr_src_idx
@@ -1484,7 +1522,14 @@ class EAPGraph:
                     raise ValueError(f"Missing required gradient for {dest_name} to compute attention head scores. Check if backward hooks are registered correctly and gradients are being captured.")
 
                 grad = clean_grads[dest_name].to(self.main_device)
-                score_tensor = torch.einsum("bsid,bshd->bshi", src_view, grad)
+                if not return_per_head_attribution:
+                    if grad.dim() != 3:
+                        raise ValueError(f"Expected aggregated gradient with rank 3 for {dest_name}, got rank {grad.dim()}.")
+                    score_tensor = torch.einsum("bsid,bsd->bsi", src_view, grad)
+                else:
+                    if grad.dim() != 4:
+                        raise ValueError(f"Expected per-head gradient with rank 4 for {dest_name}, got rank {grad.dim()}.")
+                    score_tensor = torch.einsum("bsid,bshd->bshi", src_view, grad)
                 if not return_per_token_scores:
                     score_tensor = score_tensor.sum(dim=(0, 1))
                 scores[dest_name] = score_tensor.detach()
@@ -1494,11 +1539,18 @@ class EAPGraph:
             if res_name not in activation_differences:
                 raise ValueError(f"Missing required activation difference for {res_name} to compute attention output contributions. Check if forward hooks are registered correctly and activations are being captured.")
             res_diff = activation_differences[res_name]
-            n_new = res_diff.shape[2]
-            src_buffer[:, :, curr_src_idx:curr_src_idx + n_new, :].copy_(res_diff.to(self.main_device))
-            for h_idx in range(n_new):
-                source_names[curr_src_idx + h_idx] = f"blocks.{layer}.attn.hook_result[{h_idx}]"
-            curr_src_idx += n_new
+            if not return_per_head_attribution:
+                if res_diff.dim() != 3:
+                    raise ValueError(f"Expected aggregated activation difference with rank 3 for {res_name}, got rank {res_diff.dim()}.")
+                append_source(res_diff, f"blocks.{layer}.attn.hook_result")
+            else:
+                if res_diff.dim() != 4:
+                    raise ValueError(f"Expected per-head activation difference with rank 4 for {res_name}, got rank {res_diff.dim()}.")
+                n_new = res_diff.shape[2]
+                src_buffer[:, :, curr_src_idx:curr_src_idx + n_new, :].copy_(res_diff.to(self.main_device))
+                for h_idx in range(n_new):
+                    source_names[curr_src_idx + h_idx] = f"blocks.{layer}.attn.hook_result[{h_idx}]"
+                curr_src_idx += n_new
 
             # 4. MLP Attribution: Score S -> MLP
             src_view = src_buffer[:, :, :curr_src_idx, :]
@@ -1532,16 +1584,21 @@ class EAPGraph:
         
         scores["source_names"] = source_names
         
+        if curr_src_idx != n_srcs:
+            raise ValueError(f"Unexpected number of sources: {curr_src_idx} (max_sources={n_srcs}). Check if all expected activation differences were computed and appended correctly.")
+
+        self.reset_hooks()
+
         self.profiler.end(profile, phase_start, "scoring", report_peak=True)
-
-        if curr_src_idx != self.config["n_src"]:
-            raise ValueError(f"Unexpected number of sources: {curr_src_idx} (max_sources={self.config['n_src']}). Check if all expected activation differences were computed and appended correctly.")
-
         return scores
     
 # %%
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+
+    logger = logging.getLogger(__name__)
+
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
     
@@ -1556,7 +1613,7 @@ if __name__ == "__main__":
     model_id = "Qwen/Qwen3-4B-Instruct-2507"
     chat_format = True
     
-    print(f"Loading {model_id}...")
+    logger.info(f"Loading {model_id}...")
     
     model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", dtype=dtype)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -1566,6 +1623,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     profile = True
     use_subject_noise_baseline = True
+    return_per_head_attribution = True
     return_per_token_scores = True
     
     # If an `eap` instance exists from a previous run, reset its hooks
@@ -1575,7 +1633,7 @@ if __name__ == "__main__":
             existing = globals().get("eap")
             if existing is not None:
                 existing.reset_hooks()
-                print("Existing EAP instance hooks reset.")
+                logger.debug("Existing EAP instance hooks reset.")
         except Exception:
             pass
 
@@ -1602,8 +1660,8 @@ if __name__ == "__main__":
     input_ids = clean["input_ids"]
     attention_mask = clean["attention_mask"]
     
-    print(f"Computing attributions. input_ids shape: {input_ids.shape}")
-    print("Formatted prompts:\n", formatted_prompts[0])
+    logger.info(f"Computing attributions. input_ids shape: {input_ids.shape}")
+    logger.info(f"Formatted prompts:\n{formatted_prompts[0]}")
 
     kl_div_metric = get_kl_div_metric()
     
@@ -1613,12 +1671,12 @@ if __name__ == "__main__":
         corrupted_input_ids = corrupted["input_ids"]
         corrupted_attention_mask = corrupted["attention_mask"]
         
-        print("Corrupted prompts:\n", corrupted_formatted_prompts[0])
+        logger.info(f"Corrupted prompts:\n{corrupted_formatted_prompts[0]}")
         
-        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, corrupted_attention_mask=corrupted_attention_mask, integrated_gradients=5, return_per_token_scores=return_per_token_scores, profile=profile)
+        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=corrupted_input_ids, corrupted_attention_mask=corrupted_attention_mask, integrated_gradients=5, return_per_head_attribution=return_per_head_attribution, return_per_token_scores=return_per_token_scores, profile=profile)
     elif use_subject_noise_baseline:
-        print("Using subject noise baseline...")
-        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=None, corrupted_attention_mask=None, subject_spans=subject_spans, integrated_gradients=5, return_per_token_scores=return_per_token_scores, profile=profile)
+        logger.info("Using subject noise baseline...")
+        results = eap.attribute(input_ids, attention_mask, kl_div_metric, corrupted_input_ids=None, corrupted_attention_mask=None, subject_spans=subject_spans, integrated_gradients=5, return_per_head_attribution=return_per_head_attribution, return_per_token_scores=return_per_token_scores, profile=profile)
     
 # %%
 
@@ -1628,7 +1686,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         generated = model.generate(input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=20)
     
-    print("Generated output:\n", tokenizer.decode(generated[0]))
+    logger.info(f"Generated output:\n{tokenizer.decode(generated[0])}")
 
 # %%
 
@@ -1657,13 +1715,13 @@ if __name__ == "__main__":
         top_mlp_hubs_by_token_sample = find_top_mlp_hubs_by_token_sample(results, token_level_n=5)
         profiler.end(enabled=profile, start_time=token_sample_start, stage_name="find_top_mlp_hubs_by_token_sample", report_peak=True)
     
-    print("Top MLP hubs by aggregation:\n", json.dumps(top_mlp_hubs_aggregated, indent=4))
+    logger.info(f"Top MLP hubs by aggregation:\n{json.dumps(top_mlp_hubs_aggregated, indent=4)}")
     
     if return_per_token_scores:
-        print("Top MLP hubs by sample:\n", json.dumps(top_mlp_hubs_by_sample, indent=4))
-        print("Top MLP hubs by token and sample:\n", json.dumps(top_mlp_hubs_by_token_sample, indent=4))
+        logger.info(f"Top MLP hubs by sample:\n{json.dumps(top_mlp_hubs_by_sample, indent=4)}")
+        logger.info(f"Top MLP hubs by token and sample:\n{json.dumps(top_mlp_hubs_by_token_sample, indent=4)}")
         start = 32
-        print("Top token:\n", tokenizer.decode(input_ids[0][start:]))
+        logger.info(f"Top token:\n{tokenizer.decode(input_ids[0][start:])}")
 
  # %%
 
@@ -1684,11 +1742,11 @@ if __name__ == "__main__":
         top_token_hubs_by_sample = find_top_hubs_by_token_sample(results, token_level_n=5)
         profiler.end(enabled=profile, start_time=token_sample_start, stage_name="find_top_hubs_by_token_sample", report_peak=True)
         
-    print("Top hubs by aggregation:\n", json.dumps(top_hubs_aggregated, indent=4))
+    logger.info(f"Top hubs by aggregation:\n{json.dumps(top_hubs_aggregated, indent=4)}")
     
     if return_per_token_scores:
-        print("Top hubs by sample:\n", json.dumps(top_hubs_by_sample, indent=4))
-        print("Top token hubs by sample:\n", json.dumps(top_token_hubs_by_sample, indent=4))
+        logger.info(f"Top hubs by sample:\n{json.dumps(top_hubs_by_sample, indent=4)}")
+        logger.info(f"Top token hubs by sample:\n{json.dumps(top_token_hubs_by_sample, indent=4)}")
 
 # %%
 
@@ -1709,10 +1767,10 @@ if __name__ == "__main__":
         top_edges_by_token_sample = find_top_edges_by_token_sample(results, token_level_n=3)
         profiler.end(enabled=profile, start_time=token_sample_start, stage_name="find_top_edges_by_token_sample", report_peak=True)
     
-    print("Top edges by aggregation:\n", json.dumps(top_edges_aggregated, indent=4))
+    logger.info(f"Top edges by aggregation:\n{json.dumps(top_edges_aggregated, indent=4)}")
     
     if return_per_token_scores:
-        print("Top edge by sample:\n", json.dumps(top_edges_by_sample, indent=4))
-        print("Top edges by token and sample:\n", json.dumps(top_edges_by_token_sample, indent=4))
+        logger.info(f"Top edge by sample:\n{json.dumps(top_edges_by_sample, indent=4)}")
+        logger.info(f"Top edges by token and sample:\n{json.dumps(top_edges_by_token_sample, indent=4)}")
 
 # %%
