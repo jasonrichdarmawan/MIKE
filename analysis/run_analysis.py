@@ -14,8 +14,7 @@ Usage:
         [--hparams-alphaedit  EasyEdit/hparams/AlphaEdit/llama3-8b.yaml] \\
         [--hparams-ifmet-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml] \\
         [--hparams-ifmet-deep   EasyEdit/hparams/IFMET/llama3-8b-deep.yaml] \\
-        [--skip-patchscopes] [--max-examples N] [--batch-size 32] \\
-        [--edit-batch-size 4] [--device 0]
+        [--skip-patchscopes] [--max-examples N] [--batch-size 64] [--device 0]
 """
 
 # %%
@@ -345,27 +344,26 @@ def run_alphaedit(args):
     orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
                     for k in weight_names}
 
-    n_batches     = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
+    n_batches     = (len(dataset) + args.batch_size - 1) // args.batch_size
     all_evaluated     = []
     all_sublayer_attn = []
     all_sublayer_mlp  = []
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
 
-    for b, start_idx in enumerate(range(0, len(dataset), args.edit_batch_size)):
-        batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
+    for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
+        batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-        # Edit
-        for i, (_, row) in enumerate(batch_df.iterrows()):
-            requests_item = [
-                {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
-                {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
-            ]
-            hparams.batch_size = len(requests_item)
-            apply_algo(model, tokenizer, requests_item, hparams, copy=False, return_orig_weights=False,
-                       edit_batch_size=args.ae_edit_batch_size)
-            print(f"  Item {i+1}/{len(batch_df)} edited.")
+        # Edit — one apply_algo call for the whole batch so the null-space
+        # projection is estimated over all batch facts at once.
+        batch_requests = []
+        for _, row in batch_df.iterrows():
+            batch_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
+            batch_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+        hparams.batch_size = len(batch_requests)
+        apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
+        print(f"  Batch edited ({len(batch_requests)} requests).")
 
         # Evaluate
         print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
@@ -426,7 +424,7 @@ def run_alphaedit(args):
         print(f"Saved {out_dir / name / 'two_hop.csv'}")
 
     if not args.skip_analysis:
-        analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
+        analysis_subsets = subsets
         save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
                        "sublayer_projection", "attention_projections.csv", ["id", "layer"])
         save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
@@ -482,31 +480,30 @@ def run_ifmet(args):
     orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
                     for k in weight_names}
 
-    n_batches     = (len(dataset) + args.edit_batch_size - 1) // args.edit_batch_size
+    n_batches     = (len(dataset) + args.batch_size - 1) // args.batch_size
     all_evaluated     = []
     all_sublayer_attn = []
     all_sublayer_mlp  = []
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
 
-    for b, start_idx in enumerate(range(0, len(dataset), args.edit_batch_size)):
-        batch_df = dataset.iloc[start_idx:start_idx + args.edit_batch_size].copy()
+    for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
+        batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- IFMET Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-        # Edit
-        for i, (_, row) in enumerate(batch_df.iterrows()):
-            standard_requests_item = [
-                {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
-                {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
-            ]
-            indirect_requests_item = [
-                {"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]},
-            ]
-            hparams_s.batch_size = len(standard_requests_item)
-            apply_algo(model, tokenizer, standard_requests_item, hparams_s, copy=False, return_orig_weights=False)
-            hparams_d.batch_size = len(indirect_requests_item)
-            apply_algo(model, tokenizer, indirect_requests_item, hparams_d, copy=False, return_orig_weights=False)
-            print(f"  Item {i+1}/{len(batch_df)} edited.")
+        # Edit — collect all requests for the batch, then call apply_algo once
+        # per phase so the null-space projection covers all batch facts.
+        standard_requests = []
+        indirect_requests = []
+        for _, row in batch_df.iterrows():
+            standard_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
+            standard_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+            indirect_requests.append({"prompt": row["source_prompt"], "subject": row["source_prompt"], "target_new": row["e3_label"]})
+        hparams_s.batch_size = len(standard_requests)
+        apply_algo(model, tokenizer, standard_requests, hparams_s, copy=False, return_orig_weights=False)
+        hparams_d.batch_size = len(indirect_requests)
+        apply_algo(model, tokenizer, indirect_requests, hparams_d, copy=False, return_orig_weights=False)
+        print(f"  Batch edited ({len(standard_requests)} standard + {len(indirect_requests)} indirect requests).")
 
         # Evaluate
         print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
@@ -567,7 +564,7 @@ def run_ifmet(args):
         print(f"Saved {out_dir / name / 'two_hop.csv'}")
 
     if not args.skip_analysis:
-        analysis_subsets = {k: v for k, v in subsets.items() if k not in ("still_inconsistent", "broken_hops")}
+        analysis_subsets = subsets
         save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
                        "sublayer_projection", "attention_projections.csv", ["id", "layer"])
         save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
@@ -637,12 +634,8 @@ if __name__ == "__main__":
                         help="Skip PatchScopes (method 4) to save time")
     parser.add_argument("--force", action="store_true",
                         help="Rerun and overwrite all existing outputs (ignore checkpoints and cached files)")
-    parser.add_argument("--batch-size",        type=int, default=64)
-    parser.add_argument("--edit-batch-size",   type=int, default=8,
-                        help="Facts per IFMET editing batch (outer loop batch size)")
-    parser.add_argument("--ae-edit-batch-size", type=int, default=8,
-                        help="AlphaEdit internal z-vector batch size (controls compute_z_batched; "
-                             "~10 safe on A100 40GB with Llama-3-8B)")
+    parser.add_argument("--batch-size",        type=int, default=128,
+                        help="Batch size for both inference (eval/analysis) and edit→analyze→restore cycles")
     parser.add_argument("--device",          type=int, default=0)
 
     main(parser.parse_args())
