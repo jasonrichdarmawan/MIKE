@@ -14,7 +14,8 @@ Usage:
         [--hparams-alphaedit  EasyEdit/hparams/AlphaEdit/llama3-8b.yaml] \\
         [--hparams-ifmet-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml] \\
         [--hparams-ifmet-deep   EasyEdit/hparams/IFMET/llama3-8b-deep.yaml] \\
-        [--skip-patchscopes] [--max-examples N] [--batch-size 64] [--device 0]
+        [--skip-patchscopes] [--max-examples N] [--batch-size 128] \\
+        [--eap-top-k 5] [--eap-batch-size 16] [--eap-samples N] [--device 0]
 """
 
 # %%
@@ -444,6 +445,185 @@ def run_alphaedit(args):
           f"still_incorrect:{out_dir}/still_incorrect")
 
 
+def run_eap_alphaedit(args):
+    """AlphaEdit with layers chosen by EAP attribution on the incorrect dataset."""
+    data_dir      = Path(args.data_dir)
+    incorrect_dir = data_dir / "composition_incorrect"
+    out_dir       = data_dir / "composition_incorrect_eap_alphaedit"
+    device        = f"cuda:{args.device}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Loading model {args.model} ...")
+    model     = load_model(args.model)
+    model.eval()
+    tokenizer = load_tokenizer(args.model)
+
+    from EasyEdit.easyeditor import AlphaEditHyperParams
+    from EasyEdit.easyeditor.util import nethook
+    from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
+    from transformers_eap import EAPGraph
+    from transformers_eap.eap_graph import get_nll_metric
+
+    hparams    = AlphaEditHyperParams.from_hparams(args.hparams_alphaedit)
+    apply_algo = ALG_DICT["AlphaEdit"]
+
+    dataset = pd.read_csv(str(incorrect_dir / "two_hop.csv"), index_col=0)
+    dataset = filter_multi_target(dataset, log_path=incorrect_dir / "filtered_multi_target.csv")
+    if args.max_examples:
+        dataset = dataset.head(args.max_examples)
+    dataset["e2_answers"] = dataset.apply(lambda r: get_answers(r, "e2")["e2_answers"], axis=1)
+    dataset["e3_answers"] = dataset.apply(lambda r: get_answers(r, "e3")["e3_answers"], axis=1)
+
+    # ── EAP: identify top-k MLP layers ──────────────────────────────────────
+    print(f"\n[EAP] Identifying top-{args.eap_top_k} MLP layers on r1+r2 prompts ...")
+    eap_data = dataset.head(args.eap_samples) if args.eap_samples else dataset
+    n_layers = model.config.num_hidden_layers
+    accumulated = torch.zeros(n_layers, device=device)
+
+    eap = EAPGraph(model)
+    for start in range(0, len(eap_data), args.eap_batch_size):
+        batch = eap_data.iloc[start:start + args.eap_batch_size]
+
+        # Build r1 and r2 prompts together
+        prompts, ans_labels = [], []
+        for _, row in batch.iterrows():
+            prompts.append(row["r1_template"].replace("{}", row["e1_label"]))
+            ans_labels.append(row["e2_label"])
+            prompts.append(row["r2_template"].replace("{}", row["e2_label"]))
+            ans_labels.append(row["e3_label"])
+
+        enc = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
+        ans_ids = torch.tensor([
+            tokenizer(lbl, add_special_tokens=False)["input_ids"][0]
+            for lbl in ans_labels
+        ], device=device)
+
+        with torch.enable_grad():
+            scores = eap.attribute(
+                enc["input_ids"], enc["attention_mask"],
+                metric_fn=get_nll_metric(ans_ids),
+                return_per_token_scores=False,
+                return_per_head_attribution=False,
+            )
+        eap.reset_hooks()
+
+        for l in range(n_layers):
+            key = f"blocks.{l}.hook_mlp_in"
+            if key in scores and isinstance(scores[key], torch.Tensor):
+                accumulated[l] += scores[key].abs().sum().detach()
+
+    top_layers = accumulated.topk(args.eap_top_k).indices.tolist()
+    top_layers.sort()
+    print(f"[EAP] Top-{args.eap_top_k} layers: {top_layers}")
+    hparams.layers = top_layers
+    torch.cuda.empty_cache()
+    # ────────────────────────────────────────────────────────────────────────
+
+    weight_names = [
+        f"{hparams.rewrite_module_tmp.format(layer)}.weight"
+        for layer in hparams.layers
+    ]
+    orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
+                    for k in weight_names}
+
+    n_batches         = (len(dataset) + args.batch_size - 1) // args.batch_size
+    all_evaluated     = []
+    all_sublayer_attn = []
+    all_sublayer_mlp  = []
+    all_knockout      = []
+    all_patch         = {source: [] for source in ["e1", "last"]}
+
+    for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
+        batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
+        print(f"\n--- EAP-AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+
+        batch_requests = []
+        for _, row in batch_df.iterrows():
+            batch_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
+            batch_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+        hparams.batch_size = len(batch_requests)
+        apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
+        print(f"  Batch edited ({len(batch_requests)} requests, layers={top_layers}).")
+
+        # Evaluate
+        print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
+        fn_kwargs = {"model": model, "tokenizer": tokenizer}
+        hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
+        hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        all_evaluated.append(hf_b.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True))
+
+        # Analyze
+        if not args.skip_analysis:
+            hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+            print(f"  [Phase: Sublayer-Attn] Batch {b+1}/{n_batches}")
+            all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
+                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Sublayer-MLP] Batch {b+1}/{n_batches}")
+            all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
+                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Knockout] Batch {b+1}/{n_batches}")
+            all_knockout.append(hf_analysis.map(
+                generate_answer_with_attention_knockout,
+                fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
+                           "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
+            if not args.skip_patchscopes:
+                print(f"  [Phase: PatchScopes] Batch {b+1}/{n_batches}")
+                batch_ps = batch_df.copy()
+                batch_ps["target_prompt"] = TARGET_PROMPT
+                hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
+                for source in ["e1", "last"]:
+                    all_patch[source].append(hf_ps.map(
+                        generate_entity_description_with_patching,
+                        fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
+                        batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+
+        # Restore
+        print(f"  [Phase: Restore] Batch {b+1}/{n_batches}")
+        with torch.no_grad():
+            for k, v in orig_weights.items():
+                nethook.get_parameter(model, k)[...] = v.to(device)
+        torch.cuda.empty_cache()
+        print(f"  Weights restored to original.")
+
+    evaluated_path = out_dir / "evaluated_two_hop.csv"
+    evaluated = pd.concat(all_evaluated).reset_index(drop=True)
+    evaluated.to_csv(evaluated_path)
+    print(f"Saved {evaluated_path}")
+
+    subsets = split_subsets(evaluated)
+    for name, df in subsets.items():
+        (out_dir / name).mkdir(parents=True, exist_ok=True)
+        df.to_csv(out_dir / name / "two_hop.csv")
+        print(f"Saved {out_dir / name / 'two_hop.csv'}")
+
+    if not args.skip_analysis:
+        analysis_subsets = subsets
+        save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
+                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
+        save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
+                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
+        save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
+                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+        if not args.skip_patchscopes:
+            for source in ["e1", "last"]:
+                if all_patch[source]:
+                    save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
+                                   "entity_description", f"{source}_entity_description_s0.csv",
+                                   ["id", "source_layer", "target_layer"])
+
+    print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
+          f"pre-edit:{data_dir}/composition_incorrect "
+          f"now_correct:{out_dir}/now_correct "
+          f"still_incorrect:{out_dir}/still_incorrect")
+
+
 def run_ifmet(args):
     data_dir      = Path(args.data_dir)
     incorrect_dir = data_dir / "composition_incorrect"
@@ -598,6 +778,8 @@ def main(args):
             run_alphaedit(args)
         elif method == "ifmet":
             run_ifmet(args)
+        elif method == "eap_alphaedit":
+            run_eap_alphaedit(args)
         else:
             print(f"[SKIP] Unknown method: {method}")
 
@@ -609,7 +791,7 @@ if __name__ == "__main__":
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model",    default="meta-llama/Meta-Llama-3-8B")
     parser.add_argument("--methods",  nargs="+", default=["preedit", "alphaedit", "ifmet"],
-                        choices=["preedit", "alphaedit", "ifmet"],
+                        choices=["preedit", "alphaedit", "ifmet", "eap_alphaedit"],
                         help="Which methods to run (default: all three)")
     parser.add_argument("--input",    default="datasets/two_hop.csv",
                         help="Raw two_hop.csv for pre-edit evaluation")
@@ -636,6 +818,12 @@ if __name__ == "__main__":
                         help="Rerun and overwrite all existing outputs (ignore checkpoints and cached files)")
     parser.add_argument("--batch-size",        type=int, default=128,
                         help="Batch size for both inference (eval/analysis) and edit→analyze→restore cycles")
+    parser.add_argument("--eap-top-k",        type=int, default=5,
+                        help="Number of top MLP layers to select via EAP for eap_alphaedit")
+    parser.add_argument("--eap-batch-size",   type=int, default=16,
+                        help="Batch size for EAP attribution (smaller than batch-size due to gradient memory)")
+    parser.add_argument("--eap-samples",      type=int, default=None,
+                        help="Number of incorrect examples to run EAP on (default: all)")
     parser.add_argument("--device",          type=int, default=0)
 
     main(parser.parse_args())
