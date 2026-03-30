@@ -127,31 +127,32 @@ Rules:
 
     # Call the API (Using JSON mode if the model supports it)
     for attempt in range(1, max_retries + 1):
-        response = client.chat.completions.create(
-            model=deployment_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                
-                # OPTIONAL: Add a 1-shot example if the model fails to follow instructions
-                {"role": "user", "content": json.dumps({
-                    "answer": "United Kingdom", 
-                    "answer_alias": ["Britain", "UK", "GBR", "Great Britain", "The UK", "🇬🇧"],
-                    "cloze_question": "Fernando Santos is a citizen of"
-                }, ensure_ascii=False)},
-                {"role": "assistant", "content": json.dumps({
-                    "answer": "イギリス", 
-                    "answer_alias": ["英国", "グレートブリテン", "連合王国", "イギリス連合王国", "🇬🇧"],
-                    "cloze_question": "フェルナンド・サントスが市民権を有する国は"
-                }, ensure_ascii=False)},
-                
-                {"role": "user", "content": json.dumps(input_json, ensure_ascii=False)}
-            ],
-            temperature=0.3, # Lower temperature for translation
-            
-            # OPTIONAL: Forces the model to return valid JSON
-            # Comment out if the model fails to return valid JSON because it conflicts with the Guided Decoding or the JSON schema enforcer
-            # response_format={"type": "json_object"}
-        )
+        try:
+            response = client.chat.completions.create(
+                model=deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    
+                    # OPTIONAL: Add a 1-shot example if the model fails to follow instructions
+                    {"role": "user", "content": json.dumps({
+                        "answer": "United Kingdom", 
+                        "answer_alias": ["Britain", "UK", "GBR", "Great Britain", "The UK", "🇬🇧"],
+                        "cloze_question": "Fernando Santos is a citizen of"
+                    }, ensure_ascii=False)},
+                    {"role": "assistant", "content": json.dumps({
+                        "answer": "イギリス", 
+                        "answer_alias": ["英国", "グレートブリテン", "連合王国", "イギリス連合王国", "🇬🇧"],
+                        "cloze_question": "フェルナンド・サントスが市民権を有する国は"
+                    }, ensure_ascii=False)},
+                    
+                    {"role": "user", "content": json.dumps(input_json, ensure_ascii=False)}
+                ],
+                temperature=0.3,
+            )
+        except Exception as e:
+            tqdm.write(f"API error for lang_code={lang_code} (attempt {attempt}/{max_retries}): {e}")
+            import time; time.sleep(30)
+            continue
 
         content = response.choices[0].message.content
         translated_json = parse_model_json(content)
@@ -201,7 +202,8 @@ target_case_ids = list(range(start, stop + 1))
 
 missing_case_ids = [case_id for case_id in target_case_ids if case_id not in case_index]
 if missing_case_ids:
-    raise ValueError(f"case_id(s) not found in dataset: {missing_case_ids}")
+    print(f"Skipping missing case_id(s): {missing_case_ids}")
+    target_case_ids = [cid for cid in target_case_ids if cid in case_index]
 
 jobs = [
     (case_id, language)
