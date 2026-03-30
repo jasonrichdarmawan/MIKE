@@ -309,11 +309,13 @@ Note: [legacy-datasets/wikipedia](https://huggingface.co/datasets/legacy-dataset
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   python -m EasyEdit.easyeditor.models.rome.layer_stats \
   --model_name Qwen/Qwen3-4B-Instruct-2507 \
+  --apply_chat_template \
   --dataset wikipedia \
   --layers 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35 \
   --layer_tmp model.layers.{layer_num}.mlp.down_proj \
   --to_collect mom2 \
-  --sample_size 100 \
+  --sample_size 100000 \
+  --batch_size 1 \
   --batch_tokens 4096 \
   --precision float32 \
   --stats_dir data/stats
