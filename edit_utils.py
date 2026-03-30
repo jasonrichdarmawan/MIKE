@@ -490,7 +490,8 @@ def edit(model, tokenizer, edit_item, hparams,alg_name,apply_algo,test_generatio
     start = time()
     requests = edit_item['requested_rewrite']
     for i in requests:
-        i['target_new'] = i['target_new']['str']
+        if isinstance(i["target_new"], dict):
+            i['target_new'] = i['target_new']['str']
     hparams.batch_size = len(requests)
     edited_model, weights_copy = apply_algo(
         model,
@@ -523,6 +524,7 @@ def edit(model, tokenizer, edit_item, hparams,alg_name,apply_algo,test_generatio
             for k, v in weights_copy.items():
                 nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
     return edited_model, metrics
+
 def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,test_generation=False):
     # all_metrics = []
     start = time()

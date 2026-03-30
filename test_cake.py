@@ -1,11 +1,19 @@
-from EasyEdit.easyeditor import MEMITHyperParams,LoRAHyperParams,WISEHyperParams, ROMEHyperParams
+# %%
+
+from EasyEdit.easyeditor import (
+    MEMITHyperParams, LoRAHyperParams, WISEHyperParams, ROMEHyperParams,
+)
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
 from tqdm import tqdm
-from edit_utils import edit, edit_ifmet, edit_mello, edit_rome, cake, edit_wise, get_sent_embeddings
+from edit_utils import (
+    edit, edit_ifmet, edit_mello, edit_rome, cake, edit_wise, get_sent_embeddings,
+)
 from EasyEdit.easyeditor.util.alg_dict import *
 import torch
 import os
+
+# %%
 
 def calculate_averages(data):
     """
@@ -44,6 +52,13 @@ def calculate_averages(data):
         "accuracy_averages": f"{accuracy_avg:.3f}"
     }
 
+# %%
+
+if __name__ == "__main__":
+    import sys
+    sys.argv = ["", "--editing_method", "MEMIT-CLKE", "--model_type", "qwen3-4b-instruct",
+                "--datatype", "MQuAKE-CF-3k-v2-clke"]
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--editing_method', required=True, type=str)
@@ -52,40 +67,51 @@ if __name__ == "__main__":
     parser.add_argument('--model_type', default=None,type=str)
     args = parser.parse_args()
 
-    if args.editing_method == 'MEMIT' or args.editing_method == 'IFMET':
+    if args.editing_method in ['MEMIT', 'MEMIT-CLKE', 'IFMET']:
         editing_hparams = MEMITHyperParams
-    elif args.editing_method == 'LoRA':
+    elif args.editing_method in ['LoRA', 'CAKE', 'Mello']:
         editing_hparams = LoRAHyperParams
     elif args.editing_method == 'WISE':
         editing_hparams = WISEHyperParams
     elif args.editing_method == 'ROME':
         editing_hparams = ROMEHyperParams
     else:
-        editing_hparams = LoRAHyperParams
-    if args.editing_method == 'CAKE' or args.editing_method == 'Mello':
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
-    elif args.editing_method == 'IFMET':
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-shallow.yaml')
-        hparams_s=hparams
-        hparams_d=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-deeper.yaml')
-    else:
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}.yaml')
+        raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
+    if args.editing_method in ['LoRA', 'CAKE', 'Mello']:
+        hparams = editing_hparams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
+    elif args.editing_method == 'IFMET':
+        hparams = editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-shallow.yaml')
+        hparams_s = hparams
+        hparams_d = editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-deeper.yaml')
+    else:
+        hparams = editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}.yaml')
+    
+    # In-Context Learning Editing Methods (e.g., Mello)
     if args.editing_method != 'Mello':
         alg_name = hparams.alg_name
         apply_algo = ALG_DICT[alg_name]
+        
+# %%
 
-    MODEL_PATH = hparams.model_name
+if __name__ == "__main__":
     if args.editing_method == 'CAKE':
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16)
+        dtype = torch.bfloat16
     else:
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.float32)
-    # 添加FFN层的LoRA配置
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, use_fast=False)
-    tokenizer.pad_token = tokenizer.eos_token
+        dtype = torch.float32
+    
+    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="auto", torch_dtype=dtype)
+    tokenizer = AutoTokenizer.from_pretrained(hparams.model_name)
+    
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        
+# %%
 
+if __name__ == "__main__":
     import json
-    data = json.load(open(f'./datasets/{args.datatype}-cake.json','r'))
+    
+    data = json.load(open(f'./datasets/{args.datatype}.json','r'))
     if args.editing_method == 'WISE':
         loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
         loc_data = loc_data[:7000]
@@ -103,23 +129,34 @@ if __name__ == "__main__":
         new_facts = list(new_facts)
         embs = get_sent_embeddings(new_facts, contriever, contriever_tokenizer, hparams.device)
 
+# %%
+
+if __name__ == "__main__":
     all_metrics = []
-    for item in tqdm(data[:2]):
+    
+    for items in tqdm(data[:2]):
         if args.editing_method == 'CAKE':
-            model, metrics = cake(model, tokenizer, item, hparams, test_generation=False)
+            model, metrics = cake(model, tokenizer, items, hparams, test_generation=False)
         elif args.editing_method == 'WISE':
-            metrics, loc_index = edit_wise(model, tokenizer, item, hparams, loc_data, loc_index, apply_algo, test_generation=False)
+            metrics, loc_index = edit_wise(model, tokenizer, items, hparams, loc_data, loc_index, apply_algo, test_generation=False)
         elif args.editing_method == 'Mello':
-            metrics = edit_mello(model, task_prompt, stop, tokenizer, item, hparams, contriever, contriever_tokenizer, embs, test_generation=False)
+            metrics = edit_mello(model, task_prompt, stop, tokenizer, items, hparams, contriever, contriever_tokenizer, embs, test_generation=False)
         elif args.editing_method == 'IFMET':
-            model, metrics = edit_ifmet(model, tokenizer, item, hparams_s, hparams_d, apply_algo, test_generation=False)
+            model, metrics = edit_ifmet(model, tokenizer, items, hparams_s, hparams_d, apply_algo, test_generation=False)
         elif args.editing_method == 'ROME':
-            model, metrics = edit_rome(model, tokenizer, item, hparams, apply_algo, test_generation=False)
+            model, metrics = edit_rome(model, tokenizer, items, hparams, apply_algo, test_generation=False)
         else:
-            model, metrics = edit(model, tokenizer, item, hparams, alg_name, apply_algo, test_generation=False)
+            model, metrics = edit(model, tokenizer, items, hparams, alg_name, apply_algo, test_generation=False)
         print(metrics)
         all_metrics.append(metrics)
+    
     res = calculate_averages(all_metrics)
+    
+# %%
+
+if __name__ == "__main__":
     os.makedirs(args.metrics_save_dir, exist_ok=True)
     json.dump(all_metrics, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_metrics.json','w'), indent=4)
     json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_res.json','w'), indent=4)
+
+# %%

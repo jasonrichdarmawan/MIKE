@@ -1665,7 +1665,6 @@ if __name__ == "__main__":
 
     logger = logging.getLogger(__name__)
 
-    
     dtype = torch.bfloat16
     
     # Example Usage
@@ -1688,7 +1687,7 @@ if __name__ == "__main__":
     
     profile = True
     use_subject_noise_baseline = True
-    return_per_head_attribution = True
+    return_per_head_attribution = False
     return_per_token_scores = True
     
     # If an `eap` instance exists from a previous run, reset its hooks
@@ -1747,16 +1746,12 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     input_ids = input_ids.to(model.device)
+    attention_mask = attention_mask.to(model.device)
     
     with torch.no_grad():
         generated = model.generate(input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=20)
     
     logger.info(f"Generated output:\n{tokenizer.decode(generated[0])}")
-
-# %%
-
-if __name__ == "__main__":
-    profiler = ProfileTracker(model.device)
 
 # %% 
 # Structured analysis outputs for downstream fine-tuning decisions
@@ -1764,6 +1759,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     import json
     
+    profiler = ProfileTracker(model.device)
     if profile:
         profiler.reset_header()
     
