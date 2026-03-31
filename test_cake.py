@@ -2,6 +2,7 @@
 
 from EasyEdit.easyeditor import (
     MEMITHyperParams, LoRAHyperParams, WISEHyperParams, ROMEHyperParams,
+    AlphaEditHyperParams, AlphaEditCircuitHyperParams
 )
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
@@ -55,9 +56,15 @@ def calculate_averages(data):
 # %%
 
 if __name__ == "__main__":
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     import sys
-    sys.argv = ["", "--editing_method", "MEMIT-CLKE", "--model_type", "qwen3-4b-instruct",
-                "--datatype", "MQuAKE-CF-3k-v2-clke"]
+    sys.argv = ["", 
+                "--editing_method", "AlphaEdit_Circuit", 
+                "--model_type", "llama3-8b",
+                "--dtype", "bfloat16",
+                "--datatype", "MQuAKE-CF-3k-v2-clke",
+                "--sequential_editing"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -65,9 +72,11 @@ if __name__ == "__main__":
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     parser.add_argument('--datatype', default=None,type=str)
     parser.add_argument('--model_type', default=None,type=str)
+    parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
+    parser.add_argument('--sequential_editing', action='store_true')
     args = parser.parse_args()
 
-    if args.editing_method in ['MEMIT', 'MEMIT-CLKE', 'IFMET']:
+    if args.editing_method in ['MEMIT', 'IFMET']:
         editing_hparams = MEMITHyperParams
     elif args.editing_method in ['LoRA', 'CAKE', 'Mello']:
         editing_hparams = LoRAHyperParams
@@ -75,6 +84,10 @@ if __name__ == "__main__":
         editing_hparams = WISEHyperParams
     elif args.editing_method == 'ROME':
         editing_hparams = ROMEHyperParams
+    elif args.editing_method == "AlphaEdit":
+        editing_hparams = AlphaEditHyperParams
+    elif args.editing_method == "AlphaEdit_Circuit":
+        editing_hparams = AlphaEditCircuitHyperParams
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
@@ -95,12 +108,8 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    if args.editing_method == 'CAKE':
-        dtype = torch.bfloat16
-    else:
-        dtype = torch.float32
-    
-    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="auto", torch_dtype=dtype)
+    dtype = getattr(torch, args.dtype)
+    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="cuda", dtype=dtype)
     tokenizer = AutoTokenizer.from_pretrained(hparams.model_name)
     
     if tokenizer.pad_token is None:
@@ -136,17 +145,17 @@ if __name__ == "__main__":
     
     for items in tqdm(data[:2]):
         if args.editing_method == 'CAKE':
-            model, metrics = cake(model, tokenizer, items, hparams, test_generation=False)
+            model, metrics = cake(model, tokenizer, items, hparams, restore_weights=args.sequential_editing, test_generation=False)
         elif args.editing_method == 'WISE':
-            metrics, loc_index = edit_wise(model, tokenizer, items, hparams, loc_data, loc_index, apply_algo, test_generation=False)
+            metrics, loc_index = edit_wise(model, tokenizer, items, hparams, loc_data, loc_index, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
         elif args.editing_method == 'Mello':
             metrics = edit_mello(model, task_prompt, stop, tokenizer, items, hparams, contriever, contriever_tokenizer, embs, test_generation=False)
         elif args.editing_method == 'IFMET':
-            model, metrics = edit_ifmet(model, tokenizer, items, hparams_s, hparams_d, apply_algo, test_generation=False)
+            model, metrics = edit_ifmet(model, tokenizer, items, hparams_s, hparams_d, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
         elif args.editing_method == 'ROME':
-            model, metrics = edit_rome(model, tokenizer, items, hparams, apply_algo, test_generation=False)
+            model, metrics = edit_rome(model, tokenizer, items, hparams, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
         else:
-            model, metrics = edit(model, tokenizer, items, hparams, alg_name, apply_algo, test_generation=False)
+            model, metrics = edit(model, tokenizer, items, hparams, alg_name, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
         print(metrics)
         all_metrics.append(metrics)
     

@@ -316,7 +316,6 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --to_collect mom2 \
   --sample_size 100000 \
   --batch_size 1 \
-  --batch_tokens 4096 \
   --precision float32 \
   --stats_dir data/stats
 ```

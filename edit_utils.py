@@ -404,7 +404,7 @@ def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriev
     metrics['accuracy'].append(res)
     return metrics
 
-def cake(original_model, tokenizer, item, hparams, test_generation=False):
+def cake(original_model, tokenizer, item, hparams, restore_weights=True, test_generation=False):
     """
     Caveat: return the base model after editing
     """
@@ -479,13 +479,14 @@ def cake(original_model, tokenizer, item, hparams, test_generation=False):
         "time": exec_time,
         "post": compute_edit_quality(model, tokenizer, item, hparams, test_generation=test_generation),
     }
-    model = model.unload()
-    del model.peft_config
+    if restore_weights:
+        model = model.unload()
+        del model.peft_config
 
     return model, metrics
 
 
-def edit(model, tokenizer, edit_item, hparams,alg_name,apply_algo,test_generation=False):
+def edit(model, tokenizer, edit_item, hparams, alg_name, apply_algo, restore_weights=False, test_generation=False):
     # all_metrics = []
     start = time()
     requests = edit_item['requested_rewrite']
@@ -511,21 +512,24 @@ def edit(model, tokenizer, edit_item, hparams,alg_name,apply_algo,test_generatio
         "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams, test_generation=test_generation),
     }
     # chunk_metrics.append(metrics)
-    if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
-        with torch.no_grad():
-            weights_copy()
-    elif alg_name == 'LoRA' or alg_name == 'QLoRA' or alg_name == 'DPO':
-        edited_model=edited_model.unload()
-        del edited_model.peft_config
-    elif alg_name == 'MELO':
-        model = edited_model
-    else:
-        with torch.no_grad():
-            for k, v in weights_copy.items():
-                nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
+    if restore_weights:
+        if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
+            with torch.no_grad():
+                weights_copy()
+        elif alg_name == 'LoRA' or alg_name == 'QLoRA' or alg_name == 'DPO':
+            edited_model = edited_model.unload()
+            del edited_model.peft_config
+        elif alg_name == 'MELO':
+            model = edited_model
+        else:
+            with torch.no_grad():
+                for k, v in weights_copy.items():
+                    curr = nethook.get_parameter(model, k)
+                    curr[...] = v.to(curr.device)
+    
     return edited_model, metrics
 
-def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,test_generation=False):
+def edit_rome(model, tokenizer, edit_item, hparams, apply_algo, restore_weights=True, test_generation=False):
     # all_metrics = []
     start = time()
     requests = edit_item['requested_rewrite']
@@ -550,12 +554,16 @@ def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,test_generation=F
         "requested_rewrite": requests,
         "time": exec_time,
         "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams, test_generation=test_generation),
-    } 
-    with torch.no_grad():
-        for k, v in origin_weights_copy.items():
-            nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
+    }
+    
+    if restore_weights:
+        with torch.no_grad():
+            for k, v in origin_weights_copy.items():
+                curr = nethook.get_parameter(model, k)
+                curr[...] = v.to(curr.device)
     return edited_model, metrics
-def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo,test_generation=False):
+
+def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo, restore_weights=True, test_generation=False):
     start = time()
     requests = edit_item['requested_rewrite']
     ifmet_requests = []
@@ -596,15 +604,18 @@ def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo,tes
         "time": exec_time,
         "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams_s, test_generation=test_generation),
     }
-    with torch.no_grad():
-        if len(ifmet_requests) > 0:
-            for k, v in weights_copy.items():
-                nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams_s.device}")
-        for k, v in origin_weights_copy.items():
-            nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams_s.device}")
+    if restore_weights:
+        with torch.no_grad():
+            if len(ifmet_requests) > 0:
+                for k, v in weights_copy.items():
+                    curr = nethook.get_parameter(model, k)
+                    curr[...] = v.to(curr.device)
+            for k, v in origin_weights_copy.items():
+                curr = nethook.get_parameter(model, k)
+                curr[...] = v.to(curr.device)
     return edited_model, metrics
 
-def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo,test_generation=False):
+def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo, restore_weights=True, test_generation=False):
     start = time()
     requests = edit_item['requested_rewrite']
     for i,item in enumerate(requests):
@@ -630,6 +641,7 @@ def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_a
         "time": exec_time,
         "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams, test_generation=test_generation),
     }
-    with torch.no_grad():
-        weights_copy()
+    if restore_weights:
+        with torch.no_grad():
+            weights_copy()
     return metrics, loc_index
