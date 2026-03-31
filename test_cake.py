@@ -1,4 +1,4 @@
-from EasyEdit.easyeditor import MEMITHyperParams,LoRAHyperParams,WISEHyperParams, ROMEHyperParams
+from EasyEdit.easyeditor import MEMITHyperParams,LoRAHyperParams,WISEHyperParams, ROMEHyperParams, AlphaEditHyperParams
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
 from tqdm import tqdm
@@ -62,6 +62,8 @@ if __name__ == "__main__":
         editing_hparams = WISEHyperParams
     elif args.editing_method == 'ROME':
         editing_hparams = ROMEHyperParams
+    elif args.editing_method == 'AlphaEdit':
+        editing_hparams = AlphaEditHyperParams
     else:
         editing_hparams = LoRAHyperParams
     if args.editing_method == 'CAKE' or args.editing_method == 'Mello':
@@ -223,6 +225,9 @@ if __name__ == "__main__":
 
             # Save checkpoint after each batch
             json.dump(all_metrics, open(metrics_path, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
+    
+    elif args.multilingual:
+        print("Skipping single-language stage for multilingual mode")
     else:
         for item in tqdm(data[start_idx:], initial=start_idx, total=len(data)):
             if args.editing_method == 'CAKE':
@@ -240,23 +245,27 @@ if __name__ == "__main__":
             print(metrics)
             all_metrics.append(metrics)
             json.dump(all_metrics, open(metrics_path, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
-
-    res = calculate_averages(all_metrics)
-    json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}{lang_tag}_res.json','w', encoding='utf-8'), indent=4, ensure_ascii=False)
+    if all_metrics:
+        res = calculate_averages(all_metrics)
+        json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}{lang_tag}_res.json','w', encoding='utf-8'), indent=4, ensure_ascii=False)
 
     # ============================================================
     # Multilingual mode: edit in English, evaluate in all 5 languages
-    # Usage: add --multilingual flag
-    # Example: python test_cake.py --editing_method MEMIT --datatype MQuAKE-CF-3k-v2-clke --model_type qwen3-4b --multilingual
-    # Original single-language code above is preserved unchanged.
+    # IMPORTANT: Edits accumulate sequentially — model weights are NEVER restored.
+    # Editing batch size ~50: every 50 items' requests are merged and edited at once.
+    # Eval batch size = 1: each item is evaluated individually after editing.
     # ============================================================
     if args.multilingual and args.editing_method not in ['PreEdit']:
-        from edit_utils import (edit_multilingual, edit_rome_multilingual, 
-                                cake_multilingual, edit_wise_multilingual)
+        from edit_utils import (edit_multilingual_batch, edit_rome_multilingual_batch, 
+                                cake_multilingual_batch, edit_wise_multilingual_batch)
 
         EVAL_LANGS = ['en', 'de', 'fr', 'ja', 'zh']
+        EDIT_BATCH_SIZE = 50  # Number of items per editing batch
+
         print(f"\n{'='*60}")
         print(f"Multilingual mode: edit in English, evaluate in {EVAL_LANGS}")
+        print(f"Editing batch size: {EDIT_BATCH_SIZE} items per batch")
+        print(f"Edits accumulate — NO model restore between batches")
         print(f"{'='*60}\n")
 
         # Initialize per-language metrics and checkpoint paths
@@ -278,39 +287,77 @@ if __name__ == "__main__":
                 lang_all_metrics[lang] = lang_all_metrics[lang][:ml_start_idx]
             print(f"Resuming multilingual eval from item {ml_start_idx}")
 
-        # Reload model fresh for multilingual eval
-        print("Reloading model for multilingual evaluation...")
+        # Reload model fresh for multilingual eval (clean start)
+        print("Loading fresh model for multilingual evaluation...")
         del model
         torch.cuda.empty_cache()
-        if args.editing_method == 'CAKE':
-            model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16)
-        else:
-            model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16)
+        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16)
         tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, use_fast=False)
         tokenizer.pad_token = tokenizer.eos_token
+
+        # If resuming, we need to replay all previous edits to get model to correct state
+        if ml_start_idx > 0:
+            print(f"Replaying {ml_start_idx} previous edits to restore model state...")
+            import copy
+            for replay_batch_start in tqdm(range(0, ml_start_idx, EDIT_BATCH_SIZE), desc="Replaying edits"):
+                replay_batch = data[replay_batch_start:min(replay_batch_start + EDIT_BATCH_SIZE, ml_start_idx)]
+                all_requests = []
+                for item in replay_batch:
+                    requests = copy.deepcopy(item['requested_rewrite'])
+                    for r in requests:
+                        if isinstance(r['target_new'], dict):
+                            r['target_new'] = r['target_new']['str']
+                    all_requests.extend(requests)
+                hparams.batch_size = len(all_requests)
+                model, _ = apply_algo(
+                    model, tokenizer, all_requests, hparams,
+                    copy=False, return_orig_weights=True
+                )
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+            print(f"Replay complete. Model has {ml_start_idx} edits accumulated.")
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
 
         # Re-initialize WISE loc_data if needed
         if args.editing_method == 'WISE':
             loc_index = 0
 
-        data = data[:100]
-        for item in tqdm(data[ml_start_idx:], initial=ml_start_idx, total=len(data), desc="Multilingual edit+eval"):
-            # Edit and evaluate in all 5 languages
+        # Process data in batches of EDIT_BATCH_SIZE
+        remaining_data = data[ml_start_idx:]
+        total_batches = (len(remaining_data) + EDIT_BATCH_SIZE - 1) // EDIT_BATCH_SIZE
+        
+        for batch_idx in tqdm(range(total_batches), desc="Multilingual batch edit+eval"):
+            batch_start = batch_idx * EDIT_BATCH_SIZE
+            batch_end = min(batch_start + EDIT_BATCH_SIZE, len(remaining_data))
+            batch_items = remaining_data[batch_start:batch_end]
+            
+            # Edit batch and evaluate each item in 5 languages
             if args.editing_method == 'CAKE':
-                model, lang_results = cake_multilingual(model, tokenizer, item, hparams, test_generation=False)
+                model, batch_lang_results = cake_multilingual_batch(model, tokenizer, batch_items, hparams, test_generation=False)
             elif args.editing_method == 'WISE':
-                lang_results, loc_index = edit_wise_multilingual(model, tokenizer, item, hparams, loc_data, loc_index, apply_algo, test_generation=False)
+                model, batch_lang_results, loc_index = edit_wise_multilingual_batch(model, tokenizer, batch_items, hparams, loc_data, loc_index, apply_algo, test_generation=False)
             elif args.editing_method == 'ROME':
-                model, lang_results = edit_rome_multilingual(model, tokenizer, item, hparams, apply_algo, test_generation=False)
+                model, batch_lang_results = edit_rome_multilingual_batch(model, tokenizer, batch_items, hparams, apply_algo, test_generation=False)
             else:
-                model, lang_results = edit_multilingual(model, tokenizer, item, hparams, alg_name, apply_algo, test_generation=False)
+                model, batch_lang_results = edit_multilingual_batch(model, tokenizer, batch_items, hparams, alg_name, apply_algo, test_generation=False)
 
-            # Save results for each language
-            for lang in EVAL_LANGS:
-                lang_all_metrics[lang].append(lang_results[lang])
-                json.dump(lang_all_metrics[lang], open(lang_metrics_paths[lang], 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
+            # Save results for each item in the batch
+            for item_idx, item in enumerate(batch_items):
+                for lang in EVAL_LANGS:
+                    lang_all_metrics[lang].append(batch_lang_results[item_idx][lang])
+                
+                # Save checkpoint after each item
+                for lang in EVAL_LANGS:
+                    json.dump(lang_all_metrics[lang], open(lang_metrics_paths[lang], 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
 
-            print(f"Item {item['case_id']} done")
+            global_idx = ml_start_idx + batch_start + len(batch_items)
+            print(f"Batch {batch_idx+1}/{total_batches} done. Total items processed: {global_idx}/{len(data)}")
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
 
         # Save final res for each language
         for lang in EVAL_LANGS:

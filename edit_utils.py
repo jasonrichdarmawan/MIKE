@@ -697,6 +697,7 @@ def _eval_all_langs(model, tokenizer, edit_item, hparams, exec_time, test_genera
     """Evaluate edited model in all 5 languages. Returns dict of {lang: metrics}."""
     lang_results = {}
     for lang in MULTILINGUAL_LANGS:
+        print(f"  Evaluating case {edit_item['case_id']} in {lang}...")
         hparams.lang = lang
         lang_results[lang] = {
             'case_id': edit_item['case_id'],
@@ -706,93 +707,221 @@ def _eval_all_langs(model, tokenizer, edit_item, hparams, exec_time, test_genera
         }
     return lang_results
 
-def edit_multilingual(model, tokenizer, edit_item, hparams, alg_name, apply_algo, test_generation=False):
-    """Edit in English, evaluate in 5 languages, then restore model."""
-    start = time()
+EVAL_INFERENCE_BATCH_SIZE = 448  # Max questions per GPU inference call
+
+def _eval_all_items_all_langs_batched(model, tokenizer, batch_items, hparams, exec_time, test_generation=False):
+    """
+    Batched evaluation: collect ALL questions from ALL items × ALL languages,
+    run inference in large batches, then distribute results back.
+    Much faster than calling compute_edit_quality 250 times.
+    """
+    device = f"cuda:{hparams.device}"
+    
+    # Step 1: Collect all questions from all items × all languages
+    all_questions = []
+    all_answers = []
+    # Map each question back to (item_idx, lang, category, sub_idx)
+    question_map = []
+    
+    for item_idx, item in enumerate(batch_items):
+        for lang in MULTILINGUAL_LANGS:
+            suffix = f"_{lang}" if lang and lang != "en" else ""
+            single_hops_key = f"new_single_hops{suffix}"
+            new_answer_key = f"new_answer{suffix}"
+            new_answer_alias_key = f"new_answer_alias{suffix}"
+            cloze_question_key = f"cloze_question{suffix}"
+            questions_key = f"questions{suffix}"
+            
+            # Hop-wise questions
+            for hop_idx, hop in enumerate(item.get(single_hops_key, [])):
+                ans = list(hop.get('answer_alias', []))
+                ans.append(hop.get('answer', ''))
+                # cloze
+                all_questions.append(hop.get('cloze', ''))
+                all_answers.append(ans)
+                question_map.append((item_idx, lang, 'hop', hop_idx, 'cloze'))
+                # question
+                all_questions.append(hop.get('question', ''))
+                all_answers.append(ans)
+                question_map.append((item_idx, lang, 'hop', hop_idx, 'question'))
+            
+            # Accuracy questions
+            answer = list(item.get(new_answer_alias_key, []))
+            answer.append(item.get(new_answer_key, ''))
+            # cloze
+            all_questions.append(item.get(cloze_question_key, ''))
+            all_answers.append(answer)
+            question_map.append((item_idx, lang, 'acc', 0, 'cloze'))
+            # full questions
+            for q_idx, q in enumerate(item.get(questions_key, [])):
+                all_questions.append(q)
+                all_answers.append(answer)
+                question_map.append((item_idx, lang, 'acc', q_idx + 1, 'question'))
+    
+    total_questions = len(all_questions)
+    print(f"  Batched eval: {total_questions} questions across {len(batch_items)} items × {len(MULTILINGUAL_LANGS)} languages")
+    
+    # Step 2: Run inference in batches of EVAL_INFERENCE_BATCH_SIZE
+    all_results = []
+    for batch_start in range(0, total_questions, EVAL_INFERENCE_BATCH_SIZE):
+        batch_end = min(batch_start + EVAL_INFERENCE_BATCH_SIZE, total_questions)
+        batch_q = all_questions[batch_start:batch_end]
+        batch_a = all_answers[batch_start:batch_end]
+        batch_results = check_answer_batch(model, batch_q, tokenizer, batch_a, device, max_new_tokens=100)
+        all_results.extend(batch_results)
+        print(f"    Inference progress: {batch_end}/{total_questions}")
+    
+    # Step 3: Distribute results back to per-item, per-lang structure
+    batch_lang_results = []
+    for item_idx, item in enumerate(batch_items):
+        lang_results = {}
+        for lang in MULTILINGUAL_LANGS:
+            suffix = f"_{lang}" if lang and lang != "en" else ""
+            new_answer_key = f"new_answer{suffix}"
+            
+            metrics = {
+                'hop_wise': [],
+                'accuracy': [],
+                'hop_wise_predictions': [],
+                'accuracy_predictions': []
+            }
+            
+            # Collect hop_wise results for this item+lang
+            hop_data = {}
+            for map_idx, map_entry in enumerate(question_map):
+                if map_entry[0] != item_idx or map_entry[1] != lang:
+                    continue
+                matched, gen_text = all_results[map_idx]
+                if map_entry[2] == 'hop':
+                    hop_idx = map_entry[3]
+                    if hop_idx not in hop_data:
+                        hop_data[hop_idx] = {'metrics': [], 'predictions': []}
+                    hop_data[hop_idx]['metrics'].append(matched)
+                    hop_data[hop_idx]['predictions'].append({
+                        'question': all_questions[map_idx],
+                        'generated_text': gen_text,
+                        'answer': all_answers[map_idx][-1]
+                    })
+                elif map_entry[2] == 'acc':
+                    metrics['accuracy'].append(matched)
+                    metrics['accuracy_predictions'].append({
+                        'question': all_questions[map_idx],
+                        'generated_text': gen_text,
+                        'answer': item.get(new_answer_key, '')
+                    })
+            
+            for hop_idx in sorted(hop_data.keys()):
+                metrics['hop_wise'].append(hop_data[hop_idx]['metrics'])
+                metrics['hop_wise_predictions'].append(hop_data[hop_idx]['predictions'])
+            
+            lang_results[lang] = {
+                'case_id': item['case_id'],
+                'requested_rewrite': item['requested_rewrite'],
+                'time': exec_time,
+                'post': metrics,
+            }
+        batch_lang_results.append(lang_results)
+    
+    return batch_lang_results
+
+def edit_multilingual_batch(model, tokenizer, batch_items, hparams, alg_name, apply_algo, test_generation=False):
+    """
+    Edit a batch of items at once (no restore), then evaluate each item in 5 languages.
+    Edits accumulate on the model — weights are NEVER restored.
+    
+    Args:
+        batch_items: list of data items (e.g. 50 items)
+    Returns:
+        edited_model, list of per-item lang_results
+    """
     import copy
-    requests = copy.deepcopy(edit_item['requested_rewrite'])
-    for i in requests:
-        if isinstance(i['target_new'], dict):
-            i['target_new'] = i['target_new']['str']
-    hparams.batch_size = len(requests)
+    
+    # Step 1: Collect all requests from all items in this batch
+    all_requests = []
+    for item in batch_items:
+        requests = copy.deepcopy(item['requested_rewrite'])
+        for r in requests:
+            if isinstance(r['target_new'], dict):
+                r['target_new'] = r['target_new']['str']
+        all_requests.extend(requests)
+    
+    # Step 2: Edit all requests at once
+    start = time()
+    hparams.batch_size = len(all_requests)
     edited_model, weights_copy = apply_algo(
         model,
         tokenizer,
-        requests,
+        all_requests,
         hparams,
         copy=False,
         return_orig_weights=True
     )
     exec_time = time() - start
+    
+    # Step 3: Evaluate all items in all languages using batched inference
+    batch_lang_results = _eval_all_items_all_langs_batched(edited_model, tokenizer, batch_items, hparams, exec_time, test_generation)
+    
+    # NO restore — edits accumulate
+    return edited_model, batch_lang_results
 
-    # Evaluate in all 5 languages on edited model
-    lang_results = _eval_all_langs(edited_model, tokenizer, edit_item, hparams, exec_time, test_generation)
-
-    # Restore model
-    if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
-        with torch.no_grad():
-            weights_copy()
-    elif alg_name == 'LoRA' or alg_name == 'QLoRA' or alg_name == 'DPO':
-        edited_model = edited_model.unload()
-        del edited_model.peft_config
-    elif alg_name == 'MELO':
-        model = edited_model
-    else:
-        with torch.no_grad():
-            for k, v in weights_copy.items():
-                nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
-    return edited_model, lang_results
-
-def edit_rome_multilingual(model, tokenizer, edit_item, hparams, apply_algo, test_generation=False):
-    """ROME: edit in English, evaluate in 5 languages, then restore model."""
-    start = time()
+def edit_rome_multilingual_batch(model, tokenizer, batch_items, hparams, apply_algo, test_generation=False):
+    """
+    ROME: edit a batch of items (no restore), then evaluate each in 5 languages.
+    ROME edits one request at a time, so we loop through all requests sequentially.
+    Edits accumulate — weights are NEVER restored.
+    """
     import copy
-    requests = copy.deepcopy(edit_item['requested_rewrite'])
-    for i in requests:
-        if isinstance(i['target_new'], dict):
-            i['target_new'] = i['target_new']['str']
-    origin_weights_copy = None
-    for index, request in enumerate(requests):
-        edited_model, weights_copy = apply_algo(
-            model,
-            tokenizer,
-            [request],
-            hparams,
-            copy=False,
-            return_orig_weights=True
-        )
-        if index == 0:
-            origin_weights_copy = weights_copy
+    
+    # Step 1: Collect and edit all requests one by one (ROME limitation: 1 request at a time)
+    start = time()
+    for item in batch_items:
+        requests = copy.deepcopy(item['requested_rewrite'])
+        for r in requests:
+            if isinstance(r['target_new'], dict):
+                r['target_new'] = r['target_new']['str']
+        for request in requests:
+            edited_model, weights_copy = apply_algo(
+                model,
+                tokenizer,
+                [request],
+                hparams,
+                copy=False,
+                return_orig_weights=True
+            )
     exec_time = time() - start
+    
+    # Step 2: Evaluate all items in all languages using batched inference
+    batch_lang_results = _eval_all_items_all_langs_batched(edited_model, tokenizer, batch_items, hparams, exec_time, test_generation)
+    
+    # NO restore — edits accumulate
+    return edited_model, batch_lang_results
 
-    # Evaluate in all 5 languages on edited model
-    lang_results = _eval_all_langs(edited_model, tokenizer, edit_item, hparams, exec_time, test_generation)
-
-    # Restore model
-    with torch.no_grad():
-        for k, v in origin_weights_copy.items():
-            nethook.get_parameter(model, k)[...] = v.to(f"cuda:{hparams.device}")
-    return edited_model, lang_results
-
-def cake_multilingual(original_model, tokenizer, item, hparams, test_generation=False):
-    """CaKE: edit in English, evaluate in 5 languages, then restore model."""
+def cake_multilingual_batch(original_model, tokenizer, batch_items, hparams, test_generation=False):
+    """
+    CaKE: edit a batch of items via LoRA (no restore), then evaluate each in 5 languages.
+    LoRA adapters accumulate — NOT unloaded after editing.
+    """
     target_modules = ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
     model = create_lora_model(original_model, target_modules=target_modules)
     model.enable_input_require_grads()
+    
+    # Collect training examples from all items in the batch
     train_examples = []
-    item_case_examples = []
-    learning_examples = []
-    for rewrite in item['requested_rewrite']:
-        prompt = rewrite['prompt'].format(rewrite['subject'])
-        target = rewrite['target_new']['str']
-        item_case_examples.append({"text": prompt, "target": target})
-        if 'rephrase_prompt' in rewrite:
-            for rewrite_item in rewrite['rephrase_prompt']:
-                item_case_examples.append({"text": rewrite_item['question'], "target": rewrite_item['answer']})
-        if 'learning_prompt' in rewrite:
-            for learning_item in rewrite['learning_prompt']:
-                learning_examples.append({"text": learning_item['question'], "target": learning_item['answer']})
-    train_examples.append({'item_case_examples': item_case_examples, 'learning_examples': learning_examples})
+    for item in batch_items:
+        item_case_examples = []
+        learning_examples = []
+        for rewrite in item['requested_rewrite']:
+            prompt = rewrite['prompt'].format(rewrite['subject'])
+            target = rewrite['target_new']['str']
+            item_case_examples.append({"text": prompt, "target": target})
+            if 'rephrase_prompt' in rewrite:
+                for rewrite_item in rewrite['rephrase_prompt']:
+                    item_case_examples.append({"text": rewrite_item['question'], "target": rewrite_item['answer']})
+            if 'learning_prompt' in rewrite:
+                for learning_item in rewrite['learning_prompt']:
+                    learning_examples.append({"text": learning_item['question'], "target": learning_item['answer']})
+        train_examples.append({'item_case_examples': item_case_examples, 'learning_examples': learning_examples})
+    
     train_dataset = Dataset.from_list(train_examples)
     train_dataset = train_dataset.map(
         preprocess_function, batched=True,
@@ -810,41 +939,48 @@ def cake_multilingual(original_model, tokenizer, item, hparams, test_generation=
     trainer.train()
     exec_time = time() - start
 
-    # Evaluate in all 5 languages on edited model
-    lang_results = _eval_all_langs(model, tokenizer, item, hparams, exec_time, test_generation)
+    # Evaluate all items in all languages using batched inference
+    batch_lang_results = _eval_all_items_all_langs_batched(model, tokenizer, batch_items, hparams, exec_time, test_generation)
 
-    # Restore model (unload LoRA)
-    model = model.unload()
-    del model.peft_config
-    return model, lang_results
+    # NO restore — LoRA adapters stay on
+    return model, batch_lang_results
 
-def edit_wise_multilingual(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo, test_generation=False):
-    """WISE: edit in English, evaluate in 5 languages, then restore model."""
-    start = time()
+def edit_wise_multilingual_batch(model, tokenizer, batch_items, hparams, loc_data, loc_index, apply_algo, test_generation=False):
+    """
+    WISE: edit a batch of items (no restore), then evaluate each in 5 languages.
+    Edits accumulate — weights are NEVER restored.
+    """
     import copy
-    requests = copy.deepcopy(edit_item['requested_rewrite'])
-    for i, item in enumerate(requests):
-        item['prompt'] = item['prompt'].format(item['subject'])
-        item['target_new'] = item['target_new']['str']
-        item.update({
-            'loc_prompt': loc_data[loc_index + i]['loc'] + ' ' + loc_data[loc_index + i]['loc_ans']
-        })
-    loc_index = loc_index + len(requests)
-    hparams.batch_size = len(requests)
+    
+    # Step 1: Collect all requests from all items
+    all_requests = []
+    for item in batch_items:
+        requests = copy.deepcopy(item['requested_rewrite'])
+        for i, req in enumerate(requests):
+            req['prompt'] = req['prompt'].format(req['subject'])
+            if isinstance(req['target_new'], dict):
+                req['target_new'] = req['target_new']['str']
+            req.update({
+                'loc_prompt': loc_data[loc_index + i]['loc'] + ' ' + loc_data[loc_index + i]['loc_ans']
+            })
+        loc_index = loc_index + len(requests)
+        all_requests.extend(requests)
+    
+    # Step 2: Edit all requests at once
+    start = time()
+    hparams.batch_size = len(all_requests)
     edited_model, weights_copy = apply_algo(
         model,
         tokenizer,
-        requests,
+        all_requests,
         hparams,
         copy=False,
         return_orig_weights=True
     )
     exec_time = time() - start
-
-    # Evaluate in all 5 languages on edited model
-    lang_results = _eval_all_langs(edited_model, tokenizer, edit_item, hparams, exec_time, test_generation)
-
-    # Restore model
-    with torch.no_grad():
-        weights_copy()
-    return lang_results, loc_index
+    
+    # Step 3: Evaluate all items in all languages using batched inference
+    batch_lang_results = _eval_all_items_all_langs_batched(edited_model, tokenizer, batch_items, hparams, exec_time, test_generation)
+    
+    # NO restore — edits accumulate
+    return edited_model, batch_lang_results, loc_index
