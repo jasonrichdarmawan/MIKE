@@ -485,12 +485,14 @@ def run_eap_alphaedit(args):
         batch = eap_data.iloc[start:start + args.eap_batch_size]
 
         # Build r1 and r2 prompts together
-        prompts, ans_labels = [], []
+        prompts, ans_labels, subjects = [], [], []
         for _, row in batch.iterrows():
             prompts.append(row["r1_template"].replace("{}", row["e1_label"]))
             ans_labels.append(row["e2_label"])
+            subjects.append(row["e1_label"])
             prompts.append(row["r2_template"].replace("{}", row["e2_label"]))
             ans_labels.append(row["e3_label"])
+            subjects.append(row["e2_label"])
 
         enc = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
         ans_ids = torch.tensor([
@@ -498,10 +500,27 @@ def run_eap_alphaedit(args):
             for lbl in ans_labels
         ], device=device)
 
+        # Compute subject token spans (adjusted for left padding)
+        subject_spans = []
+        for prompt, subject in zip(prompts, subjects):
+            enc_single = tokenizer(prompt, return_offsets_mapping=True)
+            offsets = enc_single["offset_mapping"]
+            subj_start_char = prompt.index(subject)
+            subj_end_char   = subj_start_char + len(subject)
+            tok_start, tok_end = None, None
+            for tok_i, (cs, ce) in enumerate(offsets):
+                if cs <= subj_start_char < ce and tok_start is None:
+                    tok_start = tok_i
+                if cs < subj_end_char <= ce:
+                    tok_end = tok_i + 1
+            pad_offset = enc["input_ids"].shape[1] - len(enc_single["input_ids"])
+            subject_spans.append((tok_start + pad_offset, tok_end + pad_offset))
+
         with torch.enable_grad():
             scores = eap.attribute(
                 enc["input_ids"], enc["attention_mask"],
                 metric_fn=get_nll_metric(ans_ids),
+                subject_spans=subject_spans,
                 return_per_token_scores=False,
                 return_per_head_attribution=False,
             )
@@ -537,13 +556,15 @@ def run_eap_alphaedit(args):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- EAP-AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-        batch_requests = []
-        for _, row in batch_df.iterrows():
-            batch_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
-            batch_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
-        hparams.batch_size = len(batch_requests)
-        apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
-        print(f"  Batch edited ({len(batch_requests)} requests, layers={top_layers}).")
+        for i, (_, row) in enumerate(batch_df.iterrows()):
+            requests_item = [
+                {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
+                {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
+            ]
+            hparams.batch_size = len(requests_item)
+            apply_algo(model, tokenizer, requests_item, hparams, copy=False, return_orig_weights=False)
+            print(f"  Item {i+1}/{len(batch_df)} edited.")
+        print(f"  Batch edit done (layers={top_layers}).")
 
         # Evaluate
         print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
