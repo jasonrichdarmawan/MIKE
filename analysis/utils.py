@@ -117,6 +117,8 @@ def get_answers(entry, key: str):
 
 
 def check_answer_in_pred(pred: str, answers: list[str]):
+    if not isinstance(pred, str):
+        return False
     pred = pred.lower()
     return any([a.lower() in pred for a in answers])
 

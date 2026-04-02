@@ -326,6 +326,7 @@ def run_alphaedit(args):
     from EasyEdit.easyeditor import AlphaEditHyperParams
     from EasyEdit.easyeditor.util import nethook
     from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
+    import EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main as ae_main
 
     hparams    = AlphaEditHyperParams.from_hparams(args.hparams_alphaedit)
     apply_algo = ALG_DICT["AlphaEdit"]
@@ -355,6 +356,9 @@ def run_alphaedit(args):
     for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+
+        # Reset cache_c so each batch gets a fresh null-space accumulation.
+        ae_main.cache_c_new = False
 
         # Edit — one apply_algo call for the whole batch so the null-space
         # projection is estimated over all batch facts at once.
@@ -461,6 +465,7 @@ def run_eap_alphaedit(args):
     from EasyEdit.easyeditor import AlphaEditHyperParams
     from EasyEdit.easyeditor.util import nethook
     from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
+    import EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main as ae_main
     from transformers_eap import EAPGraph
     from transformers_eap.eap_graph import get_nll_metric
 
@@ -556,15 +561,18 @@ def run_eap_alphaedit(args):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- EAP-AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
 
-        for i, (_, row) in enumerate(batch_df.iterrows()):
-            requests_item = [
-                {"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]},
-                {"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]},
-            ]
-            hparams.batch_size = len(requests_item)
-            apply_algo(model, tokenizer, requests_item, hparams, copy=False, return_orig_weights=False)
-            print(f"  Item {i+1}/{len(batch_df)} edited.")
-        print(f"  Batch edit done (layers={top_layers}).")
+        # Reset cache_c so each batch gets a fresh null-space accumulation.
+        ae_main.cache_c_new = False
+
+        # Edit — one apply_algo call for the whole batch so the null-space
+        # projection is estimated over all batch facts at once.
+        batch_requests = []
+        for _, row in batch_df.iterrows():
+            batch_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
+            batch_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+        hparams.batch_size = len(batch_requests)
+        apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
+        print(f"  Batch edited ({len(batch_requests)} requests, layers={top_layers}).")
 
         # Evaluate
         print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
