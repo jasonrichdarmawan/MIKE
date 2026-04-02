@@ -326,7 +326,7 @@ def run_alphaedit(args):
     from EasyEdit.easyeditor import AlphaEditHyperParams
     from EasyEdit.easyeditor.util import nethook
     from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
-    import EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main as ae_main
+    import sys; ae_main = sys.modules["EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main"]
 
     hparams    = AlphaEditHyperParams.from_hparams(args.hparams_alphaedit)
     apply_algo = ALG_DICT["AlphaEdit"]
@@ -465,7 +465,7 @@ def run_eap_alphaedit(args):
     from EasyEdit.easyeditor import AlphaEditHyperParams
     from EasyEdit.easyeditor.util import nethook
     from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
-    import EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main as ae_main
+    import sys; ae_main = sys.modules["EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main"]
     from transformers_eap import EAPGraph
     from transformers_eap.eap_graph import get_nll_metric
 
