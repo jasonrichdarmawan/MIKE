@@ -60,48 +60,51 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     import sys
     sys.argv = ["", 
-                "--editing_method", "AlphaEdit_Circuit", 
-                "--model_type", "llama3-8b",
-                "--dtype", "bfloat16",
-                "--datatype", "MQuAKE-CF-3k-v2-clke",
-                "--sequential_editing"]
+        "--editing_method", "AlphaEdit_Circuit", 
+        "--sequential_editing",
+        "--model_type", "qwen3-4b-instruct",
+        "--dtype", "bfloat16",
+        "--apply_chat_template",
+        "--batch_size", "2",
+        "--sample_size", "4",
+        "--data_name", "MQuAKE-CF-3k-v2-clke",
+    ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--editing_method', required=True, type=str)
-    parser.add_argument('--metrics_save_dir', default='./output', type=str)
-    parser.add_argument('--datatype', default=None,type=str)
+    parser.add_argument('--sequential_editing', action='store_true')
+    parser.add_argument('--data_name', default=None, type=str)
     parser.add_argument('--model_type', default=None,type=str)
     parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
-    parser.add_argument('--sequential_editing', action='store_true')
+    parser.add_argument('--apply_chat_template', action='store_true')
+    parser.add_argument("--batch_size", default=16, type=int)
+    parser.add_argument("--sample_size", default=3000, type=int)
+    parser.add_argument('--metrics_save_dir', default='./output', type=str)
     args = parser.parse_args()
 
-    if args.editing_method in ['MEMIT', 'IFMET']:
-        editing_hparams = MEMITHyperParams
+    if args.editing_method == 'no_edit':
+        hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
+    elif args.editing_method in ['MEMIT', 'IFMET']:
+        hparams = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/MEMIT/{args.model_type}.yaml')
+    elif args.editing_method in ['IFMET']:
+        hparams_s = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-shallow.yaml')
+        hparams_d = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-deeper.yaml')
     elif args.editing_method in ['LoRA', 'CAKE', 'Mello']:
-        editing_hparams = LoRAHyperParams
+        hparams = LoRAHyperParams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
     elif args.editing_method == 'WISE':
-        editing_hparams = WISEHyperParams
+        hparams = WISEHyperParams.from_hparams(f'./EasyEdit/hparams/WISE/{args.model_type}.yaml')
     elif args.editing_method == 'ROME':
-        editing_hparams = ROMEHyperParams
+        hparams = ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/ROME/{args.model_type}.yaml')
     elif args.editing_method == "AlphaEdit":
-        editing_hparams = AlphaEditHyperParams
+        hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
     elif args.editing_method == "AlphaEdit_Circuit":
-        editing_hparams = AlphaEditCircuitHyperParams
+        hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
-    if args.editing_method in ['LoRA', 'CAKE', 'Mello']:
-        hparams = editing_hparams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
-    elif args.editing_method == 'IFMET':
-        hparams = editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-shallow.yaml')
-        hparams_s = hparams
-        hparams_d = editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-deeper.yaml')
-    else:
-        hparams = editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}.yaml')
-    
     # In-Context Learning Editing Methods (e.g., Mello)
-    if args.editing_method != 'Mello':
+    if args.editing_method not in ["no_edit", 'Mello']:
         alg_name = hparams.alg_name
         apply_algo = ALG_DICT[alg_name]
         
@@ -109,7 +112,8 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     dtype = getattr(torch, args.dtype)
-    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="cuda", dtype=dtype)
+    max_memory = {i: "8GiB" for i in range(torch.cuda.device_count())}
+    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="auto", max_memory=max_memory, dtype=dtype)
     tokenizer = AutoTokenizer.from_pretrained(hparams.model_name)
     
     if tokenizer.pad_token is None:
@@ -120,7 +124,8 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     import json
     
-    data = json.load(open(f'./datasets/{args.datatype}.json','r'))
+    data = json.load(open(f'./datasets/{args.data_name}.json','r'))
+    data = data[:args.sample_size]
     if args.editing_method == 'WISE':
         loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
         loc_data = loc_data[:7000]
@@ -143,29 +148,67 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     all_metrics = []
     
-    for items in tqdm(data[:2]):
-        if args.editing_method == 'CAKE':
-            model, metrics = cake(model, tokenizer, items, hparams, restore_weights=args.sequential_editing, test_generation=False)
+    indices = list(range(0, len(data), args.batch_size))
+    for start_idx in tqdm(indices, desc="Processing batches"):
+        items = data[start_idx:start_idx + args.batch_size]
+        if args.editing_method == "no_edit":
+            model, metrics = edit(
+                model, tokenizer, items, hparams, alg_name=None, apply_algo=None, 
+                apply_chat_template=args.apply_chat_template, restore_weights=False, 
+                test_generation=False
+            )
+        elif args.editing_method == 'CAKE':
+            model, metrics = cake(
+                model, tokenizer, items, hparams, apply_chat_template=args.apply_chat_template, 
+                restore_weights=args.sequential_editing, test_generation=False
+            )
         elif args.editing_method == 'WISE':
-            metrics, loc_index = edit_wise(model, tokenizer, items, hparams, loc_data, loc_index, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
+            metrics, loc_index = edit_wise(
+                model, tokenizer, items, hparams, loc_data, loc_index, apply_algo, 
+                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
+                test_generation=False
+            )
         elif args.editing_method == 'Mello':
-            metrics = edit_mello(model, task_prompt, stop, tokenizer, items, hparams, contriever, contriever_tokenizer, embs, test_generation=False)
+            metrics = edit_mello(
+                model, task_prompt, stop, tokenizer, items, hparams, contriever, contriever_tokenizer, 
+                embs, apply_chat_template=args.apply_chat_template, test_generation=False
+            )
         elif args.editing_method == 'IFMET':
-            model, metrics = edit_ifmet(model, tokenizer, items, hparams_s, hparams_d, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
+            model, metrics = edit_ifmet(
+                model, tokenizer, items, hparams_s, hparams_d, apply_algo, 
+                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
+                test_generation=False
+            )
         elif args.editing_method == 'ROME':
-            model, metrics = edit_rome(model, tokenizer, items, hparams, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
+            model, metrics = edit_rome(
+                model, tokenizer, items, hparams, apply_algo, 
+                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
+                test_generation=False
+            )
         else:
-            model, metrics = edit(model, tokenizer, items, hparams, alg_name, apply_algo, restore_weights=args.sequential_editing, test_generation=False)
-        print(metrics)
-        all_metrics.append(metrics)
+            model, metrics = edit(
+                model, tokenizer, items, hparams, alg_name, apply_algo, 
+                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
+                test_generation=False
+            )
+        
+        if start_idx // args.batch_size == 0:
+            print(f"Metrics | batch size: {start_idx // args.batch_size}:\n{json.dumps(metrics[0], indent=4)}")
+            
+        all_metrics.extend(metrics)
     
     res = calculate_averages(all_metrics)
+    print(f"Results:\n{json.dumps(res, indent=4)}")
     
 # %%
 
 if __name__ == "__main__":
     os.makedirs(args.metrics_save_dir, exist_ok=True)
-    json.dump(all_metrics, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_metrics.json','w'), indent=4)
-    json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_res.json','w'), indent=4)
+    metrics_filepath = f'{args.metrics_save_dir}/b{args.batch_size}_s{args.sample_size}_{args.editing_method}_{args.model_type}_{args.data_name}_metrics.json'
+    res_filepath = f'{args.metrics_save_dir}/b{args.batch_size}_s{args.sample_size}_{args.editing_method}_{args.model_type}_{args.data_name}_res.json'
+    print(f"Saving metrics to {metrics_filepath}")
+    print(f"Saving results to {res_filepath}")
+    json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
+    json.dump(res, open(res_filepath, 'w'), indent=4)
 
 # %%

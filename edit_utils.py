@@ -8,6 +8,7 @@ import random
 from datasets import Dataset
 from transformers import TrainingArguments, Trainer, StoppingCriteria, StoppingCriteriaList
 
+from tqdm.auto import tqdm
 
 def mean_pooling(token_embeddings, mask):
     token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
@@ -19,29 +20,27 @@ def check_answer_in_pred(pred, answers):
     return any([a.lower() in pred for a in answers])
 
 
-def _supports_chat_template(tokenizer):
-    return hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template is not None
-
-
-def _format_chat_prompt(prompt, tokenizer):
-    if not _supports_chat_template(tokenizer):
-        return prompt
-    messages = [{"role": "user", "content": prompt}]
+def _format_chat_prompt(tokenizer, question):
+    messages = [
+        # {"role": "system", "content": "Only respond with the answer. Do not include any explanations."},
+        {"role": "user", "content": question}
+    ]
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
-def _format_chat_train_pair(text, target, tokenizer):
+def _format_chat_train_pair(tokenizer, text, target, apply_chat_template=True):
     """
     Example:
     - text: ""If Maria lives in a mansion, Fernando Santos resides in a townhouse, and Jose lives in a bungalow, then the person who resides in a townhouse is a citizen of which country?"
     - target: "The person who resides in a townhouse is a citizen of the United Kingdom."
     """
-    if not _supports_chat_template(tokenizer):
+    if not apply_chat_template:
         full_text = f"{text} {target}"
         prompt_text = text
         return full_text, prompt_text
 
     full_messages = [
+        {"role": "system", "content": "Only respond with the answer. Do not include any explanations."},
         {"role": "user", "content": text},
         {"role": "assistant", "content": target},
     ]
@@ -169,7 +168,9 @@ def call_model(prompt, stop, model, tokenizer):
     
     return generated_text
 
-def mello(task_prompt, q, model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device):
+def mello(
+    task_prompt, q, model, tokenizer, stop, contriever, contriever_tokenizer, 
+    embs, answer, device, apply_chat_template=False):
     found_ans = False
     prompt = task_prompt + "\n\nQustion: " + q
     print('*********************************')
@@ -205,7 +206,7 @@ def mello(task_prompt, q, model, tokenizer, stop, contriever, contriever_tokeniz
     return check_answer_in_pred(ans, answer), prompt
 
 
-def preprocess_function(examples, tokenizer):
+def preprocess_function(examples, tokenizer, apply_chat_template=False):
     """
     Caveat:
     - CaKE's implementation do not turn padded positions into -100
@@ -248,7 +249,7 @@ def preprocess_function(examples, tokenizer):
     full_sequences = []
     prompt_sequences = []
     for text, target in all_pairs:
-        full_text, prompt_text = _format_chat_train_pair(text, target, tokenizer)
+        full_text, prompt_text = _format_chat_train_pair(tokenizer, text, target, apply_chat_template=apply_chat_template)
         full_sequences.append(full_text)
         prompt_sequences.append(prompt_text)
 
@@ -258,7 +259,7 @@ def preprocess_function(examples, tokenizer):
         truncation=True,
         max_length=256,
         return_tensors="np",
-        add_special_tokens=not _supports_chat_template(tokenizer),
+        add_special_tokens=not apply_chat_template,
     )
     prompt_inputs = tokenizer(
         prompt_sequences,
@@ -266,7 +267,7 @@ def preprocess_function(examples, tokenizer):
         truncation=True,
         max_length=256,
         return_tensors=None,
-        add_special_tokens=not _supports_chat_template(tokenizer),
+        add_special_tokens=not apply_chat_template,
     )
 
     labels = model_inputs["input_ids"].copy()
@@ -277,7 +278,10 @@ def preprocess_function(examples, tokenizer):
     model_inputs['labels'] = labels
     return model_inputs
 
-def check_answer(model, question, tokenizer, answer, device, max_new_tokens=50):
+def check_answer(
+    model, tokenizer, question, answer, 
+    apply_chat_template=False, max_new_tokens=50
+):
     """
     Check if the model can answer the questions correctly
     
@@ -293,24 +297,30 @@ def check_answer(model, question, tokenizer, answer, device, max_new_tokens=50):
         - "Question: Who is the head of state of the country where Fernando Santos hold a citizenship?\nAnswer: The answer is"
       - answer: ["Emerson Dambudzo Mnangagwa", ...]
     """
-    prompt = _format_chat_prompt(question, tokenizer)
-    inputs = tokenizer(
+    prompt = question
+    if apply_chat_template:
+        prompt = _format_chat_prompt(tokenizer=tokenizer, question=question)
+    tokens = tokenizer(
         prompt,
         return_tensors="pt",
-        add_special_tokens=not _supports_chat_template(tokenizer),
-    ).to(device)
+        add_special_tokens=not apply_chat_template,
+    ).to(model.device)
+    if not apply_chat_template:
+        prompt = tokenizer.decode(tokens.input_ids[0], skip_special_tokens=False)
     outputs = model.generate(
-        **inputs,
+        **tokens,
         max_new_tokens=max_new_tokens,
-        do_sample=False, 
-        temperature=None,
-        top_p=None,
-        pad_token_id=tokenizer.eos_token_id
+        do_sample=False,
+        pad_token_id=tokenizer.eos_token_id,
     )
-    generated_text = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-    return check_answer_in_pred(generated_text, answer), generated_text
+    generated_text = tokenizer.decode(
+        outputs[0][tokens['input_ids'].shape[1]:], 
+        skip_special_tokens=False
+    )
+    return prompt, generated_text, check_answer_in_pred(generated_text, answer)
 
-def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=False):
+def compute_edit_quality(model, tokenizer, edit_item, hparams, 
+                         apply_chat_template=False, test_generation=False):
     """
     Caveat:
     - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
@@ -327,7 +337,8 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
         'hop_wise_predictions': [],
         'accuracy_predictions': []
     }
-    device = f"cuda:{hparams.device}"
+    
+    # Evaluate the single-hop questions
     for i in edit_item['new_single_hops']:
         """
         i['answer_alias']: ["Britain", "UK", "G. B.", "GBR", ...]
@@ -335,50 +346,72 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
         i['cloze']: "Fernando Santos is a citizen of"
         i['question']: "What is the country of citizenship of Fernando Santos?"
         """
-        temp_metrics = []
-        temp_predictions = []
-        ans = i['answer_alias']
-        ans.append(i['answer'])
-        question = 'Answer: ' + i['cloze']
-        result, generated_text = check_answer(model, question, tokenizer, ans, device, max_new_tokens=10)
-        temp_metrics.append(result)
-        temp_predictions.append({
-            "question": question,
-            "generated_text": generated_text,
-            "answer": i['answer']
+        per_case_id_metrics = []
+        per_case_id_predictions = []
+        
+        answer_candidates = [i["answer"]] + i['answer_alias']
+        
+        # Evaluate in cloze form
+        prompt, generated_text, result = check_answer(
+            model=model, tokenizer=tokenizer, question=i['cloze'], answer=answer_candidates,
+            apply_chat_template=apply_chat_template, max_new_tokens=50,
+        )
+        per_case_id_metrics.append(result)
+        per_case_id_predictions.append({
+            "prompt": prompt,
+            "generated": generated_text,
+            "target": i["answer"]
         })
-        question = 'Question: ' + i['question'] + '\nAnswer: The answer is'
-        result, generated_text = check_answer(model, question, tokenizer, ans, device, max_new_tokens=10)
-        temp_metrics.append(result)
-        temp_predictions.append({
-            "question": question,
-            "generated_text": generated_text,
-            "answer": i['answer']
+        
+        # Evaluate in question form
+        prompt, generated_text, result = check_answer(
+            model=model, tokenizer=tokenizer, question=i["question"], answer=answer_candidates,
+            apply_chat_template=apply_chat_template, max_new_tokens=50,
+        )
+        per_case_id_metrics.append(result)
+        per_case_id_predictions.append({
+            "prompt": prompt,
+            "generated": generated_text,
+            "target": i["answer"]
         })
-        metrics['hop_wise'].append(temp_metrics)
-        metrics['hop_wise_predictions'].append(temp_predictions)
-    answer = edit_item['new_answer_alias']
-    answer.append(edit_item['new_answer'])
-    question = 'Answer: ' + edit_item['cloze_question']
-    result, generated_text = check_answer(model, question, tokenizer, answer, device, max_new_tokens=10)
+        
+        metrics['hop_wise'].append(per_case_id_metrics)
+        metrics['hop_wise_predictions'].append(per_case_id_predictions)
+        
+    answer_candidates = [edit_item["new_answer"]] + edit_item['new_answer_alias']
+    
+    # Evaluate the multi-hop question in the cloze form
+    # edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
+    prompt, generated_text, result = check_answer(
+        model=model, tokenizer=tokenizer, question=edit_item['cloze_question'], 
+        answer=answer_candidates, apply_chat_template=apply_chat_template, max_new_tokens=10
+    )
     metrics['accuracy'].append(result)
     metrics['accuracy_predictions'].append({
-        "question": question,
-        "generated_text": generated_text,
-        "answer": edit_item['new_answer']
+        "prompt": prompt,
+        "generated": generated_text,
+        "target": i["answer"]
     })
-    for i in edit_item['questions']:
-        question = 'Question: ' + i + '\nAnswer: The answer is'
-        result, generated_text = check_answer(model, question, tokenizer, answer, device, max_new_tokens=10)
+    
+    # Multi-hop question evaluation
+    for question in edit_item['questions']:
+        """
+        question: "Who is the head of state of the country where Fernando Santos hold a citizenship?"
+        """
+        prompt, generated_text, result = check_answer(
+            model=model, tokenizer=tokenizer, question=question, answer=answer_candidates, 
+            apply_chat_template=apply_chat_template, max_new_tokens=50,
+        )
         metrics['accuracy'].append(result)
         metrics['accuracy_predictions'].append({
-            "question": question,
-            "generated_text": generated_text,
-            "answer": edit_item['new_answer']
+            "prompt": prompt,
+            "generated": generated_text,
+            "target": i["answer"]
         })
     return metrics
 
-def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, contriever_tokenizer, embs, test_generation=False):
+def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, 
+               contriever_tokenizer, embs, apply_chat_template=False, test_generation=False):
     metrics = {'post':
                {        
                 'hop_wise':[],
@@ -391,20 +424,33 @@ def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriev
         temp_metrics = []
         ans = i['answer_alias']
         ans.append(i['answer'])
-        result, _ = mello(t_p, i['cloze'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, ans, device)
+        result, _ = mello(
+            t_p, i['cloze'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, 
+            ans, device, apply_chat_template=apply_chat_template,
+        )
         temp_metrics.append(result)
-        result, _ = mello(t_p, i['question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, ans, device)
+        result, _ = mello(
+            t_p, i['question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, 
+            ans, device, apply_chat_template=apply_chat_template,
+        )
         temp_metrics.append(result)
         metrics['hop_wise'].append(temp_metrics)
     answer = edit_item['new_answer_alias']
     answer.append(edit_item['new_answer'])
-    res, _ = mello(task_prompt, edit_item['cloze_question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device)
+    res, _ = mello(
+        task_prompt, edit_item['cloze_question'], model, tokenizer, stop, contriever, 
+        contriever_tokenizer, embs, answer, device, apply_chat_template=apply_chat_template,
+    )
     metrics['accuracy'].append(res)
-    res, _ = mello(task_prompt, edit_item['questions'][0], model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device)
+    res, _ = mello(
+        task_prompt, edit_item['questions'][0], model, tokenizer, stop, contriever, 
+        contriever_tokenizer, embs, answer, device, apply_chat_template=apply_chat_template,
+    )
     metrics['accuracy'].append(res)
     return metrics
 
-def cake(original_model, tokenizer, item, hparams, restore_weights=True, test_generation=False):
+def cake(original_model, tokenizer, item, hparams, 
+         apply_chat_template=False, restore_weights=True, test_generation=False):
     """
     Caveat: return the base model after editing
     """
@@ -450,7 +496,7 @@ def cake(original_model, tokenizer, item, hparams, restore_weights=True, test_ge
         preprocess_function,
         batched=True,
         remove_columns=train_dataset.column_names,
-        fn_kwargs={"tokenizer": tokenizer}
+        fn_kwargs={"tokenizer": tokenizer, "apply_chat_template": apply_chat_template}
     )
 
     training_args = TrainingArguments(
@@ -477,7 +523,10 @@ def cake(original_model, tokenizer, item, hparams, restore_weights=True, test_ge
         'case_id': item['case_id'],
         "requested_rewrite": item['requested_rewrite'],
         "time": exec_time,
-        "post": compute_edit_quality(model, tokenizer, item, hparams, test_generation=test_generation),
+        "post": compute_edit_quality(
+            model, tokenizer, item, hparams, 
+            apply_chat_template=apply_chat_template, test_generation=test_generation
+        ),
     }
     if restore_weights:
         model = model.unload()
@@ -486,32 +535,48 @@ def cake(original_model, tokenizer, item, hparams, restore_weights=True, test_ge
     return model, metrics
 
 
-def edit(model, tokenizer, edit_item, hparams, alg_name, apply_algo, restore_weights=False, test_generation=False):
-    # all_metrics = []
-    start = time()
-    requests = edit_item['requested_rewrite']
-    for i in requests:
-        if isinstance(i["target_new"], dict):
-            i['target_new'] = i['target_new']['str']
-    hparams.batch_size = len(requests)
-    edited_model, weights_copy = apply_algo(
-        model,
-        tokenizer,
-        requests,
-        hparams,
-        copy=False,
-        return_orig_weights=True
-    )
-    exec_time = time() - start
-    # start = time()
-    # chunk_metrics = []
-    metrics = {
-        'case_id': edit_item['case_id'],
-        "requested_rewrite": requests,
-        "time": exec_time,
-        "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams, test_generation=test_generation),
-    }
-    # chunk_metrics.append(metrics)
+def edit(model, tokenizer, items, hparams, alg_name, apply_algo, 
+         apply_chat_template=False, restore_weights=False, test_generation=False):
+    all_metrics = []
+    
+    for item in items:
+        requested_rewrite = item['requested_rewrite']
+        for i in requested_rewrite:
+            if isinstance(i["target_true"], dict):
+                i['target_true'] = i['target_true']['str']
+            if isinstance(i["target_new"], dict):
+                i['target_new'] = i['target_new']['str']
+    
+    requests = []
+    for item in items:
+        requests.extend(item['requested_rewrite'])
+    
+    if apply_algo is None:
+        edited_model = model
+    else:
+        edited_model, weights_copy = apply_algo(
+            model,
+            tokenizer,
+            requests,
+            hparams,
+            copy=False,
+            return_orig_weights=True
+        )
+    
+    for item in tqdm(items, desc="Evaluating edits"):
+        requested_rewrite = []
+        for i in item['requested_rewrite']:
+            z = { k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"] }
+            requested_rewrite.append(z)
+        metrics = {
+            'case_id': item['case_id'],
+            "requested_rewrite": requested_rewrite,
+            "post": compute_edit_quality(
+                edited_model, tokenizer, item, hparams, 
+                apply_chat_template=apply_chat_template, test_generation=test_generation,
+            ),
+        }
+        all_metrics.append(metrics)
     if restore_weights:
         if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
             with torch.no_grad():
@@ -527,9 +592,10 @@ def edit(model, tokenizer, edit_item, hparams, alg_name, apply_algo, restore_wei
                     curr = nethook.get_parameter(model, k)
                     curr[...] = v.to(curr.device)
     
-    return edited_model, metrics
+    return edited_model, all_metrics
 
-def edit_rome(model, tokenizer, edit_item, hparams, apply_algo, restore_weights=True, test_generation=False):
+def edit_rome(model, tokenizer, edit_item, hparams, apply_algo, 
+              apply_chat_template=False, restore_weights=True, test_generation=False):
     # all_metrics = []
     start = time()
     requests = edit_item['requested_rewrite']
@@ -553,7 +619,10 @@ def edit_rome(model, tokenizer, edit_item, hparams, apply_algo, restore_weights=
         'case_id': edit_item['case_id'],
         "requested_rewrite": requests,
         "time": exec_time,
-        "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams, test_generation=test_generation),
+        "post": compute_edit_quality(
+            edited_model, tokenizer, edit_item, hparams, 
+            apply_chat_template=apply_chat_template, test_generation=test_generation,
+        ),
     }
     
     if restore_weights:
@@ -563,7 +632,8 @@ def edit_rome(model, tokenizer, edit_item, hparams, apply_algo, restore_weights=
                 curr[...] = v.to(curr.device)
     return edited_model, metrics
 
-def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo, restore_weights=True, test_generation=False):
+def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo, 
+               apply_chat_template=False, restore_weights=True, test_generation=False):
     start = time()
     requests = edit_item['requested_rewrite']
     ifmet_requests = []
@@ -602,7 +672,10 @@ def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo, re
         'case_id': edit_item['case_id'],
         "requested_rewrite": requests,
         "time": exec_time,
-        "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams_s, test_generation=test_generation),
+        "post": compute_edit_quality(
+            edited_model, tokenizer, edit_item, hparams_s, 
+            apply_chat_template=apply_chat_template, test_generation=test_generation,
+        ),
     }
     if restore_weights:
         with torch.no_grad():
@@ -615,7 +688,8 @@ def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo, re
                 curr[...] = v.to(curr.device)
     return edited_model, metrics
 
-def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo, restore_weights=True, test_generation=False):
+def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo, 
+              apply_chat_template=False, restore_weights=True, test_generation=False):
     start = time()
     requests = edit_item['requested_rewrite']
     for i,item in enumerate(requests):
@@ -639,7 +713,10 @@ def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_a
         'case_id': edit_item['case_id'],
         "requested_rewrite": requests,
         "time": exec_time,
-        "post": compute_edit_quality(edited_model, tokenizer, edit_item, hparams, test_generation=test_generation),
+        "post": compute_edit_quality(
+            edited_model, tokenizer, edit_item, hparams, 
+            apply_chat_template=apply_chat_template, test_generation=test_generation,
+        ),
     }
     if restore_weights:
         with torch.no_grad():

@@ -241,7 +241,7 @@ def encode_prompt(
     if subjects is not None:
         for i in range(len(prompts)):
             start_char = prompts[i].find(subjects[i])
-            end_char = start_char + len(subjects[i])
+            end_char = start_char + len(subjects[i]) - 1
             
             start_tok = encoded.char_to_token(i, start_char)
             end_tok = encoded.char_to_token(i, end_char)
