@@ -7,7 +7,7 @@ from tqdm import tqdm
 # %%
 
 dataset_dir = Path("../datasets")
-model_name = "gpt2"
+model_name = "meta-llama/Meta-Llama-3-8B"
 
 df = pd.read_csv(dataset_dir / model_name / "two_hop.csv")
 

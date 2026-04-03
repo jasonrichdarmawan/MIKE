@@ -2,8 +2,10 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from datasets import Dataset
+from EasyEdit.easyeditor.util import nethook
 from patched_generation import generate_with_attention_knockout_all_layers
 from utils import load_model, load_tokenizer, last_relation_word
 
@@ -105,6 +107,12 @@ def main(args):
 
     model = load_model(args.model_name)
     model.eval()
+    if args.checkpoint:
+        weights = torch.load(args.checkpoint, map_location=next(model.parameters()).device)
+        with torch.no_grad():
+            for k, v in weights.items():
+                nethook.get_parameter(model, k)[...] = v
+        print(f"Loaded checkpoint from {args.checkpoint}")
     tokenizer = load_tokenizer(args.model_name)
     generations = dataset.map(
         generate_answer_with_attention_knockout,
@@ -139,6 +147,8 @@ if __name__ == "__main__":
     parser.add_argument("knockout_target", choices=["e1", "e2", "r1", "r2"])
     parser.add_argument("--input-path")
     parser.add_argument("--output-path")
+    parser.add_argument("--checkpoint", default=None,
+                        help="Path to .pt checkpoint of edited weights (e.g. editing_checkpoint.pt)")
     parser.add_argument('--default-decoding', action=BooleanOptionalAction, default=False)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--k", type=int, default=0)

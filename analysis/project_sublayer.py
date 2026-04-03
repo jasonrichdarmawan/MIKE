@@ -2,8 +2,10 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from datasets import Dataset
+from EasyEdit.easyeditor.util import nethook
 from patched_generation import get_attention_projection, get_mlp_projection
 from utils import load_model, load_tokenizer, get_answers
 
@@ -69,6 +71,12 @@ def main(args):
 
     model = load_model(args.model_name)
     model.eval()
+    if args.checkpoint:
+        weights = torch.load(args.checkpoint, map_location=next(model.parameters()).device)
+        with torch.no_grad():
+            for k, v in weights.items():
+                nethook.get_parameter(model, k)[...] = v
+        print(f"Loaded checkpoint from {args.checkpoint}")
     tokenizer = load_tokenizer(args.model_name)
     dataset = dataset.map(get_answers, fn_kwargs={"key": "e3"})
     dataset = dataset.map(get_answers, fn_kwargs={"key": "e2"})
@@ -103,5 +111,7 @@ if __name__ == "__main__":
     parser.add_argument("target", choices=["attention", "mlp"])
     parser.add_argument("--input-path")
     parser.add_argument("--output-path")
+    parser.add_argument("--checkpoint", default=None,
+                        help="Path to .pt checkpoint of edited weights (e.g. editing_checkpoint.pt)")
     parser.add_argument("--batch-size", type=int, default=32)
     main(parser.parse_args())

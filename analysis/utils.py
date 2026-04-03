@@ -1,4 +1,5 @@
 import ast
+import os
 
 import pandas as pd
 import torch
@@ -8,21 +9,22 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, GPT2LMHeadModel, \
 
 from jaxtyping import Float
 
-HF_TOKEN = ""
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 
 def load_tokenizer(model_name):
-    tokenizer = AutoTokenizer.from_pretrained(model_name, token=HF_TOKEN)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, token=HF_TOKEN or None)
     tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
 
 
 def load_model(model_name, device="cuda"):
+    token = HF_TOKEN or None
     if "70b" in model_name or "70B" in model_name:
         return AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype="auto",
-                                                    token=HF_TOKEN)
+                                                    token=token)
     else:
-        return AutoModelForCausalLM.from_pretrained(model_name, token=HF_TOKEN).to(device)
+        return AutoModelForCausalLM.from_pretrained(model_name, token=token, torch_dtype=torch.bfloat16).to(device)
 
 
 def get_layer_names(model):
@@ -115,6 +117,8 @@ def get_answers(entry, key: str):
 
 
 def check_answer_in_pred(pred: str, answers: list[str]):
+    if not isinstance(pred, str):
+        return False
     pred = pred.lower()
     return any([a.lower() in pred for a in answers])
 

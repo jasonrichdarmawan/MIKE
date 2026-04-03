@@ -161,27 +161,105 @@ def generate_with_patching_same_layers(model, tokenizer, hidden_states, target_p
     return generations_by_layer
 
 
-def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Tensor, "batch_size num_layers hidden_size"], target_prompt: list[str], target_token_str: str, do_sample: bool):
+def _generate_with_patch_and_cache(
+        model, tokenizer, hidden_state: Float[Tensor, "batch_size hidden_size"],
+        target_layer: str, x_input_ids: torch.Tensor, full_attention_mask: torch.Tensor,
+        prefix_kv, prefix_input_ids: torch.Tensor, target_prompt: list[str], do_sample: bool):
+    """
+    KV-cache variant of generate_with_patching_layer.
+    The prefix KV cache is precomputed once and reused across all source×target
+    layer calls — only the single "x" token is re-processed per call (~32x speedup).
+
+    Uses a first_call flag instead of shape check because x_input_ids is already
+    1 token, so hs.shape[1] == 1 on both the patched prefill step and all
+    subsequent generation steps.
+
+    Workaround for transformers 4.44 cache_position bug: _get_initial_cache_position
+    computes cache_position as [0, ..., input_len-1][past_length:], which yields an
+    empty tensor when input_ids has 1 token and past_length >= 1. Fix: pad input_ids
+    to length past_length+1 so cache_position becomes [past_length] after slicing.
+    prepare_inputs_for_generation then correctly slices back to just x_input_ids.
+    """
+    past_length = prefix_kv[0][0].shape[2]
+    pad = torch.zeros(x_input_ids.shape[0], past_length,
+                      dtype=x_input_ids.dtype, device=x_input_ids.device)
+    padded_x = torch.cat([pad, x_input_ids], dim=1)  # [batch, past_length+1]
+
+    first_call = [True]
+
+    def replace_hidden_state_hook(output):
+        hs = output[0]
+        if first_call[0]:
+            first_call[0] = False
+            hs[:, -1, :] = hidden_state.to(hs.device)
+        return (hs,) + output[1:]
+
+    with torch.no_grad(), Trace(model, layer=target_layer, retain_output=False,
+                                edit_output=replace_hidden_state_hook):
+        if do_sample:
+            new_tokens = model.generate(
+                input_ids=padded_x, attention_mask=full_attention_mask,
+                past_key_values=prefix_kv, pad_token_id=tokenizer.eos_token_id,
+                max_new_tokens=10, do_sample=True)
+        else:
+            new_tokens = model.generate(
+                input_ids=padded_x, attention_mask=full_attention_mask,
+                past_key_values=prefix_kv, do_sample=False,
+                temperature=1, top_p=1, num_beams=1,
+                pad_token_id=tokenizer.eos_token_id, max_new_tokens=10)
+
+    # model.generate returns padded_x + newly_generated; strip the padding prefix
+    new_tokens = new_tokens[:, past_length:]
+    full_generated = torch.cat([prefix_input_ids, new_tokens], dim=1)
+    return decode_generated(tokenizer, full_generated, target_prompt)
+
+
+def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Tensor, "batch_size num_layers hidden_size"], target_prompt: list[str], target_token_str: str, do_sample: bool,
+                                      use_kv_cache: bool = False):
     """
     The goal is to replace the hidden representation of target_token_str in target_prompt with a hidden_state at a specific target layer with the hidden representation taken from a specific source layer.
 
     Example:
     - target_prompt: "Syria: Syria is a country in the Middle East, Leonardo DiCaprio: Leonardo DiCaprio is an American actor, Samsung: Samsung is a South Korean multinational corporation, x"
     - target_token_str: "x"
+
+    use_kv_cache: if True, precomputes the prefix KV cache once and reuses it
+    across all source×target layer calls (~32x faster prefill). Assumes
+    target_token_str is the last token in the prompt (left-padded batch).
     """
     layer_names = get_layer_names(model)
-    layer_count = len(get_layer_names(model))
+    layer_count = len(layer_names)
     generations = np.ndarray((layer_count, layer_count), dtype=object)
-    for source_layer in range(layer_count):
-        for target_layer in range(layer_count):
-            hidden_state = hidden_states[:, source_layer, :]
-            generations[source_layer, target_layer] = generate_with_patching_layer(model,
-                                                                                   tokenizer,
-                                                                                   hidden_state,
-                                                                                   layer_names[target_layer],
-                                                                                   target_prompt,
-                                                                                   target_token_str,
-                                                                                   do_sample)
+
+    if use_kv_cache:
+        inputs, _ = generate_patching_inputs(model, tokenizer, target_prompt, target_token_str)
+        prefix_input_ids  = inputs.input_ids[:, :-1]
+        x_input_ids       = inputs.input_ids[:, -1:]
+        full_attention_mask = inputs.attention_mask
+        with torch.no_grad():
+            prefix_kv = model(
+                input_ids=prefix_input_ids,
+                attention_mask=inputs.attention_mask[:, :-1],
+                use_cache=True,
+            ).past_key_values
+        for source_layer in range(layer_count):
+            for target_layer in range(layer_count):
+                hidden_state = hidden_states[:, source_layer, :]
+                generations[source_layer, target_layer] = _generate_with_patch_and_cache(
+                    model, tokenizer, hidden_state, layer_names[target_layer],
+                    x_input_ids, full_attention_mask, prefix_kv,
+                    prefix_input_ids, target_prompt, do_sample)
+    else:
+        for source_layer in range(layer_count):
+            for target_layer in range(layer_count):
+                hidden_state = hidden_states[:, source_layer, :]
+                generations[source_layer, target_layer] = generate_with_patching_layer(model,
+                                                                                       tokenizer,
+                                                                                       hidden_state,
+                                                                                       layer_names[target_layer],
+                                                                                       target_prompt,
+                                                                                       target_token_str,
+                                                                                       do_sample)
     return generations
 
 

@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 
 from datasets import Dataset
+from EasyEdit.easyeditor.util import nethook
 from patched_generation import get_hidden_states, generate_with_patching_all_layers
 from utils import get_layer_names, load_model, load_tokenizer
 
@@ -33,7 +34,7 @@ def generate_entity_description_with_patching(entries: list[str], model, tokeniz
     hidden_states = get_hidden_states(model, tokenizer, entities, entries["source_prompt"])
     tokenizer.padding_side = "left"
     generations = generate_with_patching_all_layers(model, tokenizer, hidden_states, entries["target_prompt"],
-                                                    "x", do_sample)
+                                                    "x", do_sample, use_kv_cache=True)
 
     entry_count = len(entries["source_prompt"])
     layer_count = len(get_layer_names(model))
@@ -93,6 +94,12 @@ def main(args):
 
     model = load_model(args.model_name)
     model.eval()
+    if args.checkpoint:
+        weights = torch.load(args.checkpoint, map_location=next(model.parameters()).device)
+        with torch.no_grad():
+            for k, v in weights.items():
+                nethook.get_parameter(model, k)[...] = v
+        print(f"Loaded checkpoint from {args.checkpoint}")
     tokenizer = load_tokenizer(args.model_name)
     generations = dataset.map(
         generate_entity_description_with_patching,
@@ -123,8 +130,10 @@ if __name__ == "__main__":
     parser.add_argument("source", choices=["e1", "last"])
     parser.add_argument("--input-path")
     parser.add_argument("--output-path")
+    parser.add_argument("--checkpoint", default=None,
+                        help="Path to .pt checkpoint of edited weights (e.g. editing_checkpoint.pt)")
     parser.add_argument('--target-prompt', choices=["description", "repeat"], default="description")
-    parser.add_argument('--do-sample', action=BooleanOptionalAction, default=True)
+    parser.add_argument('--do-sample', action=BooleanOptionalAction, default=False)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
     main(parser.parse_args())
