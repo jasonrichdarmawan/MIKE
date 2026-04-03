@@ -2,10 +2,11 @@
 
 from EasyEdit.easyeditor import (
     MEMITHyperParams, LoRAHyperParams, WISEHyperParams, ROMEHyperParams,
-    AlphaEditHyperParams, AlphaEditCircuitHyperParams
+    AlphaEditHyperParams, AlphaEditCircuitHyperParams, R_ROMEHyperParams,
 )
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
+import json
 from tqdm import tqdm
 from edit_utils import (
     edit, edit_ifmet, edit_mello, edit_rome, cake, edit_wise, get_sent_embeddings,
@@ -85,7 +86,7 @@ if __name__ == "__main__":
 
     if args.editing_method == 'no_edit':
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
-    elif args.editing_method in ['MEMIT', 'IFMET']:
+    elif args.editing_method in ['MEMIT']:
         hparams = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/MEMIT/{args.model_type}.yaml')
     elif args.editing_method in ['IFMET']:
         hparams_s = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-shallow.yaml')
@@ -96,6 +97,8 @@ if __name__ == "__main__":
         hparams = WISEHyperParams.from_hparams(f'./EasyEdit/hparams/WISE/{args.model_type}.yaml')
     elif args.editing_method == 'ROME':
         hparams = ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/ROME/{args.model_type}.yaml')
+    elif args.editing_method == "R-ROME":
+        hparams = R_ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/R-ROME/{args.model_type}.yaml')
     elif args.editing_method == "AlphaEdit":
         hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
     elif args.editing_method == "AlphaEdit_Circuit":
@@ -122,8 +125,6 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    import json
-    
     data = json.load(open(f'./datasets/{args.data_name}.json','r'))
     data = data[:args.sample_size]
     if args.editing_method == 'WISE':

@@ -65,11 +65,6 @@ micromamba install beartype jaxtyping pytest
 pip install zhipuai sniffio
 ```
 
-Install `transformers_eap`
-```
-pip install -e .
-```
-
 ## 📚Analyze
 Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
 
