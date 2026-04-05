@@ -59,17 +59,17 @@ def calculate_averages(data):
 if __name__ == "__main__":
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    import sys
-    sys.argv = ["", 
-        "--editing_method", "AlphaEdit_Circuit", 
-        "--sequential_editing",
-        "--model_type", "qwen3-4b-instruct",
-        "--dtype", "bfloat16",
-        "--apply_chat_template",
-        "--batch_size", "2",
-        "--sample_size", "4",
-        "--data_name", "MQuAKE-CF-3k-v2-clke",
-    ]
+    # import sys
+    # sys.argv = ["", 
+    #     "--editing_method", "AlphaEdit_Circuit", 
+    #     "--sequential_editing",
+    #     "--model_type", "qwen3-4b-instruct",
+    #     "--dtype", "bfloat16",
+    #     "--apply_chat_template",
+    #     "--batch_size", "1",
+    #     "--sample_size", "4",
+    #     "--data_name", "MQuAKE-CF-3k-v2-clke",
+    # ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -193,8 +193,8 @@ if __name__ == "__main__":
                 test_generation=False
             )
         
-        if start_idx // args.batch_size == 0:
-            print(f"Metrics | batch size: {start_idx // args.batch_size}:\n{json.dumps(metrics[0], indent=4)}")
+        if start_idx % args.batch_size == 0:
+            print(f"Batch index: {start_idx // args.batch_size}:\n{json.dumps(metrics[0], indent=4)}")
             
         all_metrics.extend(metrics)
     
@@ -204,9 +204,9 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    os.makedirs(args.metrics_save_dir, exist_ok=True)
-    metrics_filepath = f'{args.metrics_save_dir}/b{args.batch_size}_s{args.sample_size}_{args.editing_method}_{args.model_type}_{args.data_name}_metrics.json'
-    res_filepath = f'{args.metrics_save_dir}/b{args.batch_size}_s{args.sample_size}_{args.editing_method}_{args.model_type}_{args.data_name}_res.json'
+    os.makedirs(f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/', exist_ok=True)
+    metrics_filepath = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/{args.editing_method}_metrics.json'
+    res_filepath = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/{args.editing_method}_res.json'
     print(f"Saving metrics to {metrics_filepath}")
     print(f"Saving results to {res_filepath}")
     json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)

@@ -315,6 +315,20 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --stats_dir data/stats
 ```
 
+### AlphaEdit_Circuit
+
+```bash
+python test_cake.py \
+  --editing_method AlphaEdit_Circuit \
+  --sequential_editing \
+  --model_type qwen3-4b-instruct \
+  --dtype bfloat16 \
+  --apply_chat_template \
+  --batch_size 1 \
+  --sample_size 2999 \
+  --data_name MQuAKE-CF-3k-v2-clke
+```
+
 ## Contributing
 
 If you need to make changes to `EasyEdit` folder:

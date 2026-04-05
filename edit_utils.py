@@ -300,6 +300,7 @@ def check_answer(
     prompt = question
     if apply_chat_template:
         prompt = _format_chat_prompt(tokenizer=tokenizer, question=question)
+    tokenizer.padding_side = "left"
     tokens = tokenizer(
         prompt,
         return_tensors="pt",
@@ -311,7 +312,6 @@ def check_answer(
         **tokens,
         max_new_tokens=max_new_tokens,
         do_sample=False,
-        pad_token_id=tokenizer.eos_token_id,
     )
     generated_text = tokenizer.decode(
         outputs[0][tokens['input_ids'].shape[1]:], 
