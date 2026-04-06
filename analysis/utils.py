@@ -18,13 +18,17 @@ def load_tokenizer(model_name):
     return tokenizer
 
 
-def load_model(model_name, device="cuda"):
+def load_model(model_name, device="cuda", attn_implementation=None):
     token = HF_TOKEN or None
+    kwargs = {"token": token, "torch_dtype": torch.bfloat16}
+    if attn_implementation:
+        kwargs["attn_implementation"] = attn_implementation
     if "70b" in model_name or "70B" in model_name:
-        return AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype="auto",
-                                                    token=token)
+        kwargs["device_map"] = "auto"
+        kwargs["torch_dtype"] = "auto"
+        return AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
     else:
-        return AutoModelForCausalLM.from_pretrained(model_name, token=token, torch_dtype=torch.bfloat16).to(device)
+        return AutoModelForCausalLM.from_pretrained(model_name, **kwargs).to(device)
 
 
 def get_layer_names(model):
