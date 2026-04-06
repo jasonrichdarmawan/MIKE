@@ -370,7 +370,8 @@ def run_alphaedit(args):
         apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
         print(f"  Batch edited ({len(batch_requests)} requests).")
 
-        # Evaluate
+        # Evaluate + Analyze use left padding (analysis indexes [-1] for last real token)
+        tokenizer.padding_side = "left"
         print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
         fn_kwargs = {"model": model, "tokenizer": tokenizer}
         hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
@@ -409,7 +410,8 @@ def run_alphaedit(args):
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
 
-        # Restore
+        # Restore (reset to right padding for next batch's editing)
+        tokenizer.padding_side = "right"
         print(f"  [Phase: Restore] Batch {b+1}/{n_batches}")
         with torch.no_grad():
             for k, v in orig_weights.items():
@@ -574,7 +576,8 @@ def run_eap_alphaedit(args):
         apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
         print(f"  Batch edited ({len(batch_requests)} requests, layers={top_layers}).")
 
-        # Evaluate
+        # Evaluate + Analyze use left padding (analysis indexes [-1] for last real token)
+        tokenizer.padding_side = "left"
         print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
         fn_kwargs = {"model": model, "tokenizer": tokenizer}
         hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
@@ -613,7 +616,8 @@ def run_eap_alphaedit(args):
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
 
-        # Restore
+        # Restore (reset to right padding for next batch's editing)
+        tokenizer.padding_side = "right"
         print(f"  [Phase: Restore] Batch {b+1}/{n_batches}")
         with torch.no_grad():
             for k, v in orig_weights.items():
@@ -664,7 +668,6 @@ def run_ifmet(args):
     model     = load_model(args.model)
     model.eval()
     tokenizer = load_tokenizer(args.model)
-    tokenizer.padding_side = "left"
 
     from EasyEdit.easyeditor import MEMITHyperParams
     from EasyEdit.easyeditor.util import nethook
@@ -714,7 +717,8 @@ def run_ifmet(args):
         apply_algo(model, tokenizer, indirect_requests, hparams_d, copy=False, return_orig_weights=False)
         print(f"  Batch edited ({len(standard_requests)} standard + {len(indirect_requests)} indirect requests).")
 
-        # Evaluate
+        # Evaluate + Analyze use left padding (analysis indexes [-1] for last real token)
+        tokenizer.padding_side = "left"
         print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
         fn_kwargs = {"model": model, "tokenizer": tokenizer}
         hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
@@ -753,7 +757,8 @@ def run_ifmet(args):
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
 
-        # Restore
+        # Restore (reset to right padding for next batch's editing)
+        tokenizer.padding_side = "right"
         print(f"  [Phase: Restore] Batch {b+1}/{n_batches}")
         with torch.no_grad():
             for k, v in orig_weights.items():
