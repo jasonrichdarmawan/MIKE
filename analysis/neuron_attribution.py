@@ -563,6 +563,255 @@ def process_example(model, info, tokenizer, prompt, layer_num, head_num, head_di
             ffn_query_rows, attn_query_rows, chain)
 
 
+# ── Reusable pipeline functions ───────────────────────────────────────────────
+
+def setup_attribution(model):
+    """Patch model for neuron attribution and return (info, config_dict).
+
+    Must be called once after model loading. Compatible with other analyses
+    (TraceDict hooks coexist with the monkey-patches).
+
+    Requires model loaded with attn_implementation="eager".
+    """
+    patch_model.patch(model)
+    info = patch_model.model_info(model)
+
+    cfg = model.config
+    if hasattr(cfg, "n_layer"):
+        layer_num    = cfg.n_layer
+        head_num     = cfg.n_head
+        head_dim     = cfg.n_embd // cfg.n_head
+        num_kv_heads = cfg.n_head
+    else:
+        layer_num    = cfg.num_hidden_layers
+        head_num     = cfg.num_attention_heads
+        head_dim     = cfg.hidden_size // cfg.num_attention_heads
+        num_kv_heads = cfg.num_key_value_heads
+
+    # Pre-stack weight tensors once
+    with torch.no_grad():
+        info["fc2_stack"] = torch.stack([
+            info["get_ffn_down_proj"](info["layers"][i]) for i in range(layer_num)
+        ])
+        info["o_proj_stack"] = torch.stack([
+            info["get_attn_o_proj"](info["layers"][i]).contiguous() for i in range(layer_num)
+        ])
+
+    na_config = {
+        "layer_num": layer_num,
+        "head_num": head_num,
+        "head_dim": head_dim,
+        "num_kv_heads": num_kv_heads,
+    }
+    return info, na_config
+
+
+def process_examples(model, info, tokenizer, df, prompts, na_config,
+                     top_k_ffn=300, top_k_proj=1, top_k_query=300,
+                     predict_target="argmax"):
+    """Process all examples in df for given prompt types.
+
+    Returns list of dicts, one per example:
+        {"id": row_id,
+         "prompt_type": (layer_rows, head_rows, ffn_top, attn_top,
+                         ffn_query_rows, attn_query_rows, chain),
+         "prompt_type_pos_labels": [str, ...],
+         ...}
+    """
+    layer_num    = na_config["layer_num"]
+    head_num     = na_config["head_num"]
+    head_dim     = na_config["head_dim"]
+    num_kv_heads = na_config["num_kv_heads"]
+
+    results = []
+    for idx in range(len(df)):
+        row    = df.iloc[idx]
+        row_id = row.get("id", idx)
+        ex = {"id": row_id}
+
+        for pt in prompts:
+            prompt = _get_prompt(row, pt)
+            target_token_id = None
+            if predict_target == "label":
+                answer = row["e3_label"] if pt in ("two-hop", "second-hop") else row["e2_label"]
+                toks = tokenizer.encode(" " + str(answer), add_special_tokens=False)
+                target_token_id = toks[0] if toks else None
+            try:
+                result = process_example(
+                    model, info, tokenizer, prompt,
+                    layer_num, head_num, head_dim, num_kv_heads,
+                    top_k_ffn=top_k_ffn, top_k_proj=top_k_proj,
+                    top_k_query=top_k_query,
+                    max_order=2 if pt == "two-hop" else 1,
+                    target_token_id=target_token_id,
+                )
+                ex[pt] = result
+                tokens = tokenizer.encode(prompt)
+                ex[f"{pt}_pos_labels"] = _get_position_labels(tokens, row, tokenizer, pt)
+            except Exception as e:
+                print(f"  [neuron_attribution] id={row_id} {pt} ERROR: {e}", file=sys.stderr)
+
+        results.append(ex)
+    return results
+
+
+def aggregate_and_save(results, output_dir, prompts, layer_num):
+    """Aggregate per-example results and save all CSVs to output_dir/neuron_attribution/.
+
+    results: list of dicts from process_examples.
+    output_dir: Path to subset directory (e.g. out_dir/now_correct).
+    """
+    from itertools import combinations
+
+    prompt_pairs = list(combinations(prompts, 2))
+    accum = {pt: _Accum() for pt in prompts}
+    jaccard_accum       = defaultdict(list)
+    overlap_pos_accum       = defaultdict(float)
+    overlap_pos_layer_accum = defaultdict(float)
+    overlap_pos_n           = defaultdict(int)
+
+    for ex in results:
+        ex_sets      = {}
+        ex_pos_dicts = {}
+        ex_pos_labels = {}
+        row_id = ex["id"]
+
+        for pt in prompts:
+            if pt not in ex:
+                continue
+            layer_rows_ex, head_rows_ex, ffn_top, attn_top, ffq, aq, chain_ex = ex[pt]
+            pos_labels = ex.get(f"{pt}_pos_labels", [])
+            a = accum[pt]
+            a.n_examples += 1
+
+            for layer_i, sublayer, lpi, tokens in layer_rows_ex:
+                a.layer_rows.append({"id": row_id, "layer": layer_i, "sublayer": sublayer,
+                                     "lpi": lpi, "top_k_tokens": tokens})
+            for layer_i, head_i, score, tokens in head_rows_ex:
+                a.head_rows.append({"id": row_id, "layer": layer_i, "head": head_i,
+                                    "lpi": score, "top_k_tokens": tokens})
+            for layer_i, sublayer, score in ffq:
+                a.ffn_query_rows.append({"id": row_id, "layer": layer_i,
+                                         "sublayer": sublayer, "score": score})
+            for layer_i, sublayer, score in aq:
+                a.attn_query_rows.append({"id": row_id, "layer": layer_i,
+                                          "sublayer": sublayer, "score": score})
+
+            a.add_neurons(0, "ffn",  ffn_top,  pos_labels=pos_labels)
+            a.add_neurons(0, "attn", attn_top, pos_labels=pos_labels)
+            for order, ntype, rows in chain_ex:
+                a.add_neurons(order, ntype, rows, pos_labels=pos_labels)
+
+            sets = {
+                (0, "ffn"):  _ffn_sets_by_layer(ffn_top),
+                (0, "attn"): _attn_sets_by_layer(attn_top),
+            }
+            pos_dicts = {
+                (0, "ffn"):  _ffn_pos_by_layer(ffn_top),
+                (0, "attn"): _attn_pos_by_layer(attn_top),
+            }
+            for order, ntype, rows in chain_ex:
+                is_ffn = ntype.startswith("ffn")
+                sets[(order, ntype)] = (
+                    _ffn_sets_by_layer(rows) if is_ffn else _attn_sets_by_layer(rows)
+                )
+                pos_dicts[(order, ntype)] = (
+                    _ffn_pos_by_layer(rows) if is_ffn else _attn_pos_by_layer(rows)
+                )
+            ex_sets[pt] = sets
+            ex_pos_dicts[pt] = pos_dicts
+            ex_pos_labels[pt] = pos_labels
+
+        # Jaccard across prompt pairs
+        for pt_a, pt_b in prompt_pairs:
+            sets_a = ex_sets.get(pt_a, {})
+            sets_b = ex_sets.get(pt_b, {})
+            if not sets_a or not sets_b:
+                continue
+            pair_key = f"{pt_a}__{pt_b}"
+            pd_a_all = ex_pos_dicts.get(pt_a, {})
+            pd_b_all = ex_pos_dicts.get(pt_b, {})
+            pl_a = ex_pos_labels.get(pt_a, [])
+            pl_b = ex_pos_labels.get(pt_b, [])
+            for (ord_a, ntype_a), layers_a in sets_a.items():
+                nc_a = "ffn" if ntype_a.startswith("ffn") else "attn"
+                pd_a = pd_a_all.get((ord_a, ntype_a), {})
+                for (ord_b, ntype_b), layers_b in sets_b.items():
+                    nc_b = "ffn" if ntype_b.startswith("ffn") else "attn"
+                    if nc_a != nc_b:
+                        continue
+                    pd_b = pd_b_all.get((ord_b, ntype_b), {})
+                    base_key = (pair_key, nc_a, ntype_a, ord_a, ntype_b, ord_b)
+                    for layer in range(layer_num):
+                        s_a = layers_a.get(layer, frozenset())
+                        s_b = layers_b.get(layer, frozenset())
+                        j = _jaccard(s_a, s_b)
+                        if not math.isnan(j):
+                            jaccard_accum[base_key + (layer,)].append(j)
+                        intersection = s_a & s_b
+                        if not intersection:
+                            continue
+                        nd_a = pd_a.get(layer, {})
+                        nd_b = pd_b.get(layer, {})
+                        for key in intersection:
+                            for pos in nd_a.get(key, []):
+                                lbl = _resolve_pos_label(pos, pl_a)
+                                overlap_pos_accum[base_key + ("a", lbl)] += 1
+                                overlap_pos_layer_accum[base_key + (layer, "a", lbl)] += 1
+                            for pos in nd_b.get(key, []):
+                                lbl = _resolve_pos_label(pos, pl_b)
+                                overlap_pos_accum[base_key + ("b", lbl)] += 1
+                                overlap_pos_layer_accum[base_key + (layer, "b", lbl)] += 1
+                    overlap_pos_n[base_key] += 1
+
+    # Save
+    na_dir = Path(output_dir) / "neuron_attribution"
+    for pt in prompts:
+        a = accum[pt]
+        if a.n_examples == 0:
+            continue
+        pt_dir = na_dir / pt
+        pt_dir.mkdir(parents=True, exist_ok=True)
+        a.save(pt_dir, a.n_examples)
+        print(f"  [neuron_attribution] {pt}: {a.n_examples} examples -> {pt_dir}/")
+
+    # Jaccard CSV
+    jaccard_rows = [
+        {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
+         "ntype_b": ntype_b, "order_b": ord_b, "layer": layer,
+         "mean_jaccard": sum(vals) / len(vals), "n": len(vals)}
+        for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, layer), vals in jaccard_accum.items()
+    ]
+    if jaccard_rows:
+        pd.DataFrame(jaccard_rows).to_csv(na_dir / "jaccard.csv", index=False)
+        print(f"  [neuron_attribution] jaccard: {len(jaccard_rows)} rows -> {na_dir}/jaccard.csv")
+
+    # Overlap position CSVs
+    overlap_pos_rows = [
+        {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
+         "ntype_b": ntype_b, "order_b": ord_b, "side": side, "position": plabel,
+         "mean_count": cnt / max(overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)], 1),
+         "n": overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)]}
+        for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, side, plabel), cnt
+        in overlap_pos_accum.items()
+    ]
+    if overlap_pos_rows:
+        pd.DataFrame(overlap_pos_rows).to_csv(na_dir / "overlap_position.csv", index=False)
+
+    overlap_pos_layer_rows = [
+        {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
+         "ntype_b": ntype_b, "order_b": ord_b, "layer": layer, "side": side,
+         "position": plabel,
+         "mean_count": cnt / max(overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)], 1),
+         "n": overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)]}
+        for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, layer, side, plabel), cnt
+        in overlap_pos_layer_accum.items()
+    ]
+    if overlap_pos_layer_rows:
+        pd.DataFrame(overlap_pos_layer_rows).to_csv(
+            na_dir / "overlap_position_by_layer.csv", index=False)
+
+
 # ── Neuron-set helpers for Jaccard ────────────────────────────────────────────
 
 def _get_prompt(row, prompt_type):
@@ -856,39 +1105,9 @@ def main(args):
                 nethook.get_parameter(model, k)[...] = v
         print(f"Loaded checkpoint from {args.checkpoint}")
 
-    patch_model.patch(model)
-    info = patch_model.model_info(model)
-
-    cfg = model.config
-    # layer_num must be known before pre-stacking weights; resolve it first
-    if hasattr(cfg, "n_layer"):
-        _layer_num_tmp = cfg.n_layer
-    elif hasattr(cfg, "num_hidden_layers"):
-        _layer_num_tmp = cfg.num_hidden_layers
-    else:
-        raise ValueError(f"Cannot infer layer count from {type(cfg).__name__}")
-
-    # Pre-stack weight tensors once — avoids repeated lambda calls per example/layer
-    with torch.no_grad():
-        info["fc2_stack"] = torch.stack([
-            info["get_ffn_down_proj"](info["layers"][i]) for i in range(_layer_num_tmp)
-        ])  # (layer_num, ffn_dim, hidden_dim)
-        info["o_proj_stack"] = torch.stack([
-            info["get_attn_o_proj"](info["layers"][i]).contiguous() for i in range(_layer_num_tmp)
-        ])  # (layer_num, head_num, head_dim, hidden_dim)
-    if hasattr(cfg, "n_layer"):
-        layer_num    = cfg.n_layer
-        head_num     = cfg.n_head
-        head_dim     = cfg.n_embd // cfg.n_head
-        num_kv_heads = cfg.n_head
-    else:
-        layer_num    = cfg.num_hidden_layers
-        head_num     = cfg.num_attention_heads
-        head_dim     = cfg.hidden_size // cfg.num_attention_heads
-        num_kv_heads = cfg.num_key_value_heads
+    info, na_config = setup_attribution(model)
 
     data_dir = Path(args.data_dir)
-    prompt_pairs = list(combinations(args.prompts, 2))
 
     for subset in tqdm(args.subsets, desc="Subsets", unit="subset"):
         input_path = data_dir / f"composition_{subset}" / "two_hop.csv"
@@ -899,222 +1118,17 @@ def main(args):
             continue
 
         subset_dir = input_path.parent
-
         df = pd.read_csv(input_path, index_col=0)
         n  = len(df) if args.max_examples is None else min(len(df), args.max_examples)
+        df = df.head(n)
         print(f"\n=== subset={subset}: {n} examples, prompts={args.prompts} ===")
 
-        # Checkpoint: resume from partial run if available
-        ckpt_path = subset_dir / "neuron_attribution" / f"{subset}_ckpt.pkl"
-        ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-        start_idx = 0
-        accum = {pt: _Accum() for pt in args.prompts}
-        jaccard_accum = defaultdict(list)
-        overlap_pos_accum       = defaultdict(float)  # key+(side,pos_label) -> total count
-        overlap_pos_layer_accum = defaultdict(float)  # key+(layer,side,pos_label) -> total count
-        overlap_pos_n           = defaultdict(int)    # key -> n_examples
-        if ckpt_path.exists():
-            ckpt = _load_checkpoint(ckpt_path)
-            accum             = ckpt["accum"]
-            jaccard_accum     = ckpt["jaccard_accum"]
-            overlap_pos_accum       = ckpt.get("overlap_pos_accum",       defaultdict(float))
-            overlap_pos_layer_accum = ckpt.get("overlap_pos_layer_accum", defaultdict(float))
-            overlap_pos_n           = ckpt.get("overlap_pos_n",           defaultdict(int))
-            start_idx         = ckpt["next_idx"]
-            print(f"  Resuming from checkpoint at example {start_idx}/{n}")
-
-        with tqdm(
-            total=n,
-            initial=start_idx,
-            desc=f"{subset} examples",
-            unit="example",
-            leave=False,
-        ) as examples_pbar:
-            for idx in range(start_idx, n):
-                row    = df.iloc[idx]
-                row_id = row.get("id", idx)
-
-                # Process every prompt type for this example
-                ex_results = {}
-                for pt in args.prompts:
-                    prompt = _get_prompt(row, pt)
-                    target_token_id = None
-                    if args.predict_target == "label":
-                        answer = row["e3_label"] if pt in ("two-hop", "second-hop") else row["e2_label"]
-                        toks = tokenizer.encode(" " + str(answer), add_special_tokens=False)
-                        target_token_id = toks[0] if toks else None
-                    try:
-                        result = process_example(
-                            model, info, tokenizer, prompt,
-                            layer_num, head_num, head_dim, num_kv_heads,
-                            top_k_ffn=args.top_k_ffn,
-                            top_k_proj=args.top_k_proj,
-                            top_k_query=args.top_k_query,
-                            max_order=2 if pt == "two-hop" else 1,
-                            target_token_id=target_token_id,
-                        ) # (layer_rows, head_rows, ffn_top, attn_top, ffn_query_rows, attn_query_rows, chain)
-                        ex_results[pt] = result
-                    except Exception as e:
-                        print(f"  [{idx}] {pt} ERROR: {e}", file=sys.stderr)
-
-                # Build neuron sets and update accumulators for each successful prompt type
-                ex_sets      = {}   # pt -> {(order, ntype): {layer: frozenset}}
-                ex_pos_dicts = {}   # pt -> {(order, ntype): {layer: {key: [pos, ...]}}}
-                ex_pos_labels = {}  # pt -> [pos_label, ...]
-                for pt, result in ex_results.items():
-                    layer_rows_ex, head_rows_ex, ffn_top, attn_top, ffq, aq, chain_ex = result
-                    a = accum[pt]
-                    a.n_examples += 1
-
-                    # Small per-example rows (kept as-is)
-                    for layer_i, sublayer, lpi, tokens in layer_rows_ex:
-                        a.layer_rows.append({"id": row_id, "layer": layer_i, "sublayer": sublayer,
-                                             "lpi": lpi, "top_k_tokens": tokens})
-                    for layer_i, head_i, score, tokens in head_rows_ex:
-                        a.head_rows.append({"id": row_id, "layer": layer_i, "head": head_i,
-                                            "lpi": score, "top_k_tokens": tokens})
-                    for layer_i, sublayer, score in ffq:
-                        a.ffn_query_rows.append({"id": row_id, "layer": layer_i,
-                                                 "sublayer": sublayer, "score": score})
-                    for layer_i, sublayer, score in aq:
-                        a.attn_query_rows.append({"id": row_id, "layer": layer_i,
-                                                  "sublayer": sublayer, "score": score})
-
-                    # Compute position labels for this prompt type
-                    pt_prompt  = _get_prompt(row, pt)
-                    pt_tokens  = tokenizer.encode(pt_prompt)
-                    pos_labels = _get_position_labels(pt_tokens, row, tokenizer, pt)
-                    ex_pos_labels[pt] = pos_labels
-
-                    # Aggregate neuron stats with position tracking
-                    a.add_neurons(0, "ffn",  ffn_top,  pos_labels=pos_labels)
-                    a.add_neurons(0, "attn", attn_top, pos_labels=pos_labels)
-                    for order, ntype, rows in chain_ex:
-                        a.add_neurons(order, ntype, rows, pos_labels=pos_labels)
-
-                    # Build per-layer neuron sets and position dicts for Jaccard computation
-                    sets = {
-                        (0, "ffn"):  _ffn_sets_by_layer(ffn_top),
-                        (0, "attn"): _attn_sets_by_layer(attn_top),
-                    }
-                    pos_dicts = {
-                        (0, "ffn"):  _ffn_pos_by_layer(ffn_top),
-                        (0, "attn"): _attn_pos_by_layer(attn_top),
-                    }
-                    for order, ntype, rows in chain_ex:
-                        is_ffn = ntype.startswith("ffn")
-                        sets[(order, ntype)] = (
-                            _ffn_sets_by_layer(rows) if is_ffn else _attn_sets_by_layer(rows)
-                        )
-                        pos_dicts[(order, ntype)] = (
-                            _ffn_pos_by_layer(rows) if is_ffn else _attn_pos_by_layer(rows)
-                        )
-                    ex_sets[pt] = sets
-                    ex_pos_dicts[pt] = pos_dicts
-
-                # Compute Jaccard + overlap position distribution for all prompt-type pairs
-                for pt_a, pt_b in prompt_pairs:
-                    sets_a = ex_sets.get(pt_a, {})
-                    sets_b = ex_sets.get(pt_b, {})
-                    if not sets_a or not sets_b:
-                        continue
-                    pair_key = f"{pt_a}__{pt_b}"
-                    pd_a_all = ex_pos_dicts.get(pt_a, {})
-                    pd_b_all = ex_pos_dicts.get(pt_b, {})
-                    pl_a = ex_pos_labels.get(pt_a, [])
-                    pl_b = ex_pos_labels.get(pt_b, [])
-                    for (ord_a, ntype_a), layers_a in sets_a.items():
-                        nc_a = "ffn" if ntype_a.startswith("ffn") else "attn"
-                        pd_a = pd_a_all.get((ord_a, ntype_a), {})
-                        for (ord_b, ntype_b), layers_b in sets_b.items():
-                            nc_b = "ffn" if ntype_b.startswith("ffn") else "attn"
-                            if nc_a != nc_b:
-                                continue
-                            pd_b = pd_b_all.get((ord_b, ntype_b), {})
-                            base_key = (pair_key, nc_a, ntype_a, ord_a, ntype_b, ord_b)
-                            for layer in range(layer_num):
-                                s_a = layers_a.get(layer, frozenset())
-                                s_b = layers_b.get(layer, frozenset())
-                                j = _jaccard(s_a, s_b)
-                                if not math.isnan(j):
-                                    jaccard_accum[
-                                        base_key + (layer,)
-                                    ].append(j)
-                                # Position distribution of overlapping neurons
-                                intersection = s_a & s_b
-                                if not intersection:
-                                    continue
-                                nd_a = pd_a.get(layer, {})
-                                nd_b = pd_b.get(layer, {})
-                                for key in intersection:
-                                    for pos in nd_a.get(key, []):
-                                        lbl = _resolve_pos_label(pos, pl_a)
-                                        overlap_pos_accum[base_key + ("a", lbl)] += 1
-                                        overlap_pos_layer_accum[base_key + (layer, "a", lbl)] += 1
-                                    for pos in nd_b.get(key, []):
-                                        lbl = _resolve_pos_label(pos, pl_b)
-                                        overlap_pos_accum[base_key + ("b", lbl)] += 1
-                                        overlap_pos_layer_accum[base_key + (layer, "b", lbl)] += 1
-                            # Count this example (once per order-pair, not per layer)
-                            overlap_pos_n[base_key] += 1
-
-                examples_pbar.update(1)
-                if args.checkpoint_every > 0 and (idx + 1) % args.checkpoint_every == 0:
-                    _save_checkpoint(ckpt_path, accum, jaccard_accum,
-                                     overlap_pos_accum, overlap_pos_layer_accum,
-                                     overlap_pos_n, idx + 1)
-        print(f"  {n}/{n} done      ")
-
-        # Save per-prompt-type compact outputs
-        na_subset_dir = subset_dir / "neuron_attribution"
-        for pt in args.prompts:
-            a = accum[pt]
-            output_dir = na_subset_dir / pt
-            output_dir.mkdir(parents=True, exist_ok=True)
-            a.save(output_dir, n)
-            print(f"  -> {output_dir}/")
-
-        # Save cross-prompt Jaccard CSV in the neuron_attribution subset directory
-        jaccard_rows = [
-            {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
-             "ntype_b": ntype_b, "order_b": ord_b, "layer": layer,
-             "mean_jaccard": sum(vals) / len(vals),
-             "n": len(vals)}
-            for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, layer), vals in jaccard_accum.items()
-        ]
-        pd.DataFrame(jaccard_rows).to_csv(na_subset_dir / "jaccard.csv", index=False)
-        print(f"  -> {na_subset_dir}/jaccard.csv ({len(jaccard_rows)} rows)")
-
-        # Save overlap position distribution
-        overlap_pos_rows = [
-            {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
-             "ntype_b": ntype_b, "order_b": ord_b, "side": side, "position": plabel,
-             "mean_count": cnt / max(overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)], 1),
-             "n": overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)]}
-            for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, side, plabel), cnt
-            in overlap_pos_accum.items()
-        ]
-        pd.DataFrame(overlap_pos_rows).to_csv(na_subset_dir / "overlap_position.csv", index=False)
-        print(f"  -> {na_subset_dir}/overlap_position.csv ({len(overlap_pos_rows)} rows)")
-
-        # Save overlap position × layer distribution
-        overlap_pos_layer_rows = [
-            {"pair": pair, "neuron_class": nc, "ntype_a": ntype_a, "order_a": ord_a,
-             "ntype_b": ntype_b, "order_b": ord_b, "layer": layer, "side": side,
-             "position": plabel,
-             "mean_count": cnt / max(overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)], 1),
-             "n": overlap_pos_n[(pair, nc, ntype_a, ord_a, ntype_b, ord_b)]}
-            for (pair, nc, ntype_a, ord_a, ntype_b, ord_b, layer, side, plabel), cnt
-            in overlap_pos_layer_accum.items()
-        ]
-        pd.DataFrame(overlap_pos_layer_rows).to_csv(
-            na_subset_dir / "overlap_position_by_layer.csv", index=False)
-        print(f"  -> {na_subset_dir}/overlap_position_by_layer.csv "
-              f"({len(overlap_pos_layer_rows)} rows)")
-
-        # Clean up checkpoint after successful subset completion
-        if ckpt_path.exists():
-            ckpt_path.unlink()
+        results = process_examples(
+            model, info, tokenizer, df, args.prompts, na_config,
+            top_k_ffn=args.top_k_ffn, top_k_proj=args.top_k_proj,
+            top_k_query=args.top_k_query, predict_target=args.predict_target,
+        )
+        aggregate_and_save(results, subset_dir, args.prompts, na_config["layer_num"])
 
 
 if __name__ == "__main__":
