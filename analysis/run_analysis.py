@@ -43,6 +43,8 @@ from generate_entity_description import generate_entity_description_with_patchin
 from knockout_attention import generate_answer_with_attention_knockout
 from project_sublayer import project_attention
 from utils import get_answers, load_model, load_tokenizer
+import patch_model
+from neuron_attribution import setup_attribution, process_examples, aggregate_and_save
 from EasyEdit.easyeditor.util import nethook
 
 
@@ -190,7 +192,7 @@ def run_preedit(args):
     data_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading model {args.model} ...")
-    model     = load_model(args.model)
+    model     = load_model(args.model, attn_implementation="eager")
     model.eval()
     tokenizer = load_tokenizer(args.model)
     tokenizer.padding_side = "left"
@@ -306,6 +308,22 @@ def run_preedit(args):
                 patch.to_csv(out, escapechar="\\")
                 print(f"Saved {out}")
 
+    # ── Method 5: Neuron attribution ──────────────────────────────────────
+    if not args.skip_neuron_attribution:
+        na_info, na_config = setup_attribution(model)
+        for subset in ["correct", "incorrect"]:
+            subset_dir = data_dir / f"composition_{subset}"
+            csv_path = subset_dir / "two_hop.csv"
+            if not csv_path.exists():
+                continue
+            subset_df = pd.read_csv(str(csv_path), index_col=0)
+            if args.max_examples:
+                subset_df = subset_df.head(args.max_examples)
+            print(f"\n=== Method 5/5: Neuron Attribution — {subset} ({len(subset_df)} examples) ===")
+            results = process_examples(
+                model, na_info, tokenizer, subset_df, args.na_prompts, na_config)
+            aggregate_and_save(results, subset_dir, args.na_prompts, na_config["layer_num"])
+
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"correct:{data_dir}/composition_correct "
           f"incorrect:{data_dir}/composition_incorrect")
@@ -319,7 +337,7 @@ def run_alphaedit(args):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading model {args.model} ...")
-    model     = load_model(args.model)
+    model     = load_model(args.model, attn_implementation="eager")
     model.eval()
     tokenizer = load_tokenizer(args.model)
 
@@ -352,6 +370,9 @@ def run_alphaedit(args):
     all_sublayer_mlp  = []
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
+    all_neuron_results = []
+    if not args.skip_neuron_attribution:
+        na_info, na_config = setup_attribution(model)
 
     for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
@@ -409,6 +430,11 @@ def run_alphaedit(args):
                         generate_entity_description_with_patching,
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+            if not args.skip_neuron_attribution:
+                print(f"  [Phase: Neuron Attribution] Batch {b+1}/{n_batches}")
+                batch_na = process_examples(
+                    model, na_info, tokenizer, batch_df, args.na_prompts, na_config)
+                all_neuron_results.extend(batch_na)
 
         # Restore (reset to right padding for next batch's editing)
         tokenizer.padding_side = "right"
@@ -444,6 +470,13 @@ def run_alphaedit(args):
                     save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
                                    "entity_description", f"{source}_entity_description_s0.csv",
                                    ["id", "source_layer", "target_layer"])
+        if not args.skip_neuron_attribution and all_neuron_results:
+            for name, subset_df in analysis_subsets.items():
+                subset_ids = set(subset_df["id"])
+                subset_results = [r for r in all_neuron_results if r["id"] in subset_ids]
+                if subset_results:
+                    aggregate_and_save(subset_results, out_dir / name,
+                                       args.na_prompts, na_config["layer_num"])
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
@@ -460,7 +493,7 @@ def run_eap_alphaedit(args):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading model {args.model} ...")
-    model     = load_model(args.model)
+    model     = load_model(args.model, attn_implementation="eager")
     model.eval()
     tokenizer = load_tokenizer(args.model)
 
@@ -558,6 +591,9 @@ def run_eap_alphaedit(args):
     all_sublayer_mlp  = []
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
+    all_neuron_results = []
+    if not args.skip_neuron_attribution:
+        na_info, na_config = setup_attribution(model)
 
     for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
@@ -615,6 +651,11 @@ def run_eap_alphaedit(args):
                         generate_entity_description_with_patching,
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+            if not args.skip_neuron_attribution:
+                print(f"  [Phase: Neuron Attribution] Batch {b+1}/{n_batches}")
+                batch_na = process_examples(
+                    model, na_info, tokenizer, batch_df, args.na_prompts, na_config)
+                all_neuron_results.extend(batch_na)
 
         # Restore (reset to right padding for next batch's editing)
         tokenizer.padding_side = "right"
@@ -650,6 +691,13 @@ def run_eap_alphaedit(args):
                     save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
                                    "entity_description", f"{source}_entity_description_s0.csv",
                                    ["id", "source_layer", "target_layer"])
+        if not args.skip_neuron_attribution and all_neuron_results:
+            for name, subset_df in analysis_subsets.items():
+                subset_ids = set(subset_df["id"])
+                subset_results = [r for r in all_neuron_results if r["id"] in subset_ids]
+                if subset_results:
+                    aggregate_and_save(subset_results, out_dir / name,
+                                       args.na_prompts, na_config["layer_num"])
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
@@ -665,7 +713,7 @@ def run_ifmet(args):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading model {args.model} ...")
-    model     = load_model(args.model)
+    model     = load_model(args.model, attn_implementation="eager")
     model.eval()
     tokenizer = load_tokenizer(args.model)
 
@@ -698,6 +746,9 @@ def run_ifmet(args):
     all_sublayer_mlp  = []
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
+    all_neuron_results = []
+    if not args.skip_neuron_attribution:
+        na_info, na_config = setup_attribution(model)
 
     for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
@@ -756,6 +807,11 @@ def run_ifmet(args):
                         generate_entity_description_with_patching,
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+            if not args.skip_neuron_attribution:
+                print(f"  [Phase: Neuron Attribution] Batch {b+1}/{n_batches}")
+                batch_na = process_examples(
+                    model, na_info, tokenizer, batch_df, args.na_prompts, na_config)
+                all_neuron_results.extend(batch_na)
 
         # Restore (reset to right padding for next batch's editing)
         tokenizer.padding_side = "right"
@@ -790,6 +846,13 @@ def run_ifmet(args):
                 save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
                                "entity_description", f"{source}_entity_description_s0.csv",
                                ["id", "source_layer", "target_layer"])
+        if not args.skip_neuron_attribution and all_neuron_results:
+            for name, subset_df in analysis_subsets.items():
+                subset_ids = set(subset_df["id"])
+                subset_results = [r for r in all_neuron_results if r["id"] in subset_ids]
+                if subset_results:
+                    aggregate_and_save(subset_results, out_dir / name,
+                                       args.na_prompts, na_config["layer_num"])
 
     print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
           f"pre-edit:{data_dir}/composition_incorrect "
@@ -848,6 +911,12 @@ if __name__ == "__main__":
                         help="Skip all analysis (sublayer, knockout, patchscopes) — edit + eval only")
     parser.add_argument("--skip-patchscopes", action="store_true",
                         help="Skip PatchScopes (method 4) to save time")
+    parser.add_argument("--skip-neuron-attribution", action="store_true",
+                        help="Skip neuron attribution analysis")
+    parser.add_argument("--na-prompts", nargs="+",
+                        default=["two-hop", "first-hop", "second-hop"],
+                        choices=["two-hop", "first-hop", "second-hop"],
+                        help="Prompt types for neuron attribution (default: all three)")
     parser.add_argument("--force", action="store_true",
                         help="Rerun and overwrite all existing outputs (ignore checkpoints and cached files)")
     parser.add_argument("--batch-size",        type=int, default=128,
