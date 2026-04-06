@@ -848,7 +848,7 @@ def get_llama_like_config(model):
         "n_heads": config.num_attention_heads,
         "n_kv_heads": config.num_key_value_heads,
         "hidden_size": config.hidden_size,
-        "head_dim": config.head_dim,
+        "head_dim": getattr(config, "head_dim", config.hidden_size // config.num_attention_heads),
     }
     return c
 
