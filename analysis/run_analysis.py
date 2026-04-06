@@ -309,7 +309,7 @@ def run_preedit(args):
                 print(f"Saved {out}")
 
     # ── Method 5: Neuron attribution ──────────────────────────────────────
-    if not args.skip_neuron_attribution:
+    if not args.skip_analysis and not args.skip_neuron_attribution:
         na_info, na_config = setup_attribution(model)
         for subset in ["correct", "incorrect"]:
             subset_dir = data_dir / f"composition_{subset}"

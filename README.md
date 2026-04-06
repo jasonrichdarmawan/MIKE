@@ -73,14 +73,15 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 
 ```
 run_overnight.sh
-  ├── run_analysis.py --methods ifmet      — edit, evaluate, split subsets, sublayer + knockout + patchscopes
-  ├── neuron_attribution.py (IFMET post-edit)
-  ├── neuron_attribution.py (AlphaEdit post-edit)
-  ├── neuron_attribution.py (pre-edit)
+  ├── run_analysis.py --methods preedit    — evaluate, create subsets, all 4 analyses
+  ├── run_analysis.py --methods ifmet      — edit, evaluate, split subsets, all 4 analyses
   └── run_analysis.py --methods alphaedit  — same as IFMET
 
 analyze_tables.py / analyze_plots.py      — tables and plots from saved CSVs
 ```
+
+The four analyses are: sublayer projection, attention knockout, PatchScopes, and neuron attribution.
+Neuron attribution is now integrated into `run_analysis.py` (previously required separate runs).
 
 `run_analysis.py` skips steps whose output files already exist, so re-runs are safe.
 Classification results are cached automatically as `*_classified.csv` on first run.
@@ -125,7 +126,9 @@ Post-edit creates four subsets under `$OUT/{now_correct,still_incorrect,still_in
 | `still_inconsistent` | Both single hops pass, composition fails due to inconsistent second-hop |
 | `broken_hops` | One or both single-hop retrievals broke after editing |
 
-Mechanism analyses (sublayer projection, attention knockout, patchscopes) run on `now_correct` and `still_incorrect` only; `still_inconsistent` and `broken_hops` are saved as CSVs only.
+Mechanism analyses (sublayer projection, attention knockout, patchscopes, neuron attribution) run on `now_correct` and `still_incorrect` only; `still_inconsistent` and `broken_hops` are saved as CSVs only.
+
+Use `--skip-neuron-attribution` to skip neuron attribution, `--skip-patchscopes` to skip PatchScopes, or `--skip-analysis` to skip all analyses. Use `--na-prompts two-hop` to run neuron attribution on a single prompt type.
 
 #### YAML configuration
 
@@ -147,25 +150,17 @@ Key fields to check before running:
 
 ### Neuron attribution
 
-Requires GPU (~2 min for 900 examples). Uses `analysis/patch_model.py` to monkey-patch GPT-2/Llama forward passes without modifying model files.
+Neuron attribution is now integrated into `run_analysis.py` and runs automatically as the fourth analysis phase. It can also be run standalone:
 
 ```bash
 MODEL=meta-llama/Meta-Llama-3-8B
 DATA_DIR=datasets/meta-llama/Meta-Llama-3-8B
 
-# Pre-edit
+# Standalone (pre-edit)
 python analysis/neuron_attribution.py \
     --model-name $MODEL --data-dir $DATA_DIR \
     --prompts two-hop first-hop second-hop \
     --subsets correct incorrect inconsistent
-
-# Post-edit (load edited weights via checkpoint)
-python analysis/neuron_attribution.py \
-    --model-name $MODEL \
-    --data-dir $DATA_DIR/composition_incorrect_alphaedit \
-    --checkpoint $DATA_DIR/composition_incorrect_alphaedit/editing_checkpoint.pt \
-    --prompts two-hop first-hop second-hop \
-    --subsets now_correct still_incorrect still_inconsistent
 
 # Quick test
 python analysis/neuron_attribution.py \
@@ -250,7 +245,7 @@ python analysis/analyze_tables.py --subsets \
 | `project_sublayer.py` | Sublayer projection: project attention/MLP output into vocabulary per layer |
 | `knockout_attention.py` | Attention knockout: zero out attention from source to target, measure answer change |
 | `evaluate_dataset.py` | Evaluate model on two_hop.csv (first-hop, second-hop, composition, shortcuts) |
-| `neuron_attribution.py` | Neuron-level LPI and backward attribution chain (GPU recommended) |
+| `neuron_attribution.py` | Neuron-level LPI and backward attribution chain; integrated into `run_analysis.py`, also runnable standalone (GPU required) |
 
 **Analysis output scripts** -- read saved CSVs and produce tables or plots:
 
