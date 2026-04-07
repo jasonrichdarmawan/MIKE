@@ -14,6 +14,9 @@ from edit_utils import (
 from EasyEdit.easyeditor.util.alg_dict import *
 import torch
 import os
+import logging
+from utils import StreamHandler, FileHandler, BufferingLoggerWriter
+import sys
 
 # %%
 
@@ -57,19 +60,17 @@ def calculate_averages(data):
 # %%
 
 if __name__ == "__main__":
-    import os
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    # import sys
-    # sys.argv = ["", 
-    #     "--editing_method", "AlphaEdit_Circuit", 
-    #     "--sequential_editing",
-    #     "--model_type", "qwen3-4b-instruct",
-    #     "--dtype", "bfloat16",
-    #     "--apply_chat_template",
-    #     "--batch_size", "1",
-    #     "--sample_size", "4",
-    #     "--data_name", "MQuAKE-CF-3k-v2-clke",
-    # ]
+    sys.argv = ["", 
+        "--editing_method", "AlphaEdit_Circuit", 
+        "--sequential_editing",
+        "--model_type", "qwen3-4b-instruct",
+        "--dtype", "bfloat16",
+        "--apply_chat_template",
+        "--batch_size", "2",
+        "--sample_size", "4",
+        "--data_name", "MQuAKE-CF-3k-v2-clke",
+    ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -83,6 +84,8 @@ if __name__ == "__main__":
     parser.add_argument("--sample_size", default=3000, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     args = parser.parse_args()
+    
+    SAVE_DIR = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/'
 
     if args.editing_method == 'no_edit':
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
@@ -111,6 +114,29 @@ if __name__ == "__main__":
         alg_name = hparams.alg_name
         apply_algo = ALG_DICT[alg_name]
         
+# %%
+
+if __name__ == "__main__":
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    
+    fmt = logging.Formatter('%(asctime)s %(name)s %(levelname)-9s %(message)s')
+    
+    sh = StreamHandler()
+    sh.setFormatter(fmt)
+    
+    fh = FileHandler(f"{SAVE_DIR}/output.log", mode='w')
+    fh.setFormatter(fmt)
+    
+    logger = logging.getLogger("CaKE_Test")
+    logger.propagate = False  # Prevent log messages from being propagated to the root logger
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(sh)
+    logger.addHandler(fh)
+    
+    # Redirect stdout to the logger
+    sys.stdout = BufferingLoggerWriter(logger, logging.INFO)
+    sys.stderr = BufferingLoggerWriter(logger, logging.WARNING)
+    
 # %%
 
 if __name__ == "__main__":
@@ -204,9 +230,9 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    os.makedirs(f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/', exist_ok=True)
-    metrics_filepath = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/{args.editing_method}_metrics.json'
-    res_filepath = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/{args.editing_method}_res.json'
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    metrics_filepath = f'{SAVE_DIR}/{args.editing_method}_metrics.json'
+    res_filepath = f'{SAVE_DIR}/{args.editing_method}_res.json'
     print(f"Saving metrics to {metrics_filepath}")
     print(f"Saving results to {res_filepath}")
     json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
