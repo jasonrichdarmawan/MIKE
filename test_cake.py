@@ -92,6 +92,7 @@ if __name__ == "__main__":
 
     import json
     data = json.load(open(f'./datasets/{args.datatype}.json','r', encoding='utf-8'))
+    data = data[:10]  # For quick testing, use only the first 1000 items. Remove or adjust this for full evaluation.
     if args.editing_method == 'WISE':
         loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
         loc_data = loc_data[:7000]
@@ -99,7 +100,7 @@ if __name__ == "__main__":
     elif args.editing_method == 'Mello':
         contriever = AutoModel.from_pretrained("facebook/contriever-msmarco", device_map=f"cuda:{hparams.device}")
         contriever_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
-        with open('./prompts/MeLLo-prompt.txt', 'r') as f:
+        with open('./prompts/MeLLo-prompt.txt', 'r', encoding='utf-8') as f:
             task_prompt = f.read()
         stop = ["Retrieved fact:"]
         new_facts = set()
@@ -235,7 +236,7 @@ if __name__ == "__main__":
             elif args.editing_method == 'WISE':
                 metrics, loc_index = edit_wise(model, tokenizer, item, hparams, loc_data, loc_index, apply_algo, test_generation=False)
             elif args.editing_method == 'Mello':
-                metrics = edit_mello(model, task_prompt, stop, tokenizer, item, hparams, contriever, contriever_tokenizer, embs, test_generation=False)
+                metrics = edit_mello(model, task_prompt, stop, tokenizer, item, hparams, contriever, contriever_tokenizer, embs, new_facts, test_generation=False)
             elif args.editing_method == 'IFMET':
                 model, metrics = edit_ifmet(model, tokenizer, item, hparams_s, hparams_d, apply_algo, test_generation=False)
             elif args.editing_method == 'ROME':
@@ -257,7 +258,9 @@ if __name__ == "__main__":
     # ============================================================
     if args.multilingual and args.editing_method not in ['PreEdit']:
         from edit_utils import (edit_multilingual_batch, edit_rome_multilingual_batch, 
-                                cake_multilingual_batch, edit_wise_multilingual_batch)
+                                cake_multilingual_batch, edit_wise_multilingual_batch,
+                                edit_alphaedit_multilingual_batch,
+                                edit_mello_multilingual_batch)
 
         EVAL_LANGS = ['en', 'de', 'fr', 'ja', 'zh']
         EDIT_BATCH_SIZE = 50  # Number of items per editing batch
@@ -296,7 +299,8 @@ if __name__ == "__main__":
         tokenizer.pad_token = tokenizer.eos_token
 
         # If resuming, we need to replay all previous edits to get model to correct state
-        if ml_start_idx > 0:
+        # Mello does not modify weights, so replay is not needed
+        if ml_start_idx > 0 and args.editing_method != 'Mello':
             print(f"Replaying {ml_start_idx} previous edits to restore model state...")
             import copy
             for replay_batch_start in tqdm(range(0, ml_start_idx, EDIT_BATCH_SIZE), desc="Replaying edits"):
@@ -308,11 +312,20 @@ if __name__ == "__main__":
                         if isinstance(r['target_new'], dict):
                             r['target_new'] = r['target_new']['str']
                     all_requests.extend(requests)
-                hparams.batch_size = len(all_requests)
-                model, _ = apply_algo(
-                    model, tokenizer, all_requests, hparams,
-                    copy=False, return_orig_weights=True
-                )
+                if args.editing_method == 'AlphaEdit':
+                    # AlphaEdit: one request at a time (Jason's requirement)
+                    for req in all_requests:
+                        hparams.batch_size = 1
+                        model, _ = apply_algo(
+                            model, tokenizer, [req], hparams,
+                            copy=False, return_orig_weights=True
+                        )
+                else:
+                    hparams.batch_size = len(all_requests)
+                    model, _ = apply_algo(
+                        model, tokenizer, all_requests, hparams,
+                        copy=False, return_orig_weights=True
+                    )
                 import gc
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -326,7 +339,7 @@ if __name__ == "__main__":
             loc_index = 0
 
         # Process data in batches of EDIT_BATCH_SIZE
-        remaining_data = data[ml_start_idx:]
+        remaining_data = data[ml_start_idx:1000]
         total_batches = (len(remaining_data) + EDIT_BATCH_SIZE - 1) // EDIT_BATCH_SIZE
         
         for batch_idx in tqdm(range(total_batches), desc="Multilingual batch edit+eval"):
@@ -341,6 +354,10 @@ if __name__ == "__main__":
                 model, batch_lang_results, loc_index = edit_wise_multilingual_batch(model, tokenizer, batch_items, hparams, loc_data, loc_index, apply_algo, test_generation=False)
             elif args.editing_method == 'ROME':
                 model, batch_lang_results = edit_rome_multilingual_batch(model, tokenizer, batch_items, hparams, apply_algo, test_generation=False)
+            elif args.editing_method == 'AlphaEdit':
+                model, batch_lang_results = edit_alphaedit_multilingual_batch(model, tokenizer, batch_items, hparams, apply_algo, test_generation=False)
+            elif args.editing_method == 'Mello':
+                model, batch_lang_results = edit_mello_multilingual_batch(model, tokenizer, batch_items, hparams, task_prompt, stop, contriever, contriever_tokenizer, embs, new_facts, test_generation=False)
             else:
                 model, batch_lang_results = edit_multilingual_batch(model, tokenizer, batch_items, hparams, alg_name, apply_algo, test_generation=False)
 

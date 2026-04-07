@@ -142,7 +142,7 @@ def call_model(prompt, stop, model, tokenizer):
         tokenizer.eos_token = "<|eot_id|>"
     elif "qwen" in model.config.model_type.lower():
         # Qwen2.5-instruct 使用 <|im_start|> 模板
-        full_prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+        full_prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n"
         tokenizer.pad_token = tokenizer.eos_token  # 确保设置 pad_token
     else:
         full_prompt = prompt
@@ -165,7 +165,7 @@ def call_model(prompt, stop, model, tokenizer):
     generate_args = {
         "input_ids": inputs.input_ids,
         "attention_mask": inputs.attention_mask,
-        "max_new_tokens": 256,
+        "max_new_tokens": 64,
         "temperature": 0.0,
         "do_sample": False,
         "stopping_criteria": StoppingCriteriaList([stop_criteria]),
@@ -189,10 +189,11 @@ def call_model(prompt, stop, model, tokenizer):
     
     return generated_text
 
-def mello(task_prompt, q, model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device):
+def mello(task_prompt, q, model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device, new_facts):
     found_ans = False
     prompt = task_prompt + "\n\nQustion: " + q
     print('*********************************')
+    gen = ""
     for i in range(4):
     # prompt the model to generate a subquestion and a tentative answer
         gen = call_model(prompt, stop, model, tokenizer)
@@ -428,7 +429,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams, test_generation=F
 
     return metrics
 
-def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, contriever_tokenizer, embs, test_generation=False):
+def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, contriever_tokenizer, embs, new_facts, test_generation=False):
     metrics = {'post':
                {        
                 'hop_wise':[],
@@ -441,17 +442,17 @@ def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriev
         temp_metrics = []
         ans = i['answer_alias']
         ans.append(i['answer'])
-        result, _ = mello(t_p, i['cloze'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, ans, device)
+        result, _ = mello(t_p, i['cloze'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, ans, device, new_facts)
         temp_metrics.append(result)
-        result, _ = mello(t_p, i['question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, ans, device)
+        result, _ = mello(t_p, i['question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, ans, device, new_facts)
         temp_metrics.append(result)
-        metrics['hop_wise'].append(temp_metrics)
+        metrics['post']['hop_wise'].append(temp_metrics)
     answer = edit_item['new_answer_alias']
     answer.append(edit_item['new_answer'])
-    res, _ = mello(task_prompt, edit_item['cloze_question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device)
-    metrics['accuracy'].append(res)
-    res, _ = mello(task_prompt, edit_item['questions'][0], model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device)
-    metrics['accuracy'].append(res)
+    res, _ = mello(task_prompt, edit_item['cloze_question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device, new_facts)
+    metrics['post']['accuracy'].append(res)
+    res, _ = mello(task_prompt, edit_item['questions'][0], model, tokenizer, stop, contriever, contriever_tokenizer, embs, answer, device, new_facts)
+    metrics['post']['accuracy'].append(res)
     return metrics
 
 def cake(original_model, tokenizer, item, hparams, test_generation=False):
@@ -707,7 +708,7 @@ def _eval_all_langs(model, tokenizer, edit_item, hparams, exec_time, test_genera
         }
     return lang_results
 
-EVAL_INFERENCE_BATCH_SIZE = 448  # Max questions per GPU inference call
+EVAL_INFERENCE_BATCH_SIZE = 256  # Max questions per GPU inference call
 
 def _eval_all_items_all_langs_batched(model, tokenizer, batch_items, hparams, exec_time, test_generation=False):
     """
@@ -864,6 +865,39 @@ def edit_multilingual_batch(model, tokenizer, batch_items, hparams, alg_name, ap
     # NO restore — edits accumulate
     return edited_model, batch_lang_results
 
+def edit_alphaedit_multilingual_batch(model, tokenizer, batch_items, hparams, apply_algo, test_generation=False):
+    """
+    AlphaEdit: edit one request at a time using for loop outside apply_algo.
+    Jason's requirement: batching must be handled outside apply_AlphaEdit_to_model.
+    Edits accumulate — weights are NEVER restored.
+    """
+    import copy
+
+    start = time()
+    for item in batch_items:
+        requests = copy.deepcopy(item['requested_rewrite'])
+        for r in requests:
+            if isinstance(r['target_new'], dict):
+                r['target_new'] = r['target_new']['str']
+        for request in requests:
+            hparams.batch_size = 1
+            model, _ = apply_algo(
+                model,
+                tokenizer,
+                [request],
+                hparams,
+                copy=False,
+                return_orig_weights=True
+            )
+    exec_time = time() - start
+
+    batch_lang_results = _eval_all_items_all_langs_batched(
+        model, tokenizer, batch_items, hparams, exec_time, test_generation
+    )
+
+    # NO restore — edits accumulate
+    return model, batch_lang_results
+
 def edit_rome_multilingual_batch(model, tokenizer, batch_items, hparams, apply_algo, test_generation=False):
     """
     ROME: edit a batch of items (no restore), then evaluate each in 5 languages.
@@ -943,6 +977,98 @@ def cake_multilingual_batch(original_model, tokenizer, batch_items, hparams, tes
     batch_lang_results = _eval_all_items_all_langs_batched(model, tokenizer, batch_items, hparams, exec_time, test_generation)
 
     # NO restore — LoRA adapters stay on
+    return model, batch_lang_results
+
+def edit_mello_multilingual_batch(model, tokenizer, batch_items, hparams,
+                                   task_prompt, stop, contriever, contriever_tokenizer, embs, new_facts,
+                                   test_generation=False):
+    """
+    MeLLo multilingual batch: MeLLo does NOT modify model weights.
+    Editing = in-context retrieval only. Evaluate each item in 5 languages.
+
+    Because MeLLo is retrieval-based (no weight edits), there is no weight
+    accumulation concept — the same model is used throughout, and facts are
+    retrieved from `embs` at inference time.
+    """
+    from time import time
+    device = f"cuda:{hparams.device}"
+    start = time()
+
+    batch_lang_results = []
+    for item in batch_items:
+        lang_results = {}
+        for lang in MULTILINGUAL_LANGS:
+            suffix = f"_{lang}" if lang and lang != "en" else ""
+            single_hops_key = f"new_single_hops{suffix}"
+            new_answer_key = f"new_answer{suffix}"
+            new_answer_alias_key = f"new_answer_alias{suffix}"
+            cloze_question_key = f"cloze_question{suffix}"
+            questions_key = f"questions{suffix}"
+
+            metrics = {
+                'hop_wise': [],
+                'accuracy': [],
+                'hop_wise_predictions': [],
+                'accuracy_predictions': []
+            }
+
+            # Hop-wise evaluation
+            for hop in item.get(single_hops_key, []):
+                ans = list(hop.get('answer_alias', []))
+                ans.append(hop.get('answer', ''))
+                hop_metrics = []
+                hop_preds = []
+
+                result_cloze, prompt_cloze = mello(
+                    task_prompt, hop.get('cloze', ''),
+                    model, tokenizer, stop,
+                    contriever, contriever_tokenizer, embs, ans, device, new_facts
+                )
+                hop_metrics.append(result_cloze)
+                hop_preds.append({'question': hop.get('cloze', ''), 'generated_text': prompt_cloze, 'answer': ans[-1]})
+
+                result_q, prompt_q = mello(
+                    task_prompt, hop.get('question', ''),
+                    model, tokenizer, stop,
+                    contriever, contriever_tokenizer, embs, ans, device, new_facts
+                )
+                hop_metrics.append(result_q)
+                hop_preds.append({'question': hop.get('question', ''), 'generated_text': prompt_q, 'answer': ans[-1]})
+
+                metrics['hop_wise'].append(hop_metrics)
+                metrics['hop_wise_predictions'].append(hop_preds)
+
+            # Accuracy evaluation
+            answer = list(item.get(new_answer_alias_key, []))
+            answer.append(item.get(new_answer_key, ''))
+
+            res_cloze, prompt_cloze = mello(
+                task_prompt, item.get(cloze_question_key, ''),
+                model, tokenizer, stop,
+                contriever, contriever_tokenizer, embs, answer, device, new_facts
+            )
+            metrics['accuracy'].append(res_cloze)
+            metrics['accuracy_predictions'].append({'question': item.get(cloze_question_key, ''), 'generated_text': prompt_cloze, 'answer': item.get(new_answer_key, '')})
+
+            for q in item.get(questions_key, []):
+                res_q, prompt_q = mello(
+                    task_prompt, q,
+                    model, tokenizer, stop,
+                    contriever, contriever_tokenizer, embs, answer, device, new_facts
+                )
+                metrics['accuracy'].append(res_q)
+                metrics['accuracy_predictions'].append({'question': q, 'generated_text': prompt_q, 'answer': item.get(new_answer_key, '')})
+
+            exec_time = time() - start
+            lang_results[lang] = {
+                'case_id': item['case_id'],
+                'requested_rewrite': item['requested_rewrite'],
+                'time': exec_time,
+                'post': metrics,
+            }
+        batch_lang_results.append(lang_results)
+
+    # MeLLo does not modify weights — return model unchanged
     return model, batch_lang_results
 
 def edit_wise_multilingual_batch(model, tokenizer, batch_items, hparams, loc_data, loc_index, apply_algo, test_generation=False):

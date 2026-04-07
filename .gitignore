@@ -3,5 +3,9 @@
 *.egg-info
 
 datasets/two_hop.csv
-datasets/*/
-output
+datasets/gpt2
+output/
+data/stats/
+output/gpt2/
+null_space_project.pt
+*.local
