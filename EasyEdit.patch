@@ -1,0 +1,357 @@
+diff --git a/easyeditor/models/alphaedit/AlphaEdit_main.py b/easyeditor/models/alphaedit/AlphaEdit_main.py
+index 872e130..af45c93 100644
+--- a/easyeditor/models/alphaedit/AlphaEdit_main.py
++++ b/easyeditor/models/alphaedit/AlphaEdit_main.py
+@@ -13,7 +13,7 @@ from ...util.generate import generate_fast
+ from ...util.globals import *
+ 
+ from .compute_ks import compute_ks
+-from .compute_z import compute_z, get_module_input_output_at_words, find_fact_lookup_idx
++from .compute_z import compute_z, compute_z_batched, get_module_input_output_at_words, find_fact_lookup_idx
+ from .AlphaEdit_hparams import AlphaEditHyperParams
+ 
+ # Cache variable(s)
+@@ -77,7 +77,8 @@ def apply_AlphaEdit_to_model(
+         del W_out
+         cache_c_new = True
+     
+-    deltas = execute_AlphaEdit(model, tok, requests, hparams, cache_template=cache_template)
++    edit_batch_size = kwargs.get("edit_batch_size", 1)
++    deltas = execute_AlphaEdit(model, tok, requests, hparams, cache_template=cache_template, edit_batch_size=edit_batch_size)
+ 
+     with torch.no_grad():
+         for w_name, upd_m in deltas.items():
+@@ -100,6 +101,7 @@ def execute_AlphaEdit(
+     requests: List[Dict],
+     hparams: AlphaEditHyperParams,
+     cache_template: Optional[str] = None,
++    edit_batch_size: int = 1,
+ ) -> Dict[str, Tuple[torch.Tensor]]:
+     """
+     Executes the AlphaEdit update algorithm for the specified update at the specified layer
+@@ -139,50 +141,42 @@ def execute_AlphaEdit(
+     z_layer = hparams.layers[-1]
+     z_list = []
+ 
+-    for request in requests:
+-        # Retrieve k/v pair if already stored in cache
+-        cache_fname = (
+-            Path(
+-                str(cache_template).format(
+-                    z_layer, hparams.clamp_norm_factor, request["case_id"]
+-                )
+-            )
+-            if cache_template is not None
+-            else None
+-        )
+-        data_loaded = False
+-        if (
+-            cache_fname is not None  # Require cache template
+-            and cache_fname.exists()  # Cache file must exist
+-        ):
+-            try:
+-                data = np.load(cache_fname)
+-                z_list.append(torch.from_numpy(data["v_star"]).to(f"cuda:{hparams.device}"))
+-                data_loaded = True
+-            except Exception as e:
+-                print(f"Error reading cache file due to {e}. Recomputing...")
+-
+-        # Compute k/v pair if not loaded from cache
+-        if not data_loaded:
+-            cur_z = compute_z(
+-                model,
+-                tok,
+-                request,
+-                hparams,
+-                z_layer,
+-                context_templates,
+-            )
++    for batch_start in range(0, len(requests), edit_batch_size):
++        batch = requests[batch_start: batch_start + edit_batch_size]
+ 
++        # Split into cached vs. to-compute
++        to_compute, to_compute_idx = [], []
++        for i, request in enumerate(batch):
++            cache_fname = (
++                Path(str(cache_template).format(z_layer, hparams.clamp_norm_factor, request["case_id"]))
++                if cache_template is not None else None
++            )
++            loaded = False
++            if cache_fname is not None and cache_fname.exists():
++                try:
++                    data = np.load(cache_fname)
++                    z_list.append(torch.from_numpy(data["v_star"]).to(f"cuda:{hparams.device}"))
++                    loaded = True
++                except Exception as e:
++                    print(f"Error reading cache file due to {e}. Recomputing...")
++            if not loaded:
++                to_compute.append(request)
++                to_compute_idx.append(i)
++
++        if not to_compute:
++            continue
++
++        # Compute z vectors for uncached requests in one batched call
++        if len(to_compute) == 1:
++            computed = [compute_z(model, tok, to_compute[0], hparams, z_layer, context_templates)]
++        else:
++            computed = compute_z_batched(model, tok, to_compute, hparams, z_layer, context_templates)
++
++        for req, cur_z in zip(to_compute, computed):
+             z_list.append(cur_z)
+-
+             if cache_fname is not None:
+                 cache_fname.parent.mkdir(exist_ok=True, parents=True)
+-                np.savez(
+-                    cache_fname,
+-                    **{
+-                        "v_star": cur_z.detach().cpu().numpy(),
+-                    },
+-                )
++                np.savez(cache_fname, **{"v_star": cur_z.detach().cpu().numpy()})
+                 print(f"Cached k/v pair at {cache_fname}")
+     zs = torch.stack(z_list, dim=1)
+ 
+@@ -210,9 +204,13 @@ def execute_AlphaEdit(
+         repeat_factor = (layer_ks.size(1) // targets.size(1))
+         targets = targets.repeat_interleave(repeat_factor, dim=1)
+         resid = targets / (len(hparams.layers) - i)  # Distribute residual across layers
++        lk = layer_ks.float().to(f"cuda:{hparams.device}")
++        rs = resid.float().to(f"cuda:{hparams.device}")
++        Pi = P[i,:,:].float().to(f"cuda:{hparams.device}")
++        cc = cache_c[i,:,:].float().to(f"cuda:{hparams.device}")
+         upd_matrix = torch.linalg.solve(
+-                P[i,:,:].to(f"cuda:{hparams.device}") @ (layer_ks.to(f"cuda:{hparams.device}") @ layer_ks.T.to(f"cuda:{hparams.device}") + cache_c[i,:,:].to(f"cuda:{hparams.device}")) + hparams.L2*torch.eye(layer_ks.shape[0], dtype=torch.float,device=f"cuda:{hparams.device}"),
+-                P[i,:,:].to(f"cuda:{hparams.device}") @ layer_ks.to(f"cuda:{hparams.device}") @ resid.T.to(f"cuda:{hparams.device}")
++                Pi @ (lk @ lk.T + cc) + hparams.L2*torch.eye(lk.shape[0], dtype=torch.float, device=f"cuda:{hparams.device}"),
++                Pi @ lk @ rs.T
+         )
+ 
+         # Adjust update matrix shape
+@@ -238,7 +236,7 @@ def execute_AlphaEdit(
+     
+     for i, layer in enumerate(hparams.layers):
+         layer_ks = compute_ks(model, tok, requests, hparams, layer, context_templates).T
+-        cache_c[i,:,:] += layer_ks.cpu() @ layer_ks.cpu().T
++        cache_c[i,:,:] += layer_ks.float().cpu() @ layer_ks.float().cpu().T
+ 
+     # Restore state of original model
+     with torch.no_grad():
+diff --git a/easyeditor/models/alphaedit/compute_z.py b/easyeditor/models/alphaedit/compute_z.py
+index 0ad4c97..b552c43 100644
+--- a/easyeditor/models/alphaedit/compute_z.py
++++ b/easyeditor/models/alphaedit/compute_z.py
+@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple
+ 
+ import numpy as np
+ import torch
++import torch.nn.functional as F
+ from transformers import AutoModelForCausalLM, AutoTokenizer
+ 
+ from ..rome import repr_tools
+@@ -195,6 +196,191 @@ def compute_z(
+     return target
+ 
+ 
++def compute_z_batched(
++    model: AutoModelForCausalLM,
++    tok: AutoTokenizer,
++    requests: List[Dict],
++    hparams: AlphaEditHyperParams,
++    layer: int,
++    context_templates: List[str],
++) -> List[torch.Tensor]:
++    """
++    Batched version of compute_z: optimises one delta per request but runs all
++    requests in a single forward/backward pass per gradient step.
++
++    Returns a list of target vectors (one per request), identical in meaning to
++    what calling compute_z individually would return.
++    """
++    B = len(requests)
++    device = f"cuda:{hparams.device}"
++
++    lm_w = nethook.get_module(model, f"{hparams.lm_head_module}").weight.T
++    ln_f  = nethook.get_module(model, hparams.ln_f_module)
++    try:
++        lm_b = nethook.get_parameter(model, f"{hparams.lm_head_module}.bias")
++    except LookupError:
++        lm_b = next(model.parameters()).new_zeros(model.config.vocab_size)
++
++    # ── Per-request setup ─────────────────────────────────────────────────────
++    per_req = []
++    for req in requests:
++        target_ids = tok.encode(
++            req["target_new"], return_tensors="pt", add_special_tokens=False
++        ).to(device)[0]
++        if target_ids[0] in (tok.bos_token_id, tok.unk_token_id):
++            target_ids = target_ids[1:]
++
++        rewriting_prompts = [
++            context.format(req["prompt"]) + tok.decode(target_ids[:-1])
++            for context_types in context_templates
++            for context in context_types
++        ]
++        kl_prompts  = ["{} is a"]
++        all_prompts = rewriting_prompts + kl_prompts
++        n_rw        = len(rewriting_prompts)
++        n_kl        = len(kl_prompts)
++
++        input_tok = tok(
++            [p.format(req["subject"]) for p in all_prompts],
++            return_tensors="pt", padding=True,
++        ).to(device)
++
++        rewriting_targets = torch.full(
++            (n_rw, input_tok["input_ids"].shape[1]), -100, device=device
++        )
++        for j in range(n_rw):
++            ex_len = input_tok["attention_mask"][j].sum()
++            rewriting_targets[j, ex_len - len(target_ids): ex_len] = target_ids
++
++        lookup_idxs = [
++            find_fact_lookup_idx(
++                p, req["subject"], tok, hparams.fact_token, verbose=(j == 0)
++            )
++            for j, p in enumerate(all_prompts)
++        ]
++
++        per_req.append(dict(
++            target_ids=target_ids,
++            input_tok=input_tok,
++            n_rw=n_rw, n_kl=n_kl,
++            rewriting_targets=rewriting_targets,
++            lookup_idxs=lookup_idxs,
++        ))
++
++    # ── Pad and concatenate inputs ────────────────────────────────────────────
++    max_len = max(r["input_tok"]["input_ids"].shape[1] for r in per_req)
++    combined_ids, combined_mask = [], []
++    prompt_offsets = [0]
++    for r in per_req:
++        ids  = r["input_tok"]["input_ids"]
++        mask = r["input_tok"]["attention_mask"]
++        pad  = max_len - ids.shape[1]
++        if pad > 0:
++            ids  = F.pad(ids,  (0, pad), value=tok.pad_token_id)
++            mask = F.pad(mask, (0, pad), value=0)
++        combined_ids.append(ids)
++        combined_mask.append(mask)
++        prompt_offsets.append(prompt_offsets[-1] + ids.shape[0])
++        # Pad rewriting_targets to max_len as well
++        rt = r["rewriting_targets"]
++        if rt.shape[1] < max_len:
++            r["rewriting_targets"] = F.pad(rt, (0, max_len - rt.shape[1]), value=-100)
++
++    combined_input = {
++        "input_ids":      torch.cat(combined_ids,  dim=0),
++        "attention_mask": torch.cat(combined_mask, dim=0),
++    }
++
++    # ── Initialise per-request delta vectors ──────────────────────────────────
++    hidden_size  = model.config.hidden_size
++    deltas       = [torch.zeros((hidden_size,), requires_grad=True, device=device) for _ in range(B)]
++    target_inits = [None] * B
++    kl_distr_inits = [None] * B
++    loss_layer   = max(hparams.v_loss_layer, layer)
++
++    # ── Hook: inject delta_b at each request's lookup positions ───────────────
++    def edit_output_fn(cur_out, cur_layer):
++        if cur_layer == hparams.layer_module_tmp.format(layer):
++            for b in range(B):
++                if target_inits[b] is None:
++                    row0 = prompt_offsets[b]
++                    target_inits[b] = cur_out[0][row0, per_req[b]["lookup_idxs"][0]].detach().clone()
++                for j, idx in enumerate(per_req[b]["lookup_idxs"]):
++                    cur_out[0][prompt_offsets[b] + j, idx, :] += deltas[b]
++        return cur_out
++
++    opt = torch.optim.Adam(deltas, lr=hparams.v_lr)
++    nethook.set_requires_grad(False, model)
++
++    # ── Optimisation loop ─────────────────────────────────────────────────────
++    for it in range(hparams.v_num_grad_steps):
++        opt.zero_grad()
++
++        with nethook.TraceDict(
++            module=model,
++            layers=[
++                hparams.layer_module_tmp.format(loss_layer),
++                hparams.layer_module_tmp.format(layer),
++            ],
++            retain_input=False, retain_output=True,
++            edit_output=edit_output_fn,
++        ) as tr:
++            logits = model(**combined_input).logits
++
++        total_loss = torch.tensor(0.0, device=device)
++        for b in range(B):
++            r      = per_req[b]
++            start  = prompt_offsets[b]
++            n_rw   = r["n_rw"]
++            n_kl   = r["n_kl"]
++
++            # KL divergence
++            kl_logits = torch.stack([
++                logits[start + n_rw + i, r["lookup_idxs"][n_rw + i], :]
++                for i in range(n_kl)
++            ], dim=0)
++            kl_log_probs = F.log_softmax(kl_logits, dim=1)
++            if kl_distr_inits[b] is None:
++                kl_distr_inits[b] = kl_log_probs.detach().clone()
++
++            # NLL on rewriting prompts
++            output = tr[hparams.layer_module_tmp.format(loss_layer)].output[0]
++            if output.shape[1] != r["rewriting_targets"].shape[1]:
++                output = output.transpose(0, 1)
++            full_repr = output[start: start + n_rw]
++
++            log_probs = torch.log_softmax(
++                ln_f(full_repr) @ lm_w.to(full_repr.device) + lm_b.to(full_repr.device),
++                dim=2,
++            )
++            rt   = r["rewriting_targets"]
++            loss_vals = torch.gather(
++                log_probs, 2,
++                torch.where(rt != -100, rt, 0).unsqueeze(2).to(log_probs.device),
++            ).squeeze(2)
++            mask         = (rt != -100).float()
++            nll_loss_each = -(loss_vals * mask.to(loss_vals.device)).sum(1) / r["target_ids"].size(0)
++            nll_loss     = nll_loss_each.mean()
++            kl_loss      = hparams.kl_factor * F.kl_div(
++                kl_distr_inits[b], kl_log_probs, log_target=True, reduction="batchmean"
++            )
++            weight_decay = hparams.v_weight_decay * (
++                torch.norm(deltas[b]) / torch.norm(target_inits[b]) ** 2
++            )
++            total_loss = total_loss + nll_loss + kl_loss.to(device) + weight_decay.to(device)
++
++        if it < hparams.v_num_grad_steps - 1:
++            total_loss.backward()
++            opt.step()
++            for b in range(B):
++                max_norm = hparams.clamp_norm_factor * target_inits[b].norm()
++                if deltas[b].norm() > max_norm:
++                    with torch.no_grad():
++                        deltas[b][...] = deltas[b] * max_norm / deltas[b].norm()
++
++    return [target_inits[b] + deltas[b].detach() for b in range(B)]
++
++
+ def get_module_input_output_at_words(
+     model: AutoModelForCausalLM,
+     tok: AutoTokenizer,
+diff --git a/easyeditor/models/rome/layer_stats.py b/easyeditor/models/rome/layer_stats.py
+index 56f1da6..0458afc 100644
+--- a/easyeditor/models/rome/layer_stats.py
++++ b/easyeditor/models/rome/layer_stats.py
+@@ -101,7 +101,8 @@ def layer_stats(
+         # raw_ds = {'train': raw_ds}
+         raw_ds = load_dataset(
+             ds_name,
+-            dict(wikitext="wikitext-103-raw-v1", wikipedia="20200501.en")[ds_name]
++            dict(wikitext="wikitext-103-raw-v1", wikipedia="20220301.en")[ds_name],
++            trust_remote_code=True,
+         )
+         if hasattr(model.config, 'n_positions'):
+             maxlen = model.config.n_positions
