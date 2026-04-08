@@ -7,7 +7,7 @@ from EasyEdit.easyeditor import (
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
 import json
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from edit_utils import (
     edit, edit_ifmet, edit_mello, edit_rome, cake, edit_wise, get_sent_embeddings,
 )
@@ -60,17 +60,17 @@ def calculate_averages(data):
 # %%
 
 if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    sys.argv = ["", 
-        "--editing_method", "AlphaEdit_Circuit", 
-        "--sequential_editing",
-        "--model_type", "qwen3-4b-instruct",
-        "--dtype", "bfloat16",
-        "--apply_chat_template",
-        "--batch_size", "2",
-        "--sample_size", "4",
-        "--data_name", "MQuAKE-CF-3k-v2-clke",
-    ]
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    # sys.argv = ["", 
+    #     "--editing_method", "AlphaEdit_Circuit", 
+    #     "--sequential_editing",
+    #     "--model_type", "qwen3-4b-instruct",
+    #     "--dtype", "bfloat16",
+    #     "--apply_chat_template",
+    #     "--batch_size", "2",
+    #     "--sample_size", "4",
+    #     "--data_name", "MQuAKE-CF-3k-v2-clke",
+    # ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -142,7 +142,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     dtype = getattr(torch, args.dtype)
     max_memory = {i: "8GiB" for i in range(torch.cuda.device_count())}
-    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="auto", max_memory=max_memory, dtype=dtype)
+    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="auto", max_memory=max_memory, dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(hparams.model_name)
     
     if tokenizer.pad_token is None:
