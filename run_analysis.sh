@@ -1,0 +1,102 @@
+#!/bin/bash
+# Full pipeline: re-edit with AlphaEdit, IFMET, and EAP-AlphaEdit (fresh checkpoints),
+# run analyses, analyze_tables.
+#
+# Batch sizes (tuned for A100 40GB + Llama-3-8B):
+#   --batch-size 128  (unified: inference, edit outer loop, and edit→analyze→restore cycles)
+
+set -e
+
+FAILED_STEPS=()
+
+run_step() {
+    local name="$1"; shift
+    echo "========== [$(date +%H:%M:%S)] ${name} =========="
+    if "$@"; then
+        echo "========== [$(date +%H:%M:%S)] ${name} DONE =========="
+    else
+        echo "========== [$(date +%H:%M:%S)] ${name} FAILED (exit $?) =========="
+        FAILED_STEPS+=("${name}")
+    fi
+}
+
+cd /lambda/nfs/Llama-3-8B-Analysis/CaKE
+source /lambda/nfs/Llama-3-8B-Analysis/venv/bin/activate
+mkdir -p logs
+exec > >(tee logs/run_analysis.log) 2>&1
+
+wait_for_gpu() {
+    echo "Waiting for GPU memory to clear..."
+    while true; do
+        used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | tr -d ' ')
+        if [ "$used" -lt 2000 ]; then
+            echo "GPU clear (${used} MiB used)"
+            break
+        fi
+        echo "  GPU still at ${used} MiB, waiting 10s..."
+        sleep 10
+    done
+}
+
+MODEL="meta-llama/Meta-Llama-3-8B"
+DATA_DIR="datasets/meta-llama/Meta-Llama-3-8B"
+IFMET_OUT="${DATA_DIR}/composition_incorrect_ifmet"
+ALPHAEDIT_OUT="${DATA_DIR}/composition_incorrect_alphaedit"
+EAP_ALPHAEDIT_OUT="${DATA_DIR}/composition_incorrect_eap_alphaedit"
+
+# ── 1. AlphaEdit: re-edit + eval + analyses ────────────────────────────────
+run_step "AlphaEdit edit + analysis" python analysis/run_analysis.py \
+    --model   $MODEL \
+    --methods alphaedit \
+    --data-dir $DATA_DIR \
+    --hparams-alphaedit EasyEdit/hparams/AlphaEdit/llama3-8b.yaml \
+    --batch-size         128 \
+    --force
+
+# ── 2. analyze_tables: AlphaEdit ──────────────────────────────────────────
+run_step "analyze_tables: AlphaEdit" python analysis/analyze_tables.py \
+    --subsets \
+        pre-edit:${DATA_DIR}/composition_incorrect \
+        now_correct:${ALPHAEDIT_OUT}/now_correct \
+        still_incorrect:${ALPHAEDIT_OUT}/still_incorrect \
+        still_inconsistent:${ALPHAEDIT_OUT}/still_inconsistent \
+        broken_hops:${ALPHAEDIT_OUT}/broken_hops
+
+# ── 3. IFMET: skipped (already done) ──────────────────────────────────────
+
+# ── 4. analyze_tables: IFMET: skipped (already done) ──────────────────────
+
+# ── 5. EAP-AlphaEdit: re-edit + eval + analyses ───────────────────────────
+echo "Cleaning up GPU before EAP-AlphaEdit..."
+pkill -9 -f "run_analysis.py" 2>/dev/null || true
+sleep 5
+wait_for_gpu
+run_step "EAP-AlphaEdit edit + analysis" python analysis/run_analysis.py \
+    --model   $MODEL \
+    --methods eap_alphaedit \
+    --data-dir $DATA_DIR \
+    --hparams-alphaedit EasyEdit/hparams/AlphaEdit/llama3-8b.yaml \
+    --batch-size         128 \
+    --force
+
+# ── 6. analyze_tables: EAP-AlphaEdit ──────────────────────────────────────
+run_step "analyze_tables: EAP-AlphaEdit" python analysis/analyze_tables.py \
+    --subsets \
+        pre-edit:${DATA_DIR}/composition_incorrect \
+        now_correct:${EAP_ALPHAEDIT_OUT}/now_correct \
+        still_incorrect:${EAP_ALPHAEDIT_OUT}/still_incorrect \
+        still_inconsistent:${EAP_ALPHAEDIT_OUT}/still_inconsistent \
+        broken_hops:${EAP_ALPHAEDIT_OUT}/broken_hops
+
+# ── Summary ────────────────────────────────────────────────────────────────
+echo ""
+echo "========== [$(date +%H:%M:%S)] PIPELINE COMPLETE =========="
+if [ ${#FAILED_STEPS[@]} -eq 0 ]; then
+    echo "  All steps passed."
+else
+    echo "  FAILED STEPS (${#FAILED_STEPS[@]}):"
+    for step in "${FAILED_STEPS[@]}"; do
+        echo "    ✗ ${step}"
+    done
+    exit 1
+fi
