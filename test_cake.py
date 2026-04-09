@@ -60,7 +60,7 @@ def calculate_averages(data):
 # %%
 
 if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     # sys.argv = ["", 
     #     "--editing_method", "AlphaEdit_Circuit", 
     #     "--sequential_editing",
@@ -141,8 +141,8 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     dtype = getattr(torch, args.dtype)
-    max_memory = {i: "8GiB" for i in range(torch.cuda.device_count())}
-    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="auto", max_memory=max_memory, dtype=torch.bfloat16)
+    # max_memory = {i: "8GiB" for i in range(torch.cuda.device_count())}
+    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="cuda", dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(hparams.model_name)
     
     if tokenizer.pad_token is None:

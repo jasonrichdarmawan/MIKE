@@ -48,7 +48,7 @@ micromamba activate multihop
 
 pip install SPARQLWrapper==2.0.0
 
-micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.5.1 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers=0.19.1
+micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.5.1 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
 
 pip install "numpy>=1.24,<2" scipy sentence-transformers==3.2.1
 
@@ -324,7 +324,7 @@ python test_cake.py \
   --model_type qwen3-4b-instruct \
   --dtype bfloat16 \
   --apply_chat_template \
-  --batch_size 1 \
+  --batch_size 32 \
   --sample_size 1000 \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
