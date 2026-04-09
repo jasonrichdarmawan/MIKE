@@ -170,7 +170,7 @@ def call_model(prompt, stop, model, tokenizer):
 
 def mello(
     task_prompt, q, model, tokenizer, stop, contriever, contriever_tokenizer, 
-    embs, answer, device, apply_chat_template=False):
+    embs, answer, device, eval_with_chat_template=False):
     found_ans = False
     prompt = task_prompt + "\n\nQustion: " + q
     print('*********************************')
@@ -206,7 +206,7 @@ def mello(
     return check_answer_in_pred(ans, answer), prompt
 
 
-def preprocess_function(examples, tokenizer, apply_chat_template=False):
+def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_prompt_part=False):
     """
     Caveat:
     - CaKE's implementation do not turn padded positions into -100
@@ -231,6 +231,7 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False):
     # Build training pairs first so chat-template formatting can keep alignment.
     pairs = list(zip(all_texts, all_targets))
     random.shuffle(pairs)
+    
     learning_texts = []
     learning_targets = []
     for item in examples['learning_examples']:
@@ -271,16 +272,17 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False):
     )
 
     labels = model_inputs["input_ids"].copy()
-    for idx, prompt_ids in enumerate(prompt_inputs["input_ids"]):
-        prefix_length = min(len(prompt_ids), labels.shape[1])
-        labels[idx, :prefix_length] = -100
-    labels[model_inputs["attention_mask"] == 0] = -100
+    if mask_prompt_part:
+        for idx, prompt_ids in enumerate(prompt_inputs["input_ids"]):
+            prefix_length = min(len(prompt_ids), labels.shape[1])
+            labels[idx, :prefix_length] = -100
+        labels[model_inputs["attention_mask"] == 0] = -100
     model_inputs['labels'] = labels
     return model_inputs
 
 def check_answer(
     model, tokenizer, question, answer, 
-    apply_chat_template=False, max_new_tokens=50
+    eval_with_chat_template=False, max_new_tokens=50
 ):
     """
     Check if the model can answer the questions correctly
@@ -298,15 +300,15 @@ def check_answer(
       - answer: ["Emerson Dambudzo Mnangagwa", ...]
     """
     prompt = question
-    if apply_chat_template:
+    if eval_with_chat_template:
         prompt = _format_chat_prompt(tokenizer=tokenizer, question=question)
     tokenizer.padding_side = "left"
     tokens = tokenizer(
         prompt,
         return_tensors="pt",
-        add_special_tokens=not apply_chat_template,
+        add_special_tokens=not eval_with_chat_template,
     ).to(model.device)
-    if not apply_chat_template:
+    if not eval_with_chat_template:
         prompt = tokenizer.decode(tokens.input_ids[0], skip_special_tokens=False)
     outputs = model.generate(
         **tokens,
@@ -325,7 +327,7 @@ def check_answer_batch(
     tokenizer,
     questions,
     answers,
-    apply_chat_template=False,
+    eval_with_chat_template=False,
     max_new_tokens=50,
     batch_size=8,
 ):
@@ -350,7 +352,7 @@ def check_answer_batch(
 
     try:
         formatted_prompts = questions
-        if apply_chat_template:
+        if eval_with_chat_template:
             formatted_prompts = [
                 _format_chat_prompt(tokenizer=tokenizer, question=question)
                 for question in questions
@@ -365,7 +367,7 @@ def check_answer_batch(
                 batch_prompts,
                 return_tensors="pt",
                 padding=True,
-                add_special_tokens=not apply_chat_template,
+                add_special_tokens=not eval_with_chat_template,
             ).to(model.device)
 
             input_pad_length = tokens["input_ids"].shape[1]
@@ -393,7 +395,7 @@ def check_answer_batch(
     return results
 
 def compute_edit_quality(model, tokenizer, edit_item, hparams, 
-                         apply_chat_template=False, test_generation=False,
+                         eval_with_chat_template=False, test_generation=False,
                          eval_batch_size=8):
     """
     Caveat:
@@ -480,7 +482,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams,
             tokenizer=tokenizer,
             questions=batch_questions,
             answers=batch_answers,
-            apply_chat_template=apply_chat_template,
+            eval_with_chat_template=eval_with_chat_template,
             max_new_tokens=max_new_tokens,
             batch_size=eval_batch_size,
         )
@@ -512,7 +514,7 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams,
     return metrics
 
 def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, 
-               contriever_tokenizer, embs, apply_chat_template=False, test_generation=False):
+               contriever_tokenizer, embs, eval_with_chat_template=False, test_generation=False):
     metrics = {'post':
                {        
                 'hop_wise':[],
@@ -527,12 +529,12 @@ def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriev
         ans.append(i['answer'])
         result, _ = mello(
             t_p, i['cloze'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, 
-            ans, device, apply_chat_template=apply_chat_template,
+            ans, device, apply_chaeval_with_chat_templatet_template=eval_with_chat_template,
         )
         temp_metrics.append(result)
         result, _ = mello(
             t_p, i['question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, 
-            ans, device, apply_chat_template=apply_chat_template,
+            ans, device, eval_with_chat_template=eval_with_chat_template,
         )
         temp_metrics.append(result)
         metrics['hop_wise'].append(temp_metrics)
@@ -540,26 +542,27 @@ def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriev
     answer.append(edit_item['new_answer'])
     res, _ = mello(
         task_prompt, edit_item['cloze_question'], model, tokenizer, stop, contriever, 
-        contriever_tokenizer, embs, answer, device, apply_chat_template=apply_chat_template,
+        contriever_tokenizer, embs, answer, device, eval_with_chat_template=eval_with_chat_template,
     )
     metrics['accuracy'].append(res)
     res, _ = mello(
         task_prompt, edit_item['questions'][0], model, tokenizer, stop, contriever, 
-        contriever_tokenizer, embs, answer, device, apply_chat_template=apply_chat_template,
+        contriever_tokenizer, embs, answer, device, eval_with_chat_template=eval_with_chat_template,
     )
     metrics['accuracy'].append(res)
     return metrics
 
-def cake(original_model, tokenizer, item, hparams, 
-         apply_chat_template=False, restore_weights=True, test_generation=False):
+def _cake_single(model, tokenizer, item, hparams, 
+                 eval_with_chat_template=False, restore_weights=True, test_generation=False):
     """
     Caveat: return the base model after editing
     """
-    target_modules = ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "gate_proj"] 
-    model = create_lora_model(original_model, target_modules=target_modules)
+    if not hasattr(model, "peft_config"):
+        target_modules = ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "gate_proj"] 
+        model = create_lora_model(model, target_modules=target_modules)
     # original_model = original_model.to(device)
     model.enable_input_require_grads()
-    train_examples = []
+    
     item_case_examples = []
     learning_examples = []
     for rewrite in item['requested_rewrite']:
@@ -573,36 +576,39 @@ def cake(original_model, tokenizer, item, hparams,
         learning_item['question']: "If Maria lives in a mansion, Fernando Santos resides in a townhouse, and Jose lives in a bungalow, then the person who resides in a townhouse is a citizen of which country?"
         learning_item['answer']: "The person who resides in a townhouse is a citizen of the United Kingdom."
         """
-        prompt = rewrite['prompt'].format(rewrite['subject'])
-        target = rewrite['target_new']['str']
         item_case_examples.append({
-            "text": prompt,
-            "target": target
+            "text": rewrite['prompt'].format(rewrite['subject']),
+            "target": rewrite['target_new']['str'],
         })
         if 'rephrase_prompt' in rewrite:
             for rewrite_item in rewrite['rephrase_prompt']:
                 item_case_examples.append({
                     "text": rewrite_item['question'],
-                    "target": rewrite_item['answer']
+                    "target": rewrite_item['answer'],
                 })
         if 'learning_prompt' in rewrite:
             for learning_item in rewrite['learning_prompt']:
                 learning_examples.append({
                     "text": learning_item['question'],
-                    "target": learning_item['answer']
+                    "target": learning_item['answer'],
                 })
-    train_examples.append({'item_case_examples': item_case_examples, 'learning_examples': learning_examples})
+    
+    train_examples = []
+    train_examples.append({
+        'item_case_examples': item_case_examples, 
+        'learning_examples': learning_examples,
+    })
     train_dataset = Dataset.from_list(train_examples) # converts a Python list of dicts into Dataset where each list element becomes one row and dict keys become columns
     train_dataset = train_dataset.map(
         preprocess_function,
         batched=True,
         remove_columns=train_dataset.column_names,
-        fn_kwargs={"tokenizer": tokenizer, "apply_chat_template": apply_chat_template}
+        fn_kwargs={"tokenizer": tokenizer}
     )
 
     training_args = TrainingArguments(
         output_dir=f'./output/',
-        overwrite_output_dir=True,
+        overwrite_output_dir=False,
         num_train_epochs=40,
         per_device_train_batch_size=4,
         learning_rate=1e-4,
@@ -626,7 +632,7 @@ def cake(original_model, tokenizer, item, hparams,
         "time": exec_time,
         "post": compute_edit_quality(
             model, tokenizer, item, hparams, 
-            apply_chat_template=apply_chat_template, test_generation=test_generation
+            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation
         ),
     }
     if restore_weights:
@@ -636,8 +642,40 @@ def cake(original_model, tokenizer, item, hparams,
     return model, metrics
 
 
+def cake(original_model, tokenizer, items, hparams, 
+         eval_with_chat_template=False, restore_weights=True, test_generation=False):
+    """
+    Supports both single-item and batched editing for CaKE.
+
+    Caveat:
+    - CaKE edits one item at a time.
+    - If `items` is a list, edits are applied sequentially in list order.
+    - Return type matches input style:
+      - single dict input -> `(model, metrics_dict)`
+      - list input -> `(model, metrics_list)`
+    """
+    if isinstance(items, dict):
+        items = [items]
+
+    model = original_model
+    all_metrics = []
+    for item in items:
+        model, metrics = _cake_single(
+            model,
+            tokenizer,
+            item,
+            hparams,
+            eval_with_chat_template=eval_with_chat_template,
+            restore_weights=restore_weights,
+            test_generation=test_generation,
+        )
+        all_metrics.append(metrics)
+
+    return model, all_metrics
+
+
 def edit(model, tokenizer, items, hparams, alg_name, apply_algo, 
-         apply_chat_template=False, restore_weights=False, test_generation=False):
+         eval_with_chat_template=False, restore_weights=False, test_generation=False):
     all_metrics = []
     
     for item in items:
@@ -674,7 +712,7 @@ def edit(model, tokenizer, items, hparams, alg_name, apply_algo,
             "requested_rewrite": requested_rewrite,
             "post": compute_edit_quality(
                 edited_model, tokenizer, item, hparams, 
-                apply_chat_template=apply_chat_template, test_generation=test_generation,
+                eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
             ),
         }
         all_metrics.append(metrics)
@@ -696,7 +734,7 @@ def edit(model, tokenizer, items, hparams, alg_name, apply_algo,
     return edited_model, all_metrics
 
 def edit_rome(model, tokenizer, edit_item, hparams, apply_algo, 
-              apply_chat_template=False, restore_weights=True, test_generation=False):
+              eval_with_chat_template=False, restore_weights=True, test_generation=False):
     # all_metrics = []
     start = time()
     requests = edit_item['requested_rewrite']
@@ -722,7 +760,7 @@ def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,
         "time": exec_time,
         "post": compute_edit_quality(
             edited_model, tokenizer, edit_item, hparams, 
-            apply_chat_template=apply_chat_template, test_generation=test_generation,
+            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
         ),
     }
     
@@ -734,7 +772,7 @@ def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,
     return edited_model, metrics
 
 def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo, 
-               apply_chat_template=False, restore_weights=True, test_generation=False):
+               eval_with_chat_template=False, restore_weights=True, test_generation=False):
     start = time()
     requests = edit_item['requested_rewrite']
     ifmet_requests = []
@@ -775,7 +813,7 @@ def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo,
         "time": exec_time,
         "post": compute_edit_quality(
             edited_model, tokenizer, edit_item, hparams_s, 
-            apply_chat_template=apply_chat_template, test_generation=test_generation,
+            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
         ),
     }
     if restore_weights:
@@ -790,7 +828,7 @@ def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo,
     return edited_model, metrics
 
 def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo, 
-              apply_chat_template=False, restore_weights=True, test_generation=False):
+              eval_with_chat_template=False, restore_weights=True, test_generation=False):
     start = time()
     requests = edit_item['requested_rewrite']
     for i,item in enumerate(requests):
@@ -816,7 +854,7 @@ def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_a
         "time": exec_time,
         "post": compute_edit_quality(
             edited_model, tokenizer, edit_item, hparams, 
-            apply_chat_template=apply_chat_template, test_generation=test_generation,
+            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
         ),
     }
     if restore_weights:

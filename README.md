@@ -315,15 +315,29 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --stats_dir data/stats
 ```
 
-### AlphaEdit_Circuit
+### Others
 
+AlphaEdit_Circuit
 ```bash
 python test_cake.py \
   --editing_method AlphaEdit_Circuit \
   --sequential_editing \
   --model_type qwen3-4b-instruct \
   --dtype bfloat16 \
-  --apply_chat_template \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --sample_size 1000 \
+  --data_name MQuAKE-CF-3k-v2-clke
+```
+
+CaKE
+```bash
+python test_cake.py \
+  --editing_method CaKE \
+  --sequential_editing \
+  --model_type qwen3-4b-instruct \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
   --batch_size 32 \
   --sample_size 1000 \
   --data_name MQuAKE-CF-3k-v2-clke

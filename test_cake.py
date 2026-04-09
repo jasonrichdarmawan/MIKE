@@ -66,7 +66,7 @@ if __name__ == "__main__":
     #     "--sequential_editing",
     #     "--model_type", "qwen3-4b-instruct",
     #     "--dtype", "bfloat16",
-    #     "--apply_chat_template",
+    #     "--eval_with_chat_template",
     #     "--batch_size", "2",
     #     "--sample_size", "4",
     #     "--data_name", "MQuAKE-CF-3k-v2-clke",
@@ -79,13 +79,14 @@ if __name__ == "__main__":
     parser.add_argument('--data_name', default=None, type=str)
     parser.add_argument('--model_type', default=None,type=str)
     parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
-    parser.add_argument('--apply_chat_template', action='store_true')
+    parser.add_argument('--eval_with_chat_template', action='store_true')
     parser.add_argument("--batch_size", default=16, type=int)
     parser.add_argument("--sample_size", default=3000, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     args = parser.parse_args()
     
-    SAVE_DIR = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}/'
+    sequential_str = "sequential" if args.sequential_editing else "restore"
+    SAVE_DIR = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}_{sequential_str}/'
 
     if args.editing_method == 'no_edit':
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
@@ -94,7 +95,7 @@ if __name__ == "__main__":
     elif args.editing_method in ['IFMET']:
         hparams_s = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-shallow.yaml')
         hparams_d = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-deeper.yaml')
-    elif args.editing_method in ['LoRA', 'CAKE', 'Mello']:
+    elif args.editing_method in ['LoRA', 'CaKE', 'MeLLo']:
         hparams = LoRAHyperParams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
     elif args.editing_method == 'WISE':
         hparams = WISEHyperParams.from_hparams(f'./EasyEdit/hparams/WISE/{args.model_type}.yaml')
@@ -124,7 +125,7 @@ if __name__ == "__main__":
     sh = StreamHandler()
     sh.setFormatter(fmt)
     
-    fh = FileHandler(f"{SAVE_DIR}/output.log", mode='w')
+    fh = FileHandler(f"{SAVE_DIR}/{args.editing_method}.log", mode='w')
     fh.setFormatter(fmt)
     
     logger = logging.getLogger("CaKE_Test")
@@ -157,7 +158,7 @@ if __name__ == "__main__":
         loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
         loc_data = loc_data[:7000]
         loc_index = 0
-    elif args.editing_method == 'Mello':
+    elif args.editing_method == 'MeLLo':
         contriever = AutoModel.from_pretrained("facebook/contriever-msmarco", device_map=f"cuda:{hparams.device}")
         contriever_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
         with open('./prompts/MeLLo-prompt.txt', 'r') as f:
@@ -180,43 +181,38 @@ if __name__ == "__main__":
         items = data[start_idx:start_idx + args.batch_size]
         if args.editing_method == "no_edit":
             model, metrics = edit(
-                model, tokenizer, items, hparams, alg_name=None, apply_algo=None, 
-                apply_chat_template=args.apply_chat_template, restore_weights=False, 
-                test_generation=False
+                model, tokenizer, items, hparams=None, alg_name=None, apply_algo=None, 
+                eval_with_chat_template=args.eval_with_chat_template
             )
-        elif args.editing_method == 'CAKE':
+        elif args.editing_method == 'CaKE':
             model, metrics = cake(
-                model, tokenizer, items, hparams, apply_chat_template=args.apply_chat_template, 
-                restore_weights=args.sequential_editing, test_generation=False
+                model, tokenizer, items, hparams, 
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing,
             )
         elif args.editing_method == 'WISE':
             metrics, loc_index = edit_wise(
                 model, tokenizer, items, hparams, loc_data, loc_index, apply_algo, 
-                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
-                test_generation=False
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing, 
             )
-        elif args.editing_method == 'Mello':
+        elif args.editing_method == 'MeLLo':
             metrics = edit_mello(
                 model, task_prompt, stop, tokenizer, items, hparams, contriever, contriever_tokenizer, 
-                embs, apply_chat_template=args.apply_chat_template, test_generation=False
+                embs, eval_with_chat_template=args.eval_with_chat_template,
             )
         elif args.editing_method == 'IFMET':
             model, metrics = edit_ifmet(
                 model, tokenizer, items, hparams_s, hparams_d, apply_algo, 
-                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
-                test_generation=False
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing, 
             )
         elif args.editing_method == 'ROME':
             model, metrics = edit_rome(
                 model, tokenizer, items, hparams, apply_algo, 
-                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
-                test_generation=False
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing,
             )
         else:
             model, metrics = edit(
                 model, tokenizer, items, hparams, alg_name, apply_algo, 
-                apply_chat_template=args.apply_chat_template, restore_weights=args.sequential_editing, 
-                test_generation=False
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing, 
             )
         
         if start_idx % args.batch_size == 0:
