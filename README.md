@@ -325,7 +325,7 @@ python test_cake.py \
   --dtype bfloat16 \
   --apply_chat_template \
   --batch_size 1 \
-  --sample_size 2999 \
+  --sample_size 1000 \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 

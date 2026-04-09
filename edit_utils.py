@@ -319,8 +319,82 @@ def check_answer(
     )
     return prompt, generated_text, check_answer_in_pred(generated_text, answer)
 
+
+def check_answer_batch(
+    model,
+    tokenizer,
+    questions,
+    answers,
+    apply_chat_template=False,
+    max_new_tokens=50,
+    batch_size=8,
+):
+    """
+    Batch version of `check_answer`.
+
+    Args:
+    - questions: List[str]
+    - answers: List[List[str]]
+
+    Returns:
+    - List[Tuple[prompt, generated_text, is_correct]]
+    """
+    if len(questions) != len(answers):
+        raise ValueError("questions and answers must have the same length")
+    if len(questions) == 0:
+        return []
+
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    results = []
+
+    try:
+        formatted_prompts = questions
+        if apply_chat_template:
+            formatted_prompts = [
+                _format_chat_prompt(tokenizer=tokenizer, question=question)
+                for question in questions
+            ]
+
+        for start in range(0, len(formatted_prompts), batch_size):
+            end = min(start + batch_size, len(formatted_prompts))
+            batch_prompts = formatted_prompts[start:end]
+            batch_answers = answers[start:end]
+
+            tokens = tokenizer(
+                batch_prompts,
+                return_tensors="pt",
+                padding=True,
+                add_special_tokens=not apply_chat_template,
+            ).to(model.device)
+
+            input_pad_length = tokens["input_ids"].shape[1]
+            outputs = model.generate(
+                **tokens,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
+            
+            generated_ids_batch = outputs[:, input_pad_length:]
+            generated_texts = tokenizer.batch_decode(generated_ids_batch, skip_special_tokens=True)
+            
+            for prompt_text, generated_text, expected_answers in zip(batch_prompts, generated_texts, batch_answers):
+                results.append(
+                    (
+                        prompt_text,
+                        generated_text,
+                        check_answer_in_pred(generated_text, expected_answers),
+                    )
+                )
+
+    finally:
+        tokenizer.padding_side = original_padding_side
+
+    return results
+
 def compute_edit_quality(model, tokenizer, edit_item, hparams, 
-                         apply_chat_template=False, test_generation=False):
+                         apply_chat_template=False, test_generation=False,
+                         eval_batch_size=8):
     """
     Caveat:
     - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
@@ -337,77 +411,104 @@ def compute_edit_quality(model, tokenizer, edit_item, hparams,
         'hop_wise_predictions': [],
         'accuracy_predictions': []
     }
-    
-    # Evaluate the single-hop questions
-    for i in edit_item['new_single_hops']:
+
+    eval_requests = []
+
+    # Build single-hop evaluation requests
+    for hop_idx, single_hop in enumerate(edit_item['new_single_hops']):
         """
         i['answer_alias']: ["Britain", "UK", "G. B.", "GBR", ...]
         i['answer']: "United Kingdom"
         i['cloze']: "Fernando Santos is a citizen of"
         i['question']: "What is the country of citizenship of Fernando Santos?"
         """
-        per_case_id_metrics = []
-        per_case_id_predictions = []
-        
-        answer_candidates = [i["answer"]] + i['answer_alias']
-        
-        # Evaluate in cloze form
-        prompt, generated_text, result = check_answer(
-            model=model, tokenizer=tokenizer, question=i['cloze'], answer=answer_candidates,
-            apply_chat_template=apply_chat_template, max_new_tokens=50,
-        )
-        per_case_id_metrics.append(result)
-        per_case_id_predictions.append({
-            "prompt": prompt,
-            "generated": generated_text,
-            "target": i["answer"]
+        answer_candidates = [single_hop["answer"]] + single_hop['answer_alias']
+        eval_requests.append({
+            "group": "hop_wise",
+            "hop_idx": hop_idx,
+            "form_idx": 0,
+            "question": single_hop['cloze'],
+            "answers": answer_candidates,
+            "target": single_hop["answer"],
+            "max_new_tokens": 50,
         })
-        
-        # Evaluate in question form
-        prompt, generated_text, result = check_answer(
-            model=model, tokenizer=tokenizer, question=i["question"], answer=answer_candidates,
-            apply_chat_template=apply_chat_template, max_new_tokens=50,
-        )
-        per_case_id_metrics.append(result)
-        per_case_id_predictions.append({
-            "prompt": prompt,
-            "generated": generated_text,
-            "target": i["answer"]
+        eval_requests.append({
+            "group": "hop_wise",
+            "hop_idx": hop_idx,
+            "form_idx": 1,
+            "question": single_hop["question"],
+            "answers": answer_candidates,
+            "target": single_hop["answer"],
+            "max_new_tokens": 50,
         })
-        
-        metrics['hop_wise'].append(per_case_id_metrics)
-        metrics['hop_wise_predictions'].append(per_case_id_predictions)
-        
+
     answer_candidates = [edit_item["new_answer"]] + edit_item['new_answer_alias']
-    
-    # Evaluate the multi-hop question in the cloze form
-    # edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
-    prompt, generated_text, result = check_answer(
-        model=model, tokenizer=tokenizer, question=edit_item['cloze_question'], 
-        answer=answer_candidates, apply_chat_template=apply_chat_template, max_new_tokens=10
-    )
-    metrics['accuracy'].append(result)
-    metrics['accuracy_predictions'].append({
-        "prompt": prompt,
-        "generated": generated_text,
-        "target": i["answer"]
+
+    # Build multi-hop cloze request
+    eval_requests.append({
+        "group": "accuracy",
+        "question": edit_item['cloze_question'],
+        "answers": answer_candidates,
+        "target": edit_item["new_answer"],
+        "max_new_tokens": 50,
     })
-    
-    # Multi-hop question evaluation
+
+    # Build multi-hop question requests
     for question in edit_item['questions']:
         """
         question: "Who is the head of state of the country where Fernando Santos hold a citizenship?"
         """
-        prompt, generated_text, result = check_answer(
-            model=model, tokenizer=tokenizer, question=question, answer=answer_candidates, 
-            apply_chat_template=apply_chat_template, max_new_tokens=50,
+        eval_requests.append({
+            "group": "accuracy",
+            "question": question,
+            "answers": answer_candidates,
+            "target": edit_item["new_answer"],
+            "max_new_tokens": 50,
+        })
+
+    # Run batched generation grouped by max_new_tokens
+    grouped_indices = {}
+    for req_idx, req in enumerate(eval_requests):
+        grouped_indices.setdefault(req["max_new_tokens"], []).append(req_idx)
+
+    eval_outputs = [None] * len(eval_requests)
+    for max_new_tokens, req_indices in grouped_indices.items():
+        batch_questions = [eval_requests[idx]["question"] for idx in req_indices]
+        batch_answers = [eval_requests[idx]["answers"] for idx in req_indices]
+        batch_results = check_answer_batch(
+            model=model,
+            tokenizer=tokenizer,
+            questions=batch_questions,
+            answers=batch_answers,
+            apply_chat_template=apply_chat_template,
+            max_new_tokens=max_new_tokens,
+            batch_size=eval_batch_size,
         )
-        metrics['accuracy'].append(result)
-        metrics['accuracy_predictions'].append({
+        for local_idx, req_idx in enumerate(req_indices):
+            eval_outputs[req_idx] = batch_results[local_idx]
+
+    # Assemble metrics with original structure
+    hop_count = len(edit_item['new_single_hops'])
+    metrics['hop_wise'] = [[None, None] for _ in range(hop_count)]
+    metrics['hop_wise_predictions'] = [[None, None] for _ in range(hop_count)]
+
+    for req, output in zip(eval_requests, eval_outputs):
+        prompt, generated_text, result = output
+        prediction = {
             "prompt": prompt,
             "generated": generated_text,
-            "target": i["answer"]
-        })
+            "target": req["target"],
+        }
+
+        if req["group"] == "hop_wise":
+            metrics['hop_wise'][req["hop_idx"]][req["form_idx"]] = result
+            metrics['hop_wise_predictions'][req["hop_idx"]][req["form_idx"]] = prediction
+        elif req["group"] == "accuracy":
+            metrics['accuracy'].append(result)
+            metrics['accuracy_predictions'].append(prediction)
+        else:
+            raise ValueError(f"Unknown request group: {req['group']}")
+
     return metrics
 
 def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, 
