@@ -60,11 +60,15 @@ def load_layers(path: str) -> pd.DataFrame:
 
 
 def _parse_ranks(x):
-    """Parse rank lists saved as Python lists '[1, 2]' or numpy arrays '[ 1  2]'."""
+    """Parse rank lists saved as Python lists '[1, 2]', numpy arrays '[ 1  2]',
+    or numpy repr like '[np.int64(1), np.int64(2)]'."""
     try:
         return ast.literal_eval(x)
     except (ValueError, SyntaxError):
-        return [int(n) for n in str(x).strip("[]").split()]
+        import re
+        # Handle np.int64(...) or np.float64(...) wrappers
+        cleaned = re.sub(r'np\.\w+\(([^)]+)\)', r'\1', str(x))
+        return [int(float(n)) for n in cleaned.strip("[]").replace(",", " ").split()]
 
 
 def _classify_sublayer_projection(generations: pd.DataFrame, target: str):

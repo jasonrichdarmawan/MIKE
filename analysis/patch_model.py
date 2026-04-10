@@ -31,6 +31,7 @@ import torch
 # ── Shared state container ────────────────────────────────────────────────────
 
 _states = {}  # {layer_i: state_dict} — written during forward, read by extract_states()
+_patched = []  # list of (cls, "forward", orig_fn) for unpatch()
 
 
 def extract_states(layer_num):
@@ -42,6 +43,8 @@ def extract_states(layer_num):
 
 def patch(model):
     """Auto-detect model family and apply attribution patches in-place."""
+    if _patched:
+        return  # already patched
     _states.clear()
     name = type(model).__name__
     if "GPT2" in name:
@@ -52,6 +55,14 @@ def patch(model):
         raise ValueError(
             f"Unsupported model type: {name}. Supported: GPT2LMHeadModel, LlamaForCausalLM."
         )
+
+
+def unpatch():
+    """Restore all original forward methods patched by patch()."""
+    for cls, attr, orig_fn in _patched:
+        setattr(cls, attr, orig_fn)
+    _patched.clear()
+    _states.clear()
 
 
 def model_info(model):
@@ -263,6 +274,11 @@ def _patch_llama(model):
         LlamaAttention, LlamaMLP, LlamaDecoderLayer,
     )
 
+    # Save originals for unpatch()
+    _patched.append((LlamaAttention, "forward", LlamaAttention.forward))
+    _patched.append((LlamaMLP, "forward", LlamaMLP.forward))
+    _patched.append((LlamaDecoderLayer, "forward", LlamaDecoderLayer.forward))
+
     # Patch 1: LlamaAttention.forward
     _orig_llama_attn = LlamaAttention.forward
 
@@ -317,6 +333,11 @@ def _patch_llama(model):
     for layer_i, layer in enumerate(model.model.layers):
         layer._layer_i = layer_i
 
+    _num_heads = model.config.num_attention_heads
+    _num_kv_heads = model.config.num_key_value_heads
+    _head_dim_layer = model.config.hidden_size // _num_heads
+    _num_groups = _num_heads // _num_kv_heads
+
     def _patched_llama_layer(self, hidden_states, attention_mask=None, position_ids=None,
                               past_key_value=None, output_attentions=False, use_cache=False,
                               **kwargs):
@@ -325,7 +346,14 @@ def _patch_llama(model):
         # Self-attention
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
-        
+
+        # Compute value states before attention (no RoPE on V in Llama)
+        bsz, q_len, _ = hidden_states.size()
+        v = self.self_attn.v_proj(hidden_states)
+        v = v.view(bsz, q_len, _num_kv_heads, _head_dim_layer).transpose(1, 2)
+        if _num_groups > 1:
+            v = v.repeat_interleave(_num_groups, dim=1)
+
         attn_outputs = self.self_attn(
             hidden_states,
             attention_mask=attention_mask,
@@ -336,10 +364,12 @@ def _patch_llama(model):
             **kwargs,
         )
         attn_out = attn_outputs[0]
-        
-        attn_subvalues = self.self_attn._last_attn_subvalues
-        attn_weights_saved = self.self_attn._last_attn_weights
-        
+        attn_weights_saved = attn_outputs[1]  # [batch, heads, seq_q, seq_k]
+
+        # Compute attn_subvalues from weights and value states
+        last_weights = attn_weights_saved[:, :, -1, :].unsqueeze(-1)
+        attn_subvalues = last_weights * v
+
         hidden_states = residual + attn_out
         residual_output = hidden_states
 

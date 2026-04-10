@@ -1,7 +1,7 @@
 import os, re, subprocess
 from datetime import datetime, timedelta
 
-BASE    = "/lambda/nfs/Llama-3-8B-Analysis/CaKE"
+BASE    = "/lambda/nfs/kim/CaKE"
 _log_candidates = [f"{BASE}/logs/run_analysis.log", f"{BASE}/logs/run_eap_alphaedit.log"]
 LOG = max(
     (p for p in _log_candidates if os.path.exists(p)),
@@ -25,11 +25,11 @@ STEPS = [
 # Estimated durations (seconds)
 # Llama-3-8B on A100 40GB, batch=128
 EST = {
-    "AlphaEdit edit + analysis":       60 * 60 * 8,  # ~8h measured (batch=128)
+    "AlphaEdit edit + analysis":       60 * 60 * 12,  # ~12h measured (batch=128, with neuron attribution)
     "analyze_tables: AlphaEdit":       5  * 60,
-    "IFMET edit + analysis":           60 * 60 * 8,  # ~8h measured (batch=128)
+    "IFMET edit + analysis":           60 * 60 * 12,  # ~12h measured (batch=128, with neuron attribution)
     "analyze_tables: IFMET":           5  * 60,
-    "EAP-AlphaEdit edit + analysis":   60 * 60 * 8,  # ~8h measured (batch=128)
+    "EAP-AlphaEdit edit + analysis":   60 * 60 * 12,  # ~12h measured (batch=128, with neuron attribution)
     "analyze_tables: EAP-AlphaEdit":   5  * 60,
 }
 
@@ -103,14 +103,20 @@ def batch_progress(step):
     section = log_section(step)
     # match "--- AlphaEdit Batch X/N", "--- IFMET Batch X/N", or "--- EAP-AlphaEdit Batch X/N"
     batch_pat = re.findall(r"Batch\s+(\d+)/(\d+)", section)
-    item_pat  = re.findall(r"Item\s+(\d+)/(\d+)\s+edited", section)
     if not batch_pat:
         return None
     b_cur, b_total = int(batch_pat[-1][0]), int(batch_pat[-1][1])
     # count completed batches (batches where "Weights restored" appears after them)
     restored = section.count("Weights restored to original")
-    i_cur  = int(item_pat[-1][0])  if item_pat  else 0
-    i_size = int(item_pat[-1][1])  if item_pat  else 0
+    # count per-request edits within the current batch (each example = 2 requests)
+    # find the section after the last batch header
+    last_batch_idx = section.rfind(f"Batch {b_cur}/{b_total}")
+    current_batch_section = section[last_batch_idx:] if last_batch_idx >= 0 else ""
+    edit_count = len(re.findall(r"Executing \w+ algo", current_batch_section))
+    # batch size from header: "--- Method Batch X/N (M examples) ---"
+    size_match = re.search(r"\((\d+) examples\)", current_batch_section)
+    i_size = int(size_match.group(1)) if size_match else 0
+    i_cur = edit_count // 2 if i_size else 0  # 2 requests per example
     # detect current phase from last [Phase: X] marker
     phase_pat = re.findall(r"\[Phase:\s*([^\]]+)\]", section)
     # if still editing items within current batch (no phase marker yet for this batch)

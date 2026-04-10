@@ -623,6 +623,16 @@ def process_examples(model, info, tokenizer, df, prompts, na_config,
     head_dim     = na_config["head_dim"]
     num_kv_heads = na_config["num_kv_heads"]
 
+    # Refresh stacked weight tensors so they reflect any in-place edits
+    # (e.g. AlphaEdit modifies down_proj weights between batches).
+    with torch.no_grad():
+        info["fc2_stack"] = torch.stack([
+            info["get_ffn_down_proj"](info["layers"][i]) for i in range(layer_num)
+        ])
+        info["o_proj_stack"] = torch.stack([
+            info["get_attn_o_proj"](info["layers"][i]).contiguous() for i in range(layer_num)
+        ])
+
     results = []
     for idx in range(len(df)):
         row    = df.iloc[idx]

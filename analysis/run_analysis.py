@@ -371,12 +371,14 @@ def run_alphaedit(args):
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
     all_neuron_results = []
-    if not args.skip_neuron_attribution:
-        na_info, na_config = setup_attribution(model)
+    na_info = na_config = None
 
     for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+
+        # Editing expects right padding for proper token lookup
+        tokenizer.padding_side = "right"
 
         # Reset cache_c so each batch gets a fresh null-space accumulation.
         ae_main.cache_c_new = False
@@ -431,10 +433,18 @@ def run_alphaedit(args):
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
             if not args.skip_neuron_attribution:
+                if na_info is None:
+                    na_info, na_config = setup_attribution(model)
+                else:
+                    patch_model.patch(model)
                 print(f"  [Phase: Neuron Attribution] Batch {b+1}/{n_batches}")
                 batch_na = process_examples(
                     model, na_info, tokenizer, batch_df, args.na_prompts, na_config)
                 all_neuron_results.extend(batch_na)
+                patch_model.unpatch()
+                # Free large stacked weight tensors to reclaim ~9GB GPU memory for next batch's editing
+                na_info.pop("fc2_stack", None)
+                na_info.pop("o_proj_stack", None)
 
         # Restore (reset to right padding for next batch's editing)
         tokenizer.padding_side = "right"
@@ -575,6 +585,16 @@ def run_eap_alphaedit(args):
     top_layers.sort()
     print(f"[EAP] Top-{args.eap_top_k} layers: {top_layers}")
     hparams.layers = top_layers
+    # Force recomputation of null-space projection P for EAP-selected layers
+    # (the default P_loc was precomputed for AlphaEdit's fixed layers)
+    eap_P_loc = f"./null_space_project_eap_{'_'.join(map(str, top_layers))}.pt"
+    hparams.P_loc = eap_P_loc
+    # Reset global P_loaded so it recomputes if file doesn't exist
+    import EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main as _ae
+    _ae.P_loaded = False
+    print(f"[EAP] P_loc set to {eap_P_loc} (exists: {Path(eap_P_loc).exists()})")
+    del eap, accumulated, scores
+    import gc; gc.collect()
     torch.cuda.empty_cache()
     # ────────────────────────────────────────────────────────────────────────
 
@@ -592,12 +612,17 @@ def run_eap_alphaedit(args):
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
     all_neuron_results = []
-    if not args.skip_neuron_attribution:
-        na_info, na_config = setup_attribution(model)
+    na_info = na_config = None
 
     for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- EAP-AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+
+        # Free GPU memory before editing to avoid OOM during linalg.solve
+        torch.cuda.empty_cache()
+
+        # Editing expects right padding for proper token lookup
+        tokenizer.padding_side = "right"
 
         # Reset cache_c so each batch gets a fresh null-space accumulation.
         ae_main.cache_c_new = False
@@ -652,10 +677,18 @@ def run_eap_alphaedit(args):
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
             if not args.skip_neuron_attribution:
+                if na_info is None:
+                    na_info, na_config = setup_attribution(model)
+                else:
+                    patch_model.patch(model)
                 print(f"  [Phase: Neuron Attribution] Batch {b+1}/{n_batches}")
                 batch_na = process_examples(
                     model, na_info, tokenizer, batch_df, args.na_prompts, na_config)
                 all_neuron_results.extend(batch_na)
+                patch_model.unpatch()
+                # Free large stacked weight tensors to reclaim ~9GB GPU memory for next batch's editing
+                na_info.pop("fc2_stack", None)
+                na_info.pop("o_proj_stack", None)
 
         # Restore (reset to right padding for next batch's editing)
         tokenizer.padding_side = "right"
@@ -747,12 +780,14 @@ def run_ifmet(args):
     all_knockout      = []
     all_patch         = {source: [] for source in ["e1", "last"]}
     all_neuron_results = []
-    if not args.skip_neuron_attribution:
-        na_info, na_config = setup_attribution(model)
+    na_info = na_config = None
 
     for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
         batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
         print(f"\n--- IFMET Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+
+        # Editing expects right padding for proper token lookup
+        tokenizer.padding_side = "right"
 
         # Edit — collect all requests for the batch, then call apply_algo once
         # per phase so the null-space projection covers all batch facts.
@@ -808,10 +843,18 @@ def run_ifmet(args):
                         fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
                         batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
             if not args.skip_neuron_attribution:
+                if na_info is None:
+                    na_info, na_config = setup_attribution(model)
+                else:
+                    patch_model.patch(model)
                 print(f"  [Phase: Neuron Attribution] Batch {b+1}/{n_batches}")
                 batch_na = process_examples(
                     model, na_info, tokenizer, batch_df, args.na_prompts, na_config)
                 all_neuron_results.extend(batch_na)
+                patch_model.unpatch()
+                # Free large stacked weight tensors to reclaim ~9GB GPU memory for next batch's editing
+                na_info.pop("fc2_stack", None)
+                na_info.pop("o_proj_stack", None)
 
         # Restore (reset to right padding for next batch's editing)
         tokenizer.padding_side = "right"

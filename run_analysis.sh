@@ -20,8 +20,8 @@ run_step() {
     fi
 }
 
-cd /lambda/nfs/Llama-3-8B-Analysis/CaKE
-source /lambda/nfs/Llama-3-8B-Analysis/venv/bin/activate
+cd /lambda/nfs/kim/CaKE
+source /lambda/nfs/kim/CaKE/venv/bin/activate
 mkdir -p logs
 exec > >(tee logs/run_analysis.log) 2>&1
 
@@ -62,9 +62,28 @@ run_step "analyze_tables: AlphaEdit" python analysis/analyze_tables.py \
         still_inconsistent:${ALPHAEDIT_OUT}/still_inconsistent \
         broken_hops:${ALPHAEDIT_OUT}/broken_hops
 
-# ── 3. IFMET: skipped (already done) ──────────────────────────────────────
+# ── 3. IFMET: re-edit + eval + analyses ───────────────────────────────────
+echo "Cleaning up GPU before IFMET..."
+pkill -9 -f "run_analysis.py" 2>/dev/null || true
+sleep 5
+wait_for_gpu
+run_step "IFMET edit + analysis" python analysis/run_analysis.py \
+    --model   $MODEL \
+    --methods ifmet \
+    --data-dir $DATA_DIR \
+    --hparams-ifmet-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml \
+    --hparams-ifmet-deep    EasyEdit/hparams/IFMET/llama3-8b-deep.yaml \
+    --batch-size         128 \
+    --force
 
-# ── 4. analyze_tables: IFMET: skipped (already done) ──────────────────────
+# ── 4. analyze_tables: IFMET ─────────────────────────────────────────────
+run_step "analyze_tables: IFMET" python analysis/analyze_tables.py \
+    --subsets \
+        pre-edit:${DATA_DIR}/composition_incorrect \
+        now_correct:${IFMET_OUT}/now_correct \
+        still_incorrect:${IFMET_OUT}/still_incorrect \
+        still_inconsistent:${IFMET_OUT}/still_inconsistent \
+        broken_hops:${IFMET_OUT}/broken_hops
 
 # ── 5. EAP-AlphaEdit: re-edit + eval + analyses ───────────────────────────
 echo "Cleaning up GPU before EAP-AlphaEdit..."
