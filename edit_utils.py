@@ -7,6 +7,7 @@ from EasyEdit.easyeditor.util import nethook
 import random
 from datasets import Dataset
 from transformers import TrainingArguments, Trainer, StoppingCriteria, StoppingCriteriaList
+from accelerate.hooks import remove_hook_from_module
 
 from tqdm.auto import tqdm
 
@@ -560,8 +561,6 @@ def _cake_single(model, tokenizer, item, hparams,
     if not hasattr(model, "peft_config"):
         target_modules = ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "gate_proj"] 
         model = create_lora_model(model, target_modules=target_modules)
-    # original_model = original_model.to(device)
-    model.enable_input_require_grads()
     
     item_case_examples = []
     learning_examples = []
@@ -616,6 +615,7 @@ def _cake_single(model, tokenizer, item, hparams,
         bf16=True,
         logging_steps=10,
         report_to="none",
+        disable_tqdm=True,
     )
 
     trainer = Trainer(
@@ -624,7 +624,9 @@ def _cake_single(model, tokenizer, item, hparams,
         train_dataset=train_dataset,
     )
     trainer.train()
-    model = trainer.accelerator.unwrap_model(trainer.model)
+    
+    # CaKE train per-sample and so this function is called in a loop, causing RecursionError as Trainer class wrap the model multiple times.
+    model = trainer.accelerator.unwrap_model(trainer.model, keep_fp32_wrapper=False)
 
     return model
 
