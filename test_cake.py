@@ -60,7 +60,7 @@ def calculate_averages(data):
 # %%
 
 if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     # sys.argv = ["", 
     #     "--editing_method", "AlphaEdit_Circuit", 
     #     "--sequential_editing",

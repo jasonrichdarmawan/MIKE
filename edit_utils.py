@@ -623,25 +623,10 @@ def _cake_single(model, tokenizer, item, hparams,
         args=training_args,
         train_dataset=train_dataset,
     )
-    start = time()
     trainer.train()
     model = trainer.accelerator.unwrap_model(trainer.model)
-    exec_time = time() - start
-    metrics = {
-        'case_id': item['case_id'],
-        "requested_rewrite": item['requested_rewrite'],
-        "time": exec_time,
-        "post": compute_edit_quality(
-            model, tokenizer, item, hparams, 
-            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation
-        ),
-    }
-    if restore_weights:
-        print("Restoring weights")
-        model = model.unload()
-        del model.peft_config
 
-    return model, metrics
+    return model
 
 
 def cake(original_model, tokenizer, items, hparams, 
@@ -660,9 +645,8 @@ def cake(original_model, tokenizer, items, hparams,
         items = [items]
 
     model = original_model
-    all_metrics = []
     for item in items:
-        model, metrics = _cake_single(
+        model = _cake_single(
             model,
             tokenizer,
             item,
@@ -671,7 +655,23 @@ def cake(original_model, tokenizer, items, hparams,
             restore_weights=restore_weights,
             test_generation=test_generation,
         )
+    
+    all_metrics = []
+    for item in items:
+        metrics = {
+            'case_id': item['case_id'],
+            "requested_rewrite": item['requested_rewrite'],
+            "post": compute_edit_quality(
+                model, tokenizer, item, hparams, 
+                eval_with_chat_template=eval_with_chat_template, test_generation=test_generation
+            ),
+        }
         all_metrics.append(metrics)
+    
+    if restore_weights:
+        print("Restoring weights")
+        model = model.unload()
+        del model.peft_config
 
     return model, all_metrics
 
