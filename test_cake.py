@@ -38,13 +38,13 @@ def calculate_averages(data):
         case_hop_true_count = 0
         total_hops = 0
         for hop_pair in hop_wise:
-            case_hop_true_count += sum(1 for x in hop_pair if x)
+            case_hop_true_count += sum(hop_pair)
             total_hops += len(hop_pair)
         
         case_hop_average = case_hop_true_count / total_hops
         hop_wise_case_averages.append(case_hop_average)
         
-        accuracy_true_count = sum(1 for x in accuracy if x)
+        accuracy_true_count = sum(accuracy)
         accuracy_average = accuracy_true_count / len(accuracy)
         accuracy_case_averages.append(accuracy_average)
     
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     sequential_str = "sequential" if args.sequential_editing else "restore"
-    SAVE_DIR = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/s{args.sample_size}_b{args.batch_size}_{sequential_str}/'
+    SAVE_DIR = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/'
 
     if args.editing_method == 'no_edit':
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
@@ -125,7 +125,8 @@ if __name__ == "__main__":
     sh = StreamHandler()
     sh.setFormatter(fmt)
     
-    fh = FileHandler(f"{SAVE_DIR}/{args.editing_method}.log", mode='w')
+    fh_path = f"{SAVE_DIR}/{args.editing_method}.log"
+    fh = FileHandler(fh_path, mode='w')
     fh.setFormatter(fmt)
     
     logger = logging.getLogger("CaKE_Test")
@@ -137,6 +138,7 @@ if __name__ == "__main__":
     # Redirect stdout to the logger
     sys.stdout = BufferingLoggerWriter(logger, logging.INFO)
     sys.stderr = BufferingLoggerWriter(logger, logging.WARNING)
+    print(f"Saving output to {fh_path}")
     
 # %%
 
@@ -219,19 +221,15 @@ if __name__ == "__main__":
             print(f"Batch index: {start_idx // args.batch_size}:\n{json.dumps(metrics[0], indent=4)}")
             
         all_metrics.extend(metrics)
+        res = calculate_averages(all_metrics)
+        print(f"Results:\n{json.dumps(res, indent=4)}")
     
-    res = calculate_averages(all_metrics)
-    print(f"Results:\n{json.dumps(res, indent=4)}")
-    
-# %%
-
-if __name__ == "__main__":
-    os.makedirs(SAVE_DIR, exist_ok=True)
-    metrics_filepath = f'{SAVE_DIR}/{args.editing_method}_metrics.json'
-    res_filepath = f'{SAVE_DIR}/{args.editing_method}_res.json'
-    print(f"Saving metrics to {metrics_filepath}")
-    print(f"Saving results to {res_filepath}")
-    json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
-    json.dump(res, open(res_filepath, 'w'), indent=4)
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        metrics_filepath = f'{SAVE_DIR}/{args.editing_method}_metrics.json'
+        res_filepath = f'{SAVE_DIR}/{args.editing_method}_res.json'
+        print(f"Saving metrics to {metrics_filepath}")
+        print(f"Saving results to {res_filepath}")
+        json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
+        json.dump(res, open(res_filepath, 'w'), indent=4)
 
 # %%

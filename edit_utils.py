@@ -625,6 +625,7 @@ def _cake_single(model, tokenizer, item, hparams,
     )
     start = time()
     trainer.train()
+    model = trainer.accelerator.unwrap_model(trainer.model)
     exec_time = time() - start
     metrics = {
         'case_id': item['case_id'],
@@ -636,6 +637,7 @@ def _cake_single(model, tokenizer, item, hparams,
         ),
     }
     if restore_weights:
+        print("Restoring weights")
         model = model.unload()
         del model.peft_config
 
@@ -717,6 +719,7 @@ def edit(model, tokenizer, items, hparams, alg_name, apply_algo,
         }
         all_metrics.append(metrics)
     if restore_weights:
+        print("Restoring weights")
         if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
             with torch.no_grad():
                 weights_copy()
@@ -765,6 +768,7 @@ def edit_rome(model, tokenizer, edit_item, hparams, apply_algo,
     }
     
     if restore_weights:
+        print("Restoring weights")
         with torch.no_grad():
             for k, v in origin_weights_copy.items():
                 curr = nethook.get_parameter(model, k)
@@ -817,6 +821,7 @@ def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo,
         ),
     }
     if restore_weights:
+        print("Restoring weights")
         with torch.no_grad():
             if len(ifmet_requests) > 0:
                 for k, v in weights_copy.items():
@@ -858,6 +863,7 @@ def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_a
         ),
     }
     if restore_weights:
+        print("Restoring weights")
         with torch.no_grad():
             weights_copy()
     return metrics, loc_index
