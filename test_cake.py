@@ -84,9 +84,6 @@ if __name__ == "__main__":
     parser.add_argument("--sample_size", default=3000, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     args = parser.parse_args()
-    
-    sequential_str = "sequential" if args.sequential_editing else "restore"
-    SAVE_DIR = f'{args.metrics_save_dir}/{args.model_type}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/'
 
     if args.editing_method == 'no_edit':
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
@@ -109,6 +106,9 @@ if __name__ == "__main__":
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
+    
+    sequential_str = "sequential" if args.sequential_editing else "restore"
+    SAVE_DIR = f'{args.metrics_save_dir}/{hparams.model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/'
     
     # In-Context Learning Editing Methods (e.g., Mello)
     if args.editing_method not in ["no_edit", 'Mello']:
