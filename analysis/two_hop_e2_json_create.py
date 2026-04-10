@@ -14,8 +14,6 @@ def build_singlehop_question(r_template, subject_label, answer_type):
     prefix = "Who is " if answer_type == "human" else "What is "
     return prefix + r_template.format(subject_label) + "?"
 
-
-
 def convert_row_to_case(row):
     r1_template = row["r1_template"]
     r2_template = row["r2_template"]
@@ -109,7 +107,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_path", default="datasets/two_hop_cf_e2.csv", type=str)
     parser.add_argument("--output_path", default="datasets/two_hop_cf_e2-cake.json", type=str)
-    parser.add_argument("--max_rows", default=None, type=int)
     args = parser.parse_args()
 
     input_path = Path(args.input_path)
@@ -119,16 +116,6 @@ def main():
 
     if "Unnamed: 0" in df.columns:
         df = df.drop(columns=["Unnamed: 0"])
-
-    # if args.include_row_role:
-    #     df = df[df["row_role"] == "edit"].copy()
-
-    # needed = ["e2_label_new", "e3_label_new", "e2_new", "e3_new"]
-    # for col in needed:
-    #     df = df[df[col].notna()].copy()
-
-    if args.max_rows is not None:
-        df = df.head(args.max_rows).copy()
 
     cases = [convert_row_to_case(row) for _, row in df.iterrows()]
 
