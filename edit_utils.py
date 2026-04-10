@@ -666,7 +666,7 @@ def cake(original_model, tokenizer, items, hparams,
                 eval_with_chat_template=eval_with_chat_template, test_generation=test_generation
             ),
         }
-    all_metrics.append(metrics)
+        all_metrics.append(metrics)
     
     if restore_weights:
         print("Restoring weights")
