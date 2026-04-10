@@ -108,7 +108,7 @@ if __name__ == "__main__":
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
     sequential_str = "sequential" if args.sequential_editing else "restore"
-    SAVE_DIR = f'{args.metrics_save_dir}/{hparams.model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/'
+    SAVE_DIR = f'{args.metrics_save_dir}/{hparams.model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}'
     
     # In-Context Learning Editing Methods (e.g., Mello)
     if args.editing_method not in ["no_edit", 'Mello']:
