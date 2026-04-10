@@ -12,7 +12,13 @@
 
 ## 🌟Overview
 This work aims to improve the knowledge editing performance under the multi-hop reasoning settings.
+
 ## 🔧Installation
+
+Install `EasyEdit` repository as submodule
+```
+git submodule update --init --recursive
+```
 
 Install micromamba:
 ```
@@ -42,15 +48,13 @@ micromamba activate multihop
 
 pip install SPARQLWrapper==2.0.0
 
-micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.5.1 nltk==3.6.5 numpy==1.22.1 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 scipy==1.7.3 sentence-transformers==3.2.1 tokenizers=0.19.1
-```
+micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.5.1 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
 
-```
+pip install "numpy>=1.24,<2" scipy sentence-transformers==3.2.1
+
 pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-```
 
-```
-pip install transformers==5.3.0
+pip install transformers==4.57.6
 
 micromamba install tqdm==4.62.3 openai==2.24.0 peft==0.7.1 timm==0.9.7 iopath==0.1.10 sentencepiece seaborn
 
@@ -59,11 +63,6 @@ pip install opencv-python==4.8.0.76 fairscale==0.4.13
 micromamba install beartype jaxtyping pytest
 
 pip install zhipuai sniffio
-```
-
-Install transformers_eap
-```
-pip install -e .
 ```
 
 ## 📚Analyze
@@ -289,10 +288,103 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 [2] Y. Yao et al., "CaKe: Circuit-aware Editing Enables Generalizable Knowledge Learners," in EMNLP 2025
 
 ## 🧐Editing
+
 Just run the following commond:
 ```
 run.sh
 ```
+
+### MEMIT
+
+MEMIT needs pre-computed covariance
+
+Note: [legacy-datasets/wikipedia](https://huggingface.co/datasets/legacy-datasets/wikipedia) have samples with very long text. Meanwhile, our GPUs are 2x 3090. Consequently, computing the activations even for 1 sample but with 11k tokens will resulted in OutOfMemory error. So, we use `--batch_tokens 4096` to truncate the 11k tokens to maximum of 4096 tokens.
+
+```bash
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  python -m EasyEdit.easyeditor.models.rome.layer_stats \
+  --model_name Qwen/Qwen3-4B-Instruct-2507 \
+  --apply_chat_template \
+  --dataset wikipedia \
+  --layers 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35 \
+  --layer_tmp model.layers.{layer_num}.mlp.down_proj \
+  --to_collect mom2 \
+  --sample_size 100000 \
+  --batch_size 1 \
+  --precision float32 \
+  --stats_dir data/stats
+```
+
+### Others
+
+AlphaEdit
+
+```
+python test_cake.py \
+  --editing_method AlphaEdit \
+  --sequential_editing \
+  --model_type qwen3-4b-instruct \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --sample_size 1000 \
+  --data_name MQuAKE-CF-3k-v2-clke
+```
+
+AlphaEdit_Circuit
+```bash
+python test_cake.py \
+  --editing_method AlphaEdit_Circuit \
+  --sequential_editing \
+  --model_type qwen3-4b-instruct \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --sample_size 1000 \
+  --data_name MQuAKE-CF-3k-v2-clke
+```
+
+CaKE
+```bash
+python test_cake.py \
+  --editing_method CaKE \
+  --sequential_editing \
+  --model_type qwen3-4b-instruct \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --sample_size 1000 \
+  --data_name MQuAKE-CF-3k-v2-clke
+```
+
+## Contributing
+
+If you need to make changes to `EasyEdit` folder:
+
+Change the submodule url in the `.gitmodules` file
+```bash
+git config -f .gitmodules submodule.EasyEdit.url "https://github.com/<your-name>/EasyEdit"
+```
+
+If you can't access GitHub directly, you can use [ghfast.top](https://ghfast.top) and GitHub's personal access token via `git remote` to write a local override in `.git/config` (not committed)
+```bash
+cd EasyEdit
+git remote set-url origin https://user:your_token@ghfast.top/https://github.com/<your-name>/EasyEdit
+```
+
+Create new branch from the `main-cake` branch
+
+```bash
+cd EasyEdit
+git checkout main-cake
+git branch <your-branch>
+git checkout <your-branch>
+git push -u origin <your-branch>
+```
+
+Then, after you make changes, create 2 PRs: (1) PR to [jasonrichdarmawan/EasyEdit](https://github.com/jasonrichdarmawan/EasyEdit) repository, (2) PR to this repository.
+
+Note: To avoid making changes to the submodule, but the code is not accessible for review, then any PR to this repository that require modified `EasyEdit` folder must be accompanied a PR to the [jasonrichdarmawan/EasyEdit](https://github.com/jasonrichdarmawan/EasyEdit) repository. Then PR to the [jasonrichdarmawan/EasyEdit](https://github.com/jasonrichdarmawan/EasyEdit) repository will be merged first, then the PR to this repository will make 1 additional commit to point to the `main-cake` branch.
 
 ## 🌻Acknowledgement
 

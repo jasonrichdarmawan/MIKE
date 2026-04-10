@@ -1,11 +1,24 @@
-from EasyEdit.easyeditor import MEMITHyperParams,LoRAHyperParams,WISEHyperParams, ROMEHyperParams
+# %%
+
+from EasyEdit.easyeditor import (
+    MEMITHyperParams, LoRAHyperParams, WISEHyperParams, ROMEHyperParams,
+    AlphaEditHyperParams, AlphaEditCircuitHyperParams, R_ROMEHyperParams,
+)
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
-from tqdm import tqdm
-from edit_utils import edit, edit_ifmet, edit_mello, edit_rome, cake, edit_wise, get_sent_embeddings
+import json
+from tqdm.auto import tqdm
+from edit_utils import (
+    edit, edit_ifmet, edit_mello, edit_rome, cake, edit_wise, get_sent_embeddings,
+)
 from EasyEdit.easyeditor.util.alg_dict import *
 import torch
 import os
+import logging
+from utils import StreamHandler, FileHandler, BufferingLoggerWriter
+import sys
+
+# %%
 
 def calculate_averages(data):
     """
@@ -25,13 +38,13 @@ def calculate_averages(data):
         case_hop_true_count = 0
         total_hops = 0
         for hop_pair in hop_wise:
-            case_hop_true_count += sum(1 for x in hop_pair if x)
+            case_hop_true_count += sum(hop_pair)
             total_hops += len(hop_pair)
         
         case_hop_average = case_hop_true_count / total_hops
         hop_wise_case_averages.append(case_hop_average)
         
-        accuracy_true_count = sum(1 for x in accuracy if x)
+        accuracy_true_count = sum(accuracy)
         accuracy_average = accuracy_true_count / len(accuracy)
         accuracy_case_averages.append(accuracy_average)
     
@@ -44,53 +57,110 @@ def calculate_averages(data):
         "accuracy_averages": f"{accuracy_avg:.3f}"
     }
 
+# %%
+
+if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    # sys.argv = ["", 
+    #     "--editing_method", "AlphaEdit_Circuit", 
+    #     "--sequential_editing",
+    #     "--model_type", "qwen3-4b-instruct",
+    #     "--dtype", "bfloat16",
+    #     "--eval_with_chat_template",
+    #     "--batch_size", "2",
+    #     "--sample_size", "4",
+    #     "--data_name", "MQuAKE-CF-3k-v2-clke",
+    # ]
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--editing_method', required=True, type=str)
-    parser.add_argument('--metrics_save_dir', default='./output', type=str)
-    parser.add_argument('--datatype', default=None,type=str)
+    parser.add_argument('--sequential_editing', action='store_true')
+    parser.add_argument('--data_name', default=None, type=str)
     parser.add_argument('--model_type', default=None,type=str)
+    parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
+    parser.add_argument('--eval_with_chat_template', action='store_true')
+    parser.add_argument("--batch_size", default=16, type=int)
+    parser.add_argument("--sample_size", default=3000, type=int)
+    parser.add_argument('--metrics_save_dir', default='./output', type=str)
     args = parser.parse_args()
 
-    if args.editing_method == 'MEMIT' or args.editing_method == 'IFMET':
-        editing_hparams = MEMITHyperParams
-    elif args.editing_method == 'LoRA':
-        editing_hparams = LoRAHyperParams
+    if args.editing_method == 'no_edit':
+        hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
+    elif args.editing_method in ['MEMIT']:
+        hparams = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/MEMIT/{args.model_type}.yaml')
+    elif args.editing_method in ['IFMET']:
+        hparams_s = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-shallow.yaml')
+        hparams_d = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-deeper.yaml')
+    elif args.editing_method in ['LoRA', 'CaKE', 'MeLLo']:
+        hparams = LoRAHyperParams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
     elif args.editing_method == 'WISE':
-        editing_hparams = WISEHyperParams
+        hparams = WISEHyperParams.from_hparams(f'./EasyEdit/hparams/WISE/{args.model_type}.yaml')
     elif args.editing_method == 'ROME':
-        editing_hparams = ROMEHyperParams
+        hparams = ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/ROME/{args.model_type}.yaml')
+    elif args.editing_method == "R-ROME":
+        hparams = R_ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/R-ROME/{args.model_type}.yaml')
+    elif args.editing_method == "AlphaEdit":
+        hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
+    elif args.editing_method == "AlphaEdit_Circuit":
+        hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
     else:
-        editing_hparams = LoRAHyperParams
-    if args.editing_method == 'CAKE' or args.editing_method == 'Mello':
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
-    elif args.editing_method == 'IFMET':
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-shallow.yaml')
-        hparams_s=hparams
-        hparams_d=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-deeper.yaml')
-    else:
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}.yaml')
+        raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
-    if args.editing_method != 'Mello':
+    sequential_str = "sequential" if args.sequential_editing else "restore"
+    SAVE_DIR = f'{args.metrics_save_dir}/{hparams.model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/'
+    
+    # In-Context Learning Editing Methods (e.g., Mello)
+    if args.editing_method not in ["no_edit", 'Mello']:
         alg_name = hparams.alg_name
         apply_algo = ALG_DICT[alg_name]
+        
+# %%
 
-    MODEL_PATH = hparams.model_name
-    if args.editing_method == 'CAKE':
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.float32)
-    # 添加FFN层的LoRA配置
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, use_fast=False)
-    tokenizer.pad_token = tokenizer.eos_token
+if __name__ == "__main__":
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    
+    fmt = logging.Formatter('%(asctime)s %(name)s %(levelname)-9s %(message)s')
+    
+    sh = StreamHandler()
+    sh.setFormatter(fmt)
+    
+    fh_path = f"{SAVE_DIR}/{args.editing_method}.log"
+    fh = FileHandler(fh_path, mode='w')
+    fh.setFormatter(fmt)
+    
+    logger = logging.getLogger("CaKE_Test")
+    logger.propagate = False  # Prevent log messages from being propagated to the root logger
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(sh)
+    logger.addHandler(fh)
+    
+    # Redirect stdout to the logger
+    sys.stdout = BufferingLoggerWriter(logger, logging.INFO)
+    sys.stderr = BufferingLoggerWriter(logger, logging.WARNING)
+    print(f"Saving output to {fh_path}")
+    
+# %%
 
-    import json
-    data = json.load(open(f'./datasets/{args.datatype}-cake.json','r'))
+if __name__ == "__main__":
+    dtype = getattr(torch, args.dtype)
+    # max_memory = {i: "8GiB" for i in range(torch.cuda.device_count())}
+    model = AutoModelForCausalLM.from_pretrained(hparams.model_name, device_map="cuda", dtype=torch.bfloat16)
+    tokenizer = AutoTokenizer.from_pretrained(hparams.model_name)
+    
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        
+# %%
+
+if __name__ == "__main__":
+    data = json.load(open(f'./datasets/{args.data_name}.json','r'))
+    data = data[:args.sample_size]
     if args.editing_method == 'WISE':
         loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
         loc_data = loc_data[:7000]
         loc_index = 0
-    elif args.editing_method == 'Mello':
+    elif args.editing_method == 'MeLLo':
         contriever = AutoModel.from_pretrained("facebook/contriever-msmarco", device_map=f"cuda:{hparams.device}")
         contriever_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
         with open('./prompts/MeLLo-prompt.txt', 'r') as f:
@@ -103,23 +173,63 @@ if __name__ == "__main__":
         new_facts = list(new_facts)
         embs = get_sent_embeddings(new_facts, contriever, contriever_tokenizer, hparams.device)
 
+# %%
+
+if __name__ == "__main__":
     all_metrics = []
-    for item in tqdm(data[:2]):
-        if args.editing_method == 'CAKE':
-            model, metrics = cake(model, tokenizer, item, hparams, test_generation=False)
+    
+    indices = list(range(0, len(data), args.batch_size))
+    for start_idx in tqdm(indices, desc="Processing batches"):
+        items = data[start_idx:start_idx + args.batch_size]
+        if args.editing_method == "no_edit":
+            model, metrics = edit(
+                model, tokenizer, items, hparams=None, alg_name=None, apply_algo=None, 
+                eval_with_chat_template=args.eval_with_chat_template
+            )
+        elif args.editing_method == 'CaKE':
+            model, metrics = cake(
+                model, tokenizer, items, hparams, 
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing,
+            )
         elif args.editing_method == 'WISE':
-            metrics, loc_index = edit_wise(model, tokenizer, item, hparams, loc_data, loc_index, apply_algo, test_generation=False)
-        elif args.editing_method == 'Mello':
-            metrics = edit_mello(model, task_prompt, stop, tokenizer, item, hparams, contriever, contriever_tokenizer, embs, test_generation=False)
+            metrics, loc_index = edit_wise(
+                model, tokenizer, items, hparams, loc_data, loc_index, apply_algo, 
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing, 
+            )
+        elif args.editing_method == 'MeLLo':
+            metrics = edit_mello(
+                model, task_prompt, stop, tokenizer, items, hparams, contriever, contriever_tokenizer, 
+                embs, eval_with_chat_template=args.eval_with_chat_template,
+            )
         elif args.editing_method == 'IFMET':
-            model, metrics = edit_ifmet(model, tokenizer, item, hparams_s, hparams_d, apply_algo, test_generation=False)
+            model, metrics = edit_ifmet(
+                model, tokenizer, items, hparams_s, hparams_d, apply_algo, 
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing, 
+            )
         elif args.editing_method == 'ROME':
-            model, metrics = edit_rome(model, tokenizer, item, hparams, apply_algo, test_generation=False)
+            model, metrics = edit_rome(
+                model, tokenizer, items, hparams, apply_algo, 
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing,
+            )
         else:
-            model, metrics = edit(model, tokenizer, item, hparams, alg_name, apply_algo, test_generation=False)
-        print(metrics)
-        all_metrics.append(metrics)
-    res = calculate_averages(all_metrics)
-    os.makedirs(args.metrics_save_dir, exist_ok=True)
-    json.dump(all_metrics, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_metrics.json','w'), indent=4)
-    json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_res.json','w'), indent=4)
+            model, metrics = edit(
+                model, tokenizer, items, hparams, alg_name, apply_algo, 
+                eval_with_chat_template=args.eval_with_chat_template, restore_weights=not args.sequential_editing, 
+            )
+        
+        if start_idx % args.batch_size == 0:
+            print(f"Batch index: {start_idx // args.batch_size}:\n{json.dumps(metrics[0], indent=4)}")
+            
+        all_metrics.extend(metrics)
+        res = calculate_averages(all_metrics)
+        print(f"Results:\n{json.dumps(res, indent=4)}")
+    
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        metrics_filepath = f'{SAVE_DIR}/{args.editing_method}_metrics.json'
+        res_filepath = f'{SAVE_DIR}/{args.editing_method}_res.json'
+        print(f"Saving metrics to {metrics_filepath}")
+        print(f"Saving results to {res_filepath}")
+        json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
+        json.dump(res, open(res_filepath, 'w'), indent=4)
+
+# %%
