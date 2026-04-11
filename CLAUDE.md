@@ -96,23 +96,22 @@ Prompts follow: `[r2 tokens][r1 tokens][e1 tokens][last]`. Position labels: `e1`
 
 ### Model support
 
-### Local patches to EasyEdit submodule
+### Local changes to EasyEdit submodule
 
-Three files in `EasyEdit/` have local modifications that are **not committed upstream**. After `git submodule update --init`, these must be reapplied (a patch file is saved at `EasyEdit.patch`):
+The EasyEdit submodule (`278ad57`) points to a fork at `jasonrichdarmawan/EasyEdit`. The following hparams files have local modifications for Llama-3-8B that should be committed to the fork:
 
-1. **`easyeditor/models/alphaedit/AlphaEdit_main.py`** (88 lines changed)
-   - Added `edit_batch_size` kwarg that propagates through `apply_AlphaEdit_to_model` → `execute_AlphaEdit`, enabling batched editing instead of one-at-a-time
-   - Rewrote the z-vector computation loop to split cached vs. uncached requests and call `compute_z_batched` for multi-request batches
-   - Cast tensors to `.float()` before the `torch.linalg.solve` call and `cache_c` accumulation to avoid dtype mismatches on Llama
+1. **`hparams/AlphaEdit/llama3-8b.yaml`**
+   - Fixed `model_name` from `./hugging_cache/llama-3-8b-instruct` to `meta-llama/Meta-Llama-3-8B`
+   - Added `mom2_batch_tokens: None` (new required field in `AlphaEditHyperParams`)
 
-2. **`easyeditor/models/alphaedit/compute_z.py`** (186 lines added)
-   - Added `compute_z_batched()`: runs all requests in a single forward/backward pass per gradient step instead of one request at a time. Pads and concatenates inputs across requests, injects per-request delta vectors at each request's lookup positions via a shared hook, and accumulates NLL + KL + weight-decay loss across the batch
+2. **`hparams/AlphaEdit_Circuit/llama3-8b.yaml`**
+   - Added `num_hidden_layers: 32` (required by `AlphaEditCircuitHyperParams`)
+   - Added `hook_q_input`, `hook_k_input`, `hook_v_input`, `hook_mlp_in`, `hook_resid_post` fields (required by hparams dataclass)
 
-3. **`easyeditor/models/rome/layer_stats.py`** (3 lines changed)
-   - Changed Wikipedia dataset version from `20200501.en` to `20220301.en`
-   - Added `trust_remote_code=True` to `load_dataset` call
+3. **`hparams/IFMET/`** (new directory)
+   - `llama3-8b-shallow.yaml` — MEMIT hparams for standard r1/r2 edits (layers 4-8)
+   - `llama3-8b-deep.yaml` — MEMIT hparams for indirect composition edits (layers 20-24)
 
-To apply: `cd EasyEdit && git apply ../EasyEdit.patch`
 
 ### Model support
 

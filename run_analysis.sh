@@ -94,7 +94,7 @@ run_step "EAP-AlphaEdit edit + analysis" python analysis/run_analysis.py \
     --model   $MODEL \
     --methods eap_alphaedit \
     --data-dir $DATA_DIR \
-    --hparams-alphaedit EasyEdit/hparams/AlphaEdit/llama3-8b.yaml \
+    --hparams-eap-alphaedit EasyEdit/hparams/AlphaEdit_Circuit/llama3-8b.yaml \
     --batch-size         128 \
     --force
 

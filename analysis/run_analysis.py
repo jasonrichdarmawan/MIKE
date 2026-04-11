@@ -12,10 +12,10 @@ Usage:
         [--input      datasets/two_hop.csv] \\
         [--data-dir   datasets/meta-llama/Meta-Llama-3-8B] \\
         [--hparams-alphaedit  EasyEdit/hparams/AlphaEdit/llama3-8b.yaml] \\
+        [--hparams-eap-alphaedit EasyEdit/hparams/AlphaEdit_Circuit/llama3-8b.yaml] \\
         [--hparams-ifmet-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml] \\
         [--hparams-ifmet-deep   EasyEdit/hparams/IFMET/llama3-8b-deep.yaml] \\
-        [--skip-patchscopes] [--max-examples N] [--batch-size 128] \\
-        [--eap-top-k 5] [--eap-batch-size 16] [--eap-samples N] [--device 0]
+        [--skip-patchscopes] [--max-examples N] [--batch-size 128] [--device 0]
 """
 
 # %%
@@ -495,7 +495,7 @@ def run_alphaedit(args):
 
 
 def run_eap_alphaedit(args):
-    """AlphaEdit with layers chosen by EAP attribution on the incorrect dataset."""
+    """AlphaEdit_Circuit: per-request EAP circuit discovery + AlphaEdit editing."""
     data_dir      = Path(args.data_dir)
     incorrect_dir = data_dir / "composition_incorrect"
     out_dir       = data_dir / "composition_incorrect_eap_alphaedit"
@@ -507,15 +507,13 @@ def run_eap_alphaedit(args):
     model.eval()
     tokenizer = load_tokenizer(args.model)
 
-    from EasyEdit.easyeditor import AlphaEditHyperParams
-    from EasyEdit.easyeditor.util import nethook
+    from EasyEdit.easyeditor.models.alphaedit_circuit import AlphaEditCircuitHyperParams
     from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
-    import sys; ae_main = sys.modules["EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main"]
-    from transformers_eap import EAPGraph
-    from transformers_eap.eap_graph import get_nll_metric
+    import sys
+    ae_circuit_main = sys.modules["EasyEdit.easyeditor.models.alphaedit_circuit.AlphaEdit_Circuit_main"]
 
-    hparams    = AlphaEditHyperParams.from_hparams(args.hparams_alphaedit)
-    apply_algo = ALG_DICT["AlphaEdit"]
+    hparams    = AlphaEditCircuitHyperParams.from_hparams(args.hparams_eap_alphaedit)
+    apply_algo = ALG_DICT["AlphaEdit_Circuit"]
 
     dataset = pd.read_csv(str(incorrect_dir / "two_hop.csv"), index_col=0)
     dataset = filter_multi_target(dataset, log_path=incorrect_dir / "filtered_multi_target.csv")
@@ -524,83 +522,10 @@ def run_eap_alphaedit(args):
     dataset["e2_answers"] = dataset.apply(lambda r: get_answers(r, "e2")["e2_answers"], axis=1)
     dataset["e3_answers"] = dataset.apply(lambda r: get_answers(r, "e3")["e3_answers"], axis=1)
 
-    # ── EAP: identify top-k MLP layers ──────────────────────────────────────
-    print(f"\n[EAP] Identifying top-{args.eap_top_k} MLP layers on r1+r2 prompts ...")
-    eap_data = dataset.head(args.eap_samples) if args.eap_samples else dataset
-    n_layers = model.config.num_hidden_layers
-    accumulated = torch.zeros(n_layers, device=device)
-
-    eap = EAPGraph(model)
-    for start in range(0, len(eap_data), args.eap_batch_size):
-        batch = eap_data.iloc[start:start + args.eap_batch_size]
-
-        # Build r1 and r2 prompts together
-        prompts, ans_labels, subjects = [], [], []
-        for _, row in batch.iterrows():
-            prompts.append(row["r1_template"].replace("{}", row["e1_label"]))
-            ans_labels.append(row["e2_label"])
-            subjects.append(row["e1_label"])
-            prompts.append(row["r2_template"].replace("{}", row["e2_label"]))
-            ans_labels.append(row["e3_label"])
-            subjects.append(row["e2_label"])
-
-        enc = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
-        ans_ids = torch.tensor([
-            tokenizer(lbl, add_special_tokens=False)["input_ids"][0]
-            for lbl in ans_labels
-        ], device=device)
-
-        # Compute subject token spans (adjusted for left padding)
-        subject_spans = []
-        for prompt, subject in zip(prompts, subjects):
-            enc_single = tokenizer(prompt, return_offsets_mapping=True)
-            offsets = enc_single["offset_mapping"]
-            subj_start_char = prompt.index(subject)
-            subj_end_char   = subj_start_char + len(subject)
-            tok_start, tok_end = None, None
-            for tok_i, (cs, ce) in enumerate(offsets):
-                if cs <= subj_start_char < ce and tok_start is None:
-                    tok_start = tok_i
-                if cs < subj_end_char <= ce:
-                    tok_end = tok_i + 1
-            pad_offset = enc["input_ids"].shape[1] - len(enc_single["input_ids"])
-            subject_spans.append((tok_start + pad_offset, tok_end + pad_offset))
-
-        with torch.enable_grad():
-            scores = eap.attribute(
-                enc["input_ids"], enc["attention_mask"],
-                metric_fn=get_nll_metric(ans_ids),
-                subject_spans=subject_spans,
-                return_per_token_scores=False,
-                return_per_head_attribution=False,
-            )
-        eap.reset_hooks()
-
-        for l in range(n_layers):
-            key = f"blocks.{l}.hook_mlp_in"
-            if key in scores and isinstance(scores[key], torch.Tensor):
-                accumulated[l] += scores[key].abs().sum().detach()
-
-    top_layers = accumulated.topk(args.eap_top_k).indices.tolist()
-    top_layers.sort()
-    print(f"[EAP] Top-{args.eap_top_k} layers: {top_layers}")
-    hparams.layers = top_layers
-    # Force recomputation of null-space projection P for EAP-selected layers
-    # (the default P_loc was precomputed for AlphaEdit's fixed layers)
-    eap_P_loc = f"./null_space_project_eap_{'_'.join(map(str, top_layers))}.pt"
-    hparams.P_loc = eap_P_loc
-    # Reset global P_loaded so it recomputes if file doesn't exist
-    import EasyEdit.easyeditor.models.alphaedit.AlphaEdit_main as _ae
-    _ae.P_loaded = False
-    print(f"[EAP] P_loc set to {eap_P_loc} (exists: {Path(eap_P_loc).exists()})")
-    del eap, accumulated, scores
-    import gc; gc.collect()
-    torch.cuda.empty_cache()
-    # ────────────────────────────────────────────────────────────────────────
-
+    # AlphaEdit_Circuit edits across all layers, so back up all of them
     weight_names = [
         f"{hparams.rewrite_module_tmp.format(layer)}.weight"
-        for layer in hparams.layers
+        for layer in range(hparams.num_hidden_layers)
     ]
     orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
                     for k in weight_names}
@@ -625,17 +550,26 @@ def run_eap_alphaedit(args):
         tokenizer.padding_side = "right"
 
         # Reset cache_c so each batch gets a fresh null-space accumulation.
-        ae_main.cache_c_new = False
+        ae_circuit_main.cache_c_new = False
 
-        # Edit — one apply_algo call for the whole batch so the null-space
-        # projection is estimated over all batch facts at once.
+        # Build requests with target_true (needed by AlphaEdit_Circuit for logging)
         batch_requests = []
         for _, row in batch_df.iterrows():
-            batch_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
-            batch_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+            batch_requests.append({
+                "prompt": row["r1_template"],
+                "subject": row["e1_label"],
+                "target_new": row["e2_label"],
+                "target_true": row.get("e2_label_original", row["e2_label"]),
+            })
+            batch_requests.append({
+                "prompt": row["r2_template"],
+                "subject": row["e2_label"],
+                "target_new": row["e3_label"],
+                "target_true": row.get("e3_label_original", row["e3_label"]),
+            })
         hparams.batch_size = len(batch_requests)
         apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
-        print(f"  Batch edited ({len(batch_requests)} requests, layers={top_layers}).")
+        print(f"  Batch edited ({len(batch_requests)} requests via AlphaEdit_Circuit).")
 
         # Evaluate + Analyze use left padding (analysis indexes [-1] for last real token)
         tokenizer.padding_side = "left"
@@ -941,6 +875,9 @@ if __name__ == "__main__":
     # AlphaEdit hparams
     parser.add_argument("--hparams-alphaedit",
                         default="EasyEdit/hparams/AlphaEdit/llama3-8b.yaml")
+    parser.add_argument("--hparams-eap-alphaedit",
+                        default="EasyEdit/hparams/AlphaEdit_Circuit/llama3-8b.yaml",
+                        help="AlphaEdit_Circuit hparams (EAP-guided layer selection)")
 
     # IFMET hparams
     parser.add_argument("--hparams-ifmet-shallow",
@@ -964,12 +901,6 @@ if __name__ == "__main__":
                         help="Rerun and overwrite all existing outputs (ignore checkpoints and cached files)")
     parser.add_argument("--batch-size",        type=int, default=128,
                         help="Batch size for both inference (eval/analysis) and edit→analyze→restore cycles")
-    parser.add_argument("--eap-top-k",        type=int, default=5,
-                        help="Number of top MLP layers to select via EAP for eap_alphaedit")
-    parser.add_argument("--eap-batch-size",   type=int, default=16,
-                        help="Batch size for EAP attribution (smaller than batch-size due to gradient memory)")
-    parser.add_argument("--eap-samples",      type=int, default=None,
-                        help="Number of incorrect examples to run EAP on (default: all)")
     parser.add_argument("--device",          type=int, default=0)
 
     main(parser.parse_args())
