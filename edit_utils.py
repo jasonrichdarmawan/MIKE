@@ -1,33 +1,23 @@
 import torch
-from typing import List, Dict, Union
 from tqdm import tqdm
-from time import time
 from peft import LoraConfig, TaskType, get_peft_model
-from EasyEdit.easyeditor.util import nethook
 import random
 from datasets import Dataset
-from transformers import TrainingArguments, Trainer, StoppingCriteria, StoppingCriteriaList
-from accelerate.hooks import remove_hook_from_module
+from transformers import TrainingArguments, Trainer
 
 from tqdm.auto import tqdm
-
-def mean_pooling(token_embeddings, mask):
-    token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
-    sentence_embeddings = token_embeddings.sum(dim=1) / mask.sum(dim=1)[..., None]
-    return sentence_embeddings
+from typing import Literal
 
 def check_answer_in_pred(pred, answers):
     pred = pred.lower()
     return any([a.lower() in pred for a in answers])
 
-
-def _format_chat_prompt(tokenizer, question):
+def _format_chat_prompt(tokenizer, user_content):
     messages = [
-        # {"role": "system", "content": "Only respond with the answer. Do not include any explanations."},
-        {"role": "user", "content": question}
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": user_content}
     ]
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
 
 def _format_chat_train_pair(tokenizer, text, target, apply_chat_template=True):
     """
@@ -41,7 +31,7 @@ def _format_chat_train_pair(tokenizer, text, target, apply_chat_template=True):
         return full_text, prompt_text
 
     full_messages = [
-        {"role": "system", "content": "Only respond with the answer. Do not include any explanations."},
+        {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": text},
         {"role": "assistant", "content": target},
     ]
@@ -51,33 +41,100 @@ def _format_chat_train_pair(tokenizer, text, target, apply_chat_template=True):
     prompt_text = tokenizer.apply_chat_template(prompt_messages, tokenize=False, add_generation_prompt=True)
     return full_text, prompt_text
 
-def get_sent_embeddings(sents, contriever, tok, device, BSZ=32):
+def get_sentence_embeddings(
+    contriever, 
+    contriever_tokenizer, 
+    sentences, 
+    batch_size=32
+):
     all_embs = []
-    for i in tqdm(range(0, len(sents), BSZ)):
-        sent_batch = sents[i:i+BSZ]
-        inputs = tok(sent_batch, padding=True, truncation=True, return_tensors='pt').to(device)
+    for i in tqdm(range(0, len(sentences), batch_size)):
+        sent_batch = sentences[i:i+batch_size]
+        contriever_tokenizer.padding_side = "right"
+        inputs = contriever_tokenizer(
+            sent_batch, 
+            padding=True, 
+            truncation=True, 
+            return_tensors='pt'
+        ).to(contriever.device)
         with torch.no_grad():
             outputs = contriever(**inputs)
             embeddings = mean_pooling(outputs[0], inputs['attention_mask'])
-        all_embs.append(embeddings.cpu())
+        all_embs.append(embeddings)
     all_embs = torch.vstack(all_embs)
     return all_embs
 
-def retrieve_facts(query, fact_embs, contriever, tok, device, k=1):
-    inputs = tok([query], padding=True, truncation=True, return_tensors='pt').to(device)
+def retrieve_facts(
+    contriever, 
+    contriever_tokenizer,
+    query, 
+    facts_embeddings, # shape (num_facts, hidden_dim)
+    k=1
+):
+    contriever_tokenizer.padding_side = "right"
+    inputs = contriever_tokenizer(
+        [query], 
+        padding=True, 
+        truncation=True, 
+        return_tensors='pt',
+    ).to(contriever.device)
     with torch.no_grad():
-        outputs = contriever(**inputs)
-        query_emb = mean_pooling(outputs[0], inputs['attention_mask']).cpu()
-    sim = (query_emb @ fact_embs.T)[0]
+        outputs = contriever(**inputs) # outputs[0] shape is (batch_size, seq_len, hidden_dim)
+        query_emb = mean_pooling(outputs[0], inputs['attention_mask']) # shape is (batch_size, hidden_dim)
+    sim = (query_emb @ facts_embeddings.T)[0] # shape is (num_facts,)
     knn = sim.topk(k, largest=True)
     return knn.indices
+
+
+def retrieve_facts_batch(
+    contriever,
+    contriever_tokenizer,
+    queries,
+    facts_embeddings,
+    k=1,
+    batch_size=32,
+):
+    if len(queries) == 0:
+        return []
+
+    contriever_tokenizer.padding_side = "right"
+    all_topk = []
+
+    for start in tqdm(range(0, len(queries), batch_size), desc="Retrieving facts in batches"):
+        end = min(start + batch_size, len(queries))
+        query_batch = queries[start:end]
+
+        inputs = contriever_tokenizer(
+            query_batch,
+            padding=True,
+            truncation=True,
+            return_tensors='pt',
+        ).to(contriever.device)
+
+        with torch.no_grad():
+            outputs = contriever(**inputs)
+            query_emb = mean_pooling(outputs[0], inputs['attention_mask'])
+
+        sim = query_emb @ facts_embeddings.T
+        topk = sim.topk(k, largest=True).indices
+        all_topk.append(topk)
+
+    all_topk = torch.cat(all_topk, dim=0)
+    if k == 1:
+        return all_topk[:, 0].tolist()
+    return all_topk.tolist()
+
+def mean_pooling(token_embeddings, mask):
+    token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.) # shape is (batch_size, seq_len, hidden_dim)
+    sentence_embeddings = token_embeddings.sum(dim=1) / mask.sum(dim=1)[..., None]
+    return sentence_embeddings
 
 def create_lora_model(
     model,
     r: int = 8,
     lora_alpha: int = 32,
     lora_dropout: float = 0.05,
-    target_modules: List[str] = None,
+    target_modules: list[str] = None,
 ):
     """
     Creates a LoRA-wrapped causal language model over all layers.
@@ -99,112 +156,273 @@ def create_lora_model(
     print("LoRA model created.")
     return lora_model
 
-
-
-class MultiStopCriteria(StoppingCriteria):
-    def __init__(self, stop_token_sequences):
-        self.stop_sequences = stop_token_sequences
-
-    def __call__(self, input_ids, scores, **kwargs):
-        # 检查最新生成的 token 是否匹配任意停止序列
-        for stop_seq in self.stop_sequences:
-            if input_ids.shape[1] >= len(stop_seq):
-                if torch.all(input_ids[0, -len(stop_seq):] == torch.tensor(stop_seq, device=input_ids.device)):
-                    return True  # 触发停止
-        return False
-
-def call_model(prompt, stop, model, tokenizer):
-    # ==== 关键模型适配 ====
-    # 针对不同模型设置特殊 token（以 Llama3 和 Qwen2.5 为例）
-    if "llama3" in model.config.model_type.lower():
-        # Llama3-instruct 需要添加系统提示模板
-        full_prompt = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-        tokenizer.eos_token = "<|eot_id|>"
-    elif "qwen" in model.config.model_type.lower():
-        # Qwen2.5-instruct 使用 <|im_start|> 模板
-        full_prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
-        tokenizer.pad_token = tokenizer.eos_token  # 确保设置 pad_token
+def call_model(
+    model, 
+    tokenizer, 
+    user_content, 
+    stop_strings, 
+    eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False
+):
+    formatted_prompt = user_content
+    if eval_with_chat_template == "few_shot_in_user_content":
+        formatted_prompt = tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": user_content},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+    elif eval_with_chat_template == "few_shot_in_multi_turn":
+        formatted_prompt = tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content":
+"""You are a helpful assistant. You must answer questions by strictly following this step-by-step pattern:
+Question: [Original question]
+Subquestion: [Your generated subquestion to retrieve a fact that can help answer the original question]
+Generated answer: [Your generated answer to the subquestion]
+Retrieved fact: [The new fact retrieved from a knowledge base based on the generated subquestion]
+Retrieved fact {contradicts/does not contradict} to generated answer, so the intermediate answer is: [Your revised answer based on the retrieved fact]
+(Repeat the subquestion cycle as needed)
+Final answer: [Definitive conclusion]"""},
+                {"role": "user", "content": "Question: What is the capital city of the country of citizenship of Ivanka Trump's spouse?"},
+                {"role": "assistant", "content":
+"""Subquestion: Who is Ivanka Trump's spouse?
+Generated answer: Ivanka Trump's spouse is Jared Kushner.
+Retrieved fact: Ivanka Biden is married to Samantha Cameron.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jared Kushner
+Subquestion: What is the country of citizenship of Jared Kushner?
+Generated answer: The country of citizenship of Jared Kushner is United States.
+Retrieved fact: Jared Kushner is a citizen of Canada.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Canada
+Subquestion: What is the capital city of Canada?
+Generated answer:  The capital city of Canada is Ottawa.
+Retrieved fact: The capital city of United States of America is Seattle.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Ottawa
+Final answer: Ottawa"""},
+                {"role": "user", "content": "Question: Who is the head of state of the country where Rainn Wilson holds a citizenship?"},
+                {"role": "assistant", "content": 
+"""Subquestion: What is the country of citizenship of Rainn Wilson?
+Generated answer: Rainn Wilson is a citizen of United States of America.
+Retrieved fact: Rainn Wilson is a citizen of Croatia.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Croatia
+Subquestion: What is the name of the current head of state in Croatia?
+Generated answer: The head of state of Croatia is President Zoran Milanović.
+Retrieved fact: The name of the current head of state in Croatia is Kolinda Grabar-Kitarović.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Kolinda Grabar-Kitarović
+Final answer: Kolinda Grabar-Kitarović"""},
+                {"role": "user", "content": "Question: Who is the spouse of the head of state in United States of America?"},
+                {"role": "assistant", "content":
+"""Subquestion: Who is the head of state in United States of America?
+Generated answer: The US president is Donald Trump.
+Retrieved fact: The head of state in United States of America is Joe Biden.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Joe Biden
+Subquestion: Who is the spouse of Joe Biden?
+Generated answer: The spouse of Joe Biden is Jill Biden.
+Retrieved fact: The spouse of Joe Bill is Evan Austin.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jill Biden
+Final answer: Jill Biden"""},
+                {"role": "user", "content": "Question: On which continent is the country of citizenship of the founder of the manufacturer of iPhone 5 situated?"},
+                {"role": "user", "content":
+"""Subquestion: Which company is iPhone 5 produced by?
+Generated answer: iPhone 5 is produced by Apple.
+Retrieved fact: The company that produced iPhone 5 is Iveco.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Iveco
+Subquestion: Who is the founder of Iveco?
+Generated answer: Iveco was founded by Giovanni Agnelli.
+Retrieved fact: House of Bonaparte was founded by Gustav I of Sweden.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Giovanni Agnelli
+Subquestion: What is the country of citizenship of Giovanni Agnelli?
+Generated answer: Giovanni Agnelli is a citizen of Italy.
+Retrieved fact: Giovanni Agnelli is a citizen of Niger.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Niger.
+Subquestion: On which continent is Niger situated?
+Generated answer: Niger is situated on Africa.
+Retrieved fact: Kingdom of England is located in the continent of North America.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Africa.
+Final answer: Africa"""},
+                {"role": "user", "content": user_content},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
     else:
-        full_prompt = prompt
+        raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
 
-    # ==== 停止词处理 ====
-    # 将停止词编码为 token ID 序列（处理多 token 情况）
-    stop_sequences = [tokenizer.encode(s, add_special_tokens=False) for s in stop]
-    stop_criteria = MultiStopCriteria(stop_sequences)
-
-    # ==== 模型输入编码 ====
+    tokenizer.padding_side = "left"
     inputs = tokenizer(
-        full_prompt,
+        formatted_prompt,
         return_tensors="pt",
         padding=True,
         truncation=True,
-        return_attention_mask=True
+        add_special_tokens=not eval_with_chat_template,
     ).to(model.device)
 
-    # ==== 生成参数配置 ====
-    generate_args = {
-        "input_ids": inputs.input_ids,
-        "attention_mask": inputs.attention_mask,
-        "max_new_tokens": 256,
-        "temperature": 0.0,
-        "do_sample": False,
-        "stopping_criteria": StoppingCriteriaList([stop_criteria]),
-        "pad_token_id": tokenizer.eos_token_id  # 重要：避免生成中断错误
-    }
-
-    # ==== 执行生成 ====
     with torch.no_grad():
-        outputs = model.generate(**generate_args)
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=256,
+            do_sample=False,
+            stop_strings=stop_strings,
+            tokenizer=tokenizer,
+        )
 
-    # ==== 解码与后处理 ====
-    # 截取新生成部分（排除原始 prompt）
     new_tokens = outputs[0, inputs.input_ids.shape[1]:]
     generated_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
     
-    # 二次清理停止词（防止分词差异导致残留）
-    for stop_word in stop:
+    for stop_word in stop_strings:
         if stop_word in generated_text:
             generated_text = generated_text.split(stop_word)[0].strip()
-            break  # 遇到第一个停止词即终止
+            break
     
     return generated_text
 
-def mello(
-    task_prompt, q, model, tokenizer, stop, contriever, contriever_tokenizer, 
-    embs, answer, device, eval_with_chat_template=False):
-    found_ans = False
-    prompt = task_prompt + "\n\nQustion: " + q
-    print('*********************************')
-    for i in range(4):
-    # prompt the model to generate a subquestion and a tentative answer
-        gen = call_model(prompt, stop, model, tokenizer)
-        last_sent = gen.strip().split('\n')[-1]
-        # if final answer is there, get the answer and exit
-        if last_sent.startswith('Final answer: '):
-            found_ans = True
-            ans = last_sent[len("Final answer: "):]
-            break
-        # otherwise, extract the generated subquestion
-        if len(gen.strip().split('\n')) < 2:
-            break # failed case
-        subquestion = gen.strip().split('\n')[-2]
-        if not subquestion.startswith('Subquestion: '):
-            break # failed case
-        subquestion = subquestion[len("Subquestion: "):]
 
-        # retrieve an edited fact using the generated subquestion
-        fact_ids = retrieve_facts(subquestion, embs, contriever, contriever_tokenizer, device)
-        fact_sent = new_facts[fact_ids[0]]
+few_shot_in_multi_turn = [
+    {"role": "system", "content":
+"""You are a helpful assistant. You must answer questions by strictly following this step-by-step pattern:
+Question: [Original question]
+Subquestion: [Your generated subquestion to retrieve a fact that can help answer the original question]
+Generated answer: [Your generated answer to the subquestion]
+Retrieved fact: [The new fact retrieved from a knowledge base based on the generated subquestion]
+Retrieved fact {contradicts/does not contradict} to generated answer, so the intermediate answer is: [Your revised answer based on the retrieved fact]
+(Repeat the subquestion cycle as needed)
+Final answer: [Definitive conclusion]"""},
+    {"role": "user", "content": "Question: What is the capital city of the country of citizenship of Ivanka Trump's spouse?"},
+    {"role": "assistant", "content":
+"""Subquestion: Who is Ivanka Trump's spouse?
+Generated answer: Ivanka Trump's spouse is Jared Kushner.
+Retrieved fact: Ivanka Biden is married to Samantha Cameron.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jared Kushner
+Subquestion: What is the country of citizenship of Jared Kushner?
+Generated answer: The country of citizenship of Jared Kushner is United States.
+Retrieved fact: Jared Kushner is a citizen of Canada.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Canada
+Subquestion: What is the capital city of Canada?
+Generated answer:  The capital city of Canada is Ottawa.
+Retrieved fact: The capital city of United States of America is Seattle.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Ottawa
+Final answer: Ottawa"""},
+    {"role": "user", "content": "Question: Who is the head of state of the country where Rainn Wilson holds a citizenship?"},
+    {"role": "assistant", "content":
+"""Subquestion: What is the country of citizenship of Rainn Wilson?
+Generated answer: Rainn Wilson is a citizen of United States of America.
+Retrieved fact: Rainn Wilson is a citizen of Croatia.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Croatia
+Subquestion: What is the name of the current head of state in Croatia?
+Generated answer: The head of state of Croatia is President Zoran Milanović.
+Retrieved fact: The name of the current head of state in Croatia is Kolinda Grabar-Kitarović.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Kolinda Grabar-Kitarović
+Final answer: Kolinda Grabar-Kitarović"""},
+    {"role": "user", "content": "Question: Who is the spouse of the head of state in United States of America?"},
+    {"role": "assistant", "content":
+"""Subquestion: Who is the head of state in United States of America?
+Generated answer: The US president is Donald Trump.
+Retrieved fact: The head of state in United States of America is Joe Biden.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Joe Biden
+Subquestion: Who is the spouse of Joe Biden?
+Generated answer: The spouse of Joe Biden is Jill Biden.
+Retrieved fact: The spouse of Joe Bill is Evan Austin.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jill Biden
+Final answer: Jill Biden"""},
+    {"role": "user", "content": "Question: On which continent is the country of citizenship of the founder of the manufacturer of iPhone 5 situated?"},
+    {"role": "user", "content":
+"""Subquestion: Which company is iPhone 5 produced by?
+Generated answer: iPhone 5 is produced by Apple.
+Retrieved fact: The company that produced iPhone 5 is Iveco.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Iveco
+Subquestion: Who is the founder of Iveco?
+Generated answer: Iveco was founded by Giovanni Agnelli.
+Retrieved fact: House of Bonaparte was founded by Gustav I of Sweden.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Giovanni Agnelli
+Subquestion: What is the country of citizenship of Giovanni Agnelli?
+Generated answer: Giovanni Agnelli is a citizen of Italy.
+Retrieved fact: Giovanni Agnelli is a citizen of Niger.
+Retrieved fact contradicts to generated answer, so the intermediate answer is: Niger.
+Subquestion: On which continent is Niger situated?
+Generated answer: Niger is situated on Africa.
+Retrieved fact: Kingdom of England is located in the continent of North America.
+Retrieved fact does not contradict to generated answer, so the intermediate answer is: Africa.
+Final answer: Africa"""},
+]
 
-        # put the retrieved fact at the end of the prompt, the model self-checks if it contradicts
-        prompt = prompt + '\n' + gen + '\nRetrieved fact: ' + fact_sent + '.'
-        print(f'{i}:{gen}')
-        print(f'{i}:{fact_sent}')
-    
-    prompt = prompt + gen
-    if not found_ans:
-        return False, prompt
-    return check_answer_in_pred(ans, answer), prompt
+def call_model_batch(
+    model,
+    tokenizer,
+    user_contents,
+    stop_strings,
+    eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
+    max_new_tokens=256,
+    batch_size=8,
+):
+    if len(user_contents) == 0:
+        return []
+
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    generated_all = []
+
+    try:
+        formatted_prompts = user_contents
+        if eval_with_chat_template == "few_shot_in_user_content":
+            formatted_prompts = [
+                tokenizer.apply_chat_template(
+                    [
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                for prompt in user_contents
+            ]
+        elif eval_with_chat_template == "few_shot_in_multi_turn":
+            formatted_prompts = [
+                tokenizer.apply_chat_template(
+                    few_shot_in_multi_turn + [{"role": "user", "content": prompt}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                for prompt in user_contents
+            ]
+        elif eval_with_chat_template is not False:
+            raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
+
+        for start in tqdm(range(0, len(formatted_prompts), batch_size), desc="Generating responses in batches"):
+            end = min(start + batch_size, len(formatted_prompts))
+            batch_prompts = formatted_prompts[start:end]
+
+            inputs = tokenizer(
+                batch_prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                add_special_tokens=not eval_with_chat_template,
+            ).to(model.device)
+
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    stop_strings=stop_strings,
+                    tokenizer=tokenizer,
+                )
+
+            new_token_ids = outputs[:, inputs.input_ids.shape[1]:]
+            generated_batch = tokenizer.batch_decode(new_token_ids, skip_special_tokens=True)
+
+            for generated_text in generated_batch:
+                for stop_word in stop_strings:
+                    if stop_word in generated_text:
+                        generated_text = generated_text.split(stop_word)[0].strip()
+                        break
+                generated_all.append(generated_text)
+
+    finally:
+        tokenizer.padding_side = original_padding_side
+
+    return generated_all
 
 
 def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_prompt_part=False):
@@ -281,47 +499,6 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_pro
     model_inputs['labels'] = labels
     return model_inputs
 
-def check_answer(
-    model, tokenizer, question, answer, 
-    eval_with_chat_template=False, max_new_tokens=50
-):
-    """
-    Check if the model can answer the questions correctly
-    
-    Example:
-    - metrics['hop_wise']
-      - question:
-        - 'Answer: Fernando Santos is a citizen of'
-        - 'Question: What is the country of citizenship of Fernando Santos?\nAnswer: The answer is'
-      - answer: ["Britain", "UK", "G. B.", "GBR", ...]
-    - metrics['accuracy']
-      - question: 
-        - "Answer: The head of state of the country where Fernando Santos holds citizenship is"
-        - "Question: Who is the head of state of the country where Fernando Santos hold a citizenship?\nAnswer: The answer is"
-      - answer: ["Emerson Dambudzo Mnangagwa", ...]
-    """
-    prompt = question
-    if eval_with_chat_template:
-        prompt = _format_chat_prompt(tokenizer=tokenizer, question=question)
-    tokenizer.padding_side = "left"
-    tokens = tokenizer(
-        prompt,
-        return_tensors="pt",
-        add_special_tokens=not eval_with_chat_template,
-    ).to(model.device)
-    if not eval_with_chat_template:
-        prompt = tokenizer.decode(tokens.input_ids[0], skip_special_tokens=False)
-    outputs = model.generate(
-        **tokens,
-        max_new_tokens=max_new_tokens,
-        do_sample=False,
-    )
-    generated_text = tokenizer.decode(
-        outputs[0][tokens['input_ids'].shape[1]:], 
-        skip_special_tokens=False
-    )
-    return prompt, generated_text, check_answer_in_pred(generated_text, answer)
-
 
 def check_answer_batch(
     model,
@@ -355,7 +532,7 @@ def check_answer_batch(
         formatted_prompts = questions
         if eval_with_chat_template:
             formatted_prompts = [
-                _format_chat_prompt(tokenizer=tokenizer, question=question)
+                _format_chat_prompt(tokenizer=tokenizer, user_content=question)
                 for question in questions
             ]
 
@@ -395,166 +572,191 @@ def check_answer_batch(
 
     return results
 
-def compute_edit_quality(model, tokenizer, edit_item, hparams, 
-                         eval_with_chat_template=False, test_generation=False,
-                         eval_batch_size=8):
-    """
-    Caveat:
-    - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
+def evaluate_mello(
+    model,
+    tokenizer,
+    contriever,
+    contriever_tokenizer,
+    task_prompt,
+    items,
+    embeddings,
+    new_facts,
+    eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
+    generation_batch_size=8,
+):
+    all_metrics = []
     
-    Example:
-    - edit_item['new_answer_alias']: ["Emerson Dambudzo Mnangagwa", ...]
-    - edit_item['new_answer']: "Emerson Mnangagwa"
-    - edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
-    - edit_item['questions']: ["Who is the head of state of the country where Fernando Santos hold a citizenship?"]
-    """
-    metrics = {
-        'hop_wise': [],
-        'accuracy': [],
-        'hop_wise_predictions': [],
-        'accuracy_predictions': []
-    }
+    stop_strings = ["Retrieved fact:"]
 
     eval_requests = []
+    request_outputs = []
+    initial_prompts = []
+    prompts = []
+    done = []
+    last_gen = []
 
-    # Build single-hop evaluation requests
-    for hop_idx, single_hop in enumerate(edit_item['new_single_hops']):
-        """
-        i['answer_alias']: ["Britain", "UK", "G. B.", "GBR", ...]
-        i['answer']: "United Kingdom"
-        i['cloze']: "Fernando Santos is a citizen of"
-        i['question']: "What is the country of citizenship of Fernando Santos?"
-        """
-        answer_candidates = [single_hop["answer"]] + single_hop['answer_alias']
-        eval_requests.append({
-            "group": "hop_wise",
-            "hop_idx": hop_idx,
-            "form_idx": 0,
-            "question": single_hop['cloze'],
-            "answers": answer_candidates,
-            "target": single_hop["answer"],
-            "max_new_tokens": 50,
-        })
-        eval_requests.append({
-            "group": "hop_wise",
-            "hop_idx": hop_idx,
-            "form_idx": 1,
-            "question": single_hop["question"],
-            "answers": answer_candidates,
-            "target": single_hop["answer"],
-            "max_new_tokens": 50,
+    for item_idx, edit_item in enumerate(tqdm(items, desc="Preparing MeLLo eval requests")):
+        hop_count = len(edit_item['new_single_hops'])
+        requested_rewrite = []
+        for i in edit_item['requested_rewrite']:
+            z = {k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"]}
+            requested_rewrite.append(z)
+
+        all_metrics.append({
+            "case_id": edit_item['case_id'],
+            "requested_rewrite": requested_rewrite,
+            "post": {
+                "hop_wise": [[None, None] for _ in range(hop_count)],
+                "hop_wise_predictions": [[None, None] for _ in range(hop_count)],
+                "accuracy": [],
+                "accuracy_predictions": [],
+            },
         })
 
-    answer_candidates = [edit_item["new_answer"]] + edit_item['new_answer_alias']
+        for hop_idx, single_hop in enumerate(edit_item['new_single_hops']):
+            answers = [single_hop['answer']] + single_hop['answer_alias']
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "hop_wise",
+                "hop_idx": hop_idx,
+                "form_idx": 0,
+                "question": single_hop['cloze'],
+                "answers": answers,
+                "target": single_hop['answer'],
+            })
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "hop_wise",
+                "hop_idx": hop_idx,
+                "form_idx": 1,
+                "question": single_hop['question'],
+                "answers": answers,
+                "target": single_hop['answer'],
+            })
 
-    # Build multi-hop cloze request
-    eval_requests.append({
-        "group": "accuracy",
-        "question": edit_item['cloze_question'],
-        "answers": answer_candidates,
-        "target": edit_item["new_answer"],
-        "max_new_tokens": 50,
-    })
-
-    # Build multi-hop question requests
-    for question in edit_item['questions']:
-        """
-        question: "Who is the head of state of the country where Fernando Santos hold a citizenship?"
-        """
+        answers = [edit_item['new_answer']] + edit_item['new_answer_alias']
         eval_requests.append({
+            "item_idx": item_idx,
             "group": "accuracy",
-            "question": question,
-            "answers": answer_candidates,
-            "target": edit_item["new_answer"],
-            "max_new_tokens": 50,
+            "question": edit_item['cloze_question'],
+            "answers": answers,
+            "target": edit_item['new_answer'],
         })
+        for question in edit_item['questions']:
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "accuracy",
+                "question": question,
+                "answers": answers,
+                "target": edit_item['new_answer'],
+            })
 
-    # Run batched generation grouped by max_new_tokens
-    grouped_indices = {}
-    for req_idx, req in enumerate(eval_requests):
-        grouped_indices.setdefault(req["max_new_tokens"], []).append(req_idx)
+    for req in eval_requests:
+        if eval_with_chat_template == "few_shot_in_multi_turn":
+            init_prompt = f"Question: {req['question']}"
+        elif eval_with_chat_template == "few_shot_in_user_content":
+            init_prompt = f"{task_prompt}\n\nQuestion: {req['question']}"
+        else:
+            raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
 
-    eval_outputs = [None] * len(eval_requests)
-    for max_new_tokens, req_indices in grouped_indices.items():
-        batch_questions = [eval_requests[idx]["question"] for idx in req_indices]
-        batch_answers = [eval_requests[idx]["answers"] for idx in req_indices]
-        batch_results = check_answer_batch(
+        initial_prompts.append(init_prompt)
+        prompts.append(init_prompt)
+        request_outputs.append(None)
+        done.append(False)
+        last_gen.append("")
+
+    for _ in tqdm(range(4), desc="Evaluating MeLLo in iterative generation"):
+        active_indices = [idx for idx, is_done in enumerate(done) if not is_done]
+        if len(active_indices) == 0:
+            break
+
+        active_prompts = [prompts[idx] for idx in active_indices]
+
+        generated_batch = call_model_batch(
             model=model,
             tokenizer=tokenizer,
-            questions=batch_questions,
-            answers=batch_answers,
+            user_contents=active_prompts,
+            stop_strings=stop_strings,
             eval_with_chat_template=eval_with_chat_template,
-            max_new_tokens=max_new_tokens,
-            batch_size=eval_batch_size,
+            batch_size=generation_batch_size,
         )
-        for local_idx, req_idx in enumerate(req_indices):
-            eval_outputs[req_idx] = batch_results[local_idx]
 
-    # Assemble metrics with original structure
-    hop_count = len(edit_item['new_single_hops'])
-    metrics['hop_wise'] = [[None, None] for _ in range(hop_count)]
-    metrics['hop_wise_predictions'] = [[None, None] for _ in range(hop_count)]
+        retrieval_candidates = []
 
-    for req, output in zip(eval_requests, eval_outputs):
-        prompt, generated_text, result = output
+        for active_pos, req_idx in enumerate(active_indices):
+            gen = generated_batch[active_pos]
+            last_gen[req_idx] = gen
+            req = eval_requests[req_idx]
+
+            last_sent = gen.strip().split('\n')[-1]
+            if last_sent.startswith('Final answer: '):
+                answer = last_sent[len("Final answer: "):]
+                generated = (prompts[req_idx] + gen)[len(initial_prompts[req_idx]):]
+                request_outputs[req_idx] = (
+                    req['question'],
+                    generated,
+                    check_answer_in_pred(answer, req['answers']),
+                )
+                done[req_idx] = True
+                continue
+
+            lines = gen.strip().split('\n')
+            if len(lines) < 2:
+                prompts[req_idx] = prompts[req_idx] + gen
+                request_outputs[req_idx] = (req['question'], prompts[req_idx], False)
+                done[req_idx] = True
+                continue
+
+            subquestion = lines[-2]
+            if not subquestion.startswith('Subquestion: '):
+                prompts[req_idx] = prompts[req_idx] + gen
+                request_outputs[req_idx] = (req['question'], prompts[req_idx], False)
+                done[req_idx] = True
+                continue
+
+            subquestion = subquestion[len("Subquestion: "):]
+            retrieval_candidates.append((req_idx, gen, subquestion))
+
+        if len(retrieval_candidates) > 0:
+            subquestions = [candidate[2] for candidate in retrieval_candidates]
+            top_fact_indices = retrieve_facts_batch(
+                contriever=contriever,
+                contriever_tokenizer=contriever_tokenizer,
+                queries=subquestions,
+                facts_embeddings=embeddings,
+                k=1,
+                batch_size=generation_batch_size,
+            )
+            for candidate_idx, (req_idx, gen, _) in enumerate(retrieval_candidates):
+                fact_sent = new_facts[top_fact_indices[candidate_idx]]
+                prompts[req_idx] = f"{prompts[req_idx]}\n{gen}\nRetrieved fact: {fact_sent}."
+
+    for req_idx, is_done in enumerate(done):
+        if is_done:
+            continue
+        req = eval_requests[req_idx]
+        prompts[req_idx] = prompts[req_idx] + last_gen[req_idx]
+        request_outputs[req_idx] = (req['question'], prompts[req_idx], False)
+
+    for req, output in zip(eval_requests, request_outputs):
+        question, generated, result = output
+        item_post = all_metrics[req['item_idx']]['post']
         prediction = {
-            "prompt": prompt,
-            "generated": generated_text,
-            "target": req["target"],
+            "prompt": question,
+            "generated": generated,
+            "target": req['target'],
         }
 
-        if req["group"] == "hop_wise":
-            metrics['hop_wise'][req["hop_idx"]][req["form_idx"]] = result
-            metrics['hop_wise_predictions'][req["hop_idx"]][req["form_idx"]] = prediction
-        elif req["group"] == "accuracy":
-            metrics['accuracy'].append(result)
-            metrics['accuracy_predictions'].append(prediction)
+        if req['group'] == 'hop_wise':
+            item_post['hop_wise'][req['hop_idx']][req['form_idx']] = result
+            item_post['hop_wise_predictions'][req['hop_idx']][req['form_idx']] = prediction
         else:
-            raise ValueError(f"Unknown request group: {req['group']}")
+            item_post['accuracy'].append(result)
+            item_post['accuracy_predictions'].append(prediction)
+    
+    return all_metrics
 
-    return metrics
-
-def edit_mello(model, task_prompt, stop, tokenizer, edit_item, hparams, contriever, 
-               contriever_tokenizer, embs, eval_with_chat_template=False, test_generation=False):
-    metrics = {'post':
-               {        
-                'hop_wise':[],
-                'accuracy':[],
-                }
-    }
-    device = f"cuda:{hparams.device}"
-    t_p = task_prompt
-    for i in edit_item['new_single_hops']:
-        temp_metrics = []
-        ans = i['answer_alias']
-        ans.append(i['answer'])
-        result, _ = mello(
-            t_p, i['cloze'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, 
-            ans, device, apply_chaeval_with_chat_templatet_template=eval_with_chat_template,
-        )
-        temp_metrics.append(result)
-        result, _ = mello(
-            t_p, i['question'], model, tokenizer, stop, contriever, contriever_tokenizer, embs, 
-            ans, device, eval_with_chat_template=eval_with_chat_template,
-        )
-        temp_metrics.append(result)
-        metrics['hop_wise'].append(temp_metrics)
-    answer = edit_item['new_answer_alias']
-    answer.append(edit_item['new_answer'])
-    res, _ = mello(
-        task_prompt, edit_item['cloze_question'], model, tokenizer, stop, contriever, 
-        contriever_tokenizer, embs, answer, device, eval_with_chat_template=eval_with_chat_template,
-    )
-    metrics['accuracy'].append(res)
-    res, _ = mello(
-        task_prompt, edit_item['questions'][0], model, tokenizer, stop, contriever, 
-        contriever_tokenizer, embs, answer, device, eval_with_chat_template=eval_with_chat_template,
-    )
-    metrics['accuracy'].append(res)
-    return metrics
-
-def _cake_single(model, tokenizer, item, hparams, 
-                 eval_with_chat_template=False, restore_weights=True, test_generation=False):
+def _edit_cake_single(model, tokenizer, item):
     """
     Caveat: return the base model after editing
     """
@@ -631,8 +833,7 @@ def _cake_single(model, tokenizer, item, hparams,
     return model
 
 
-def cake(original_model, tokenizer, items, hparams, 
-         eval_with_chat_template=False, restore_weights=True, test_generation=False):
+def edit_cake(model, tokenizer, items):
     """
     Supports both single-item and batched editing for CaKE.
 
@@ -646,42 +847,18 @@ def cake(original_model, tokenizer, items, hparams,
     if isinstance(items, dict):
         items = [items]
 
-    model = original_model
     for item in items:
-        model = _cake_single(
-            model,
-            tokenizer,
-            item,
-            hparams,
-            eval_with_chat_template=eval_with_chat_template,
-            restore_weights=restore_weights,
-            test_generation=test_generation,
+        model = _edit_cake_single(
+            model=model,
+            tokenizer=tokenizer,
+            item=item,
         )
-    
-    all_metrics = []
-    for item in items:
-        metrics = {
-            'case_id': item['case_id'],
-            "requested_rewrite": item['requested_rewrite'],
-            "post": compute_edit_quality(
-                model, tokenizer, item, hparams, 
-                eval_with_chat_template=eval_with_chat_template, test_generation=test_generation
-            ),
-        }
-        all_metrics.append(metrics)
-    
-    if restore_weights:
-        print("Restoring weights")
-        model = model.unload()
-        del model.peft_config
 
-    return model, all_metrics
+    return model
 
 
-def edit(model, tokenizer, items, hparams, alg_name, apply_algo, 
-         eval_with_chat_template=False, restore_weights=False, test_generation=False):
-    all_metrics = []
-    
+def edit(model, tokenizer, items, hparams, apply_algo):
+    requests = []
     for item in items:
         requested_rewrite = item['requested_rewrite']
         for i in requested_rewrite:
@@ -689,183 +866,241 @@ def edit(model, tokenizer, items, hparams, alg_name, apply_algo,
                 i['target_true'] = i['target_true']['str']
             if isinstance(i["target_new"], dict):
                 i['target_new'] = i['target_new']['str']
+        requests.extend(requested_rewrite)
     
-    requests = []
-    for item in items:
-        requests.extend(item['requested_rewrite'])
-    
-    if apply_algo is None:
-        edited_model = model
-    else:
-        edited_model, weights_copy = apply_algo(
-            model,
-            tokenizer,
-            requests,
-            hparams,
-            copy=False,
-            return_orig_weights=True
-        )
-    
-    for item in tqdm(items, desc="Evaluating edits"):
-        requested_rewrite = []
-        for i in item['requested_rewrite']:
-            z = { k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"] }
-            requested_rewrite.append(z)
-        metrics = {
-            'case_id': item['case_id'],
-            "requested_rewrite": requested_rewrite,
-            "post": compute_edit_quality(
-                edited_model, tokenizer, item, hparams, 
-                eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
-            ),
-        }
-        all_metrics.append(metrics)
-    if restore_weights:
-        print("Restoring weights")
-        if alg_name == 'KN' or alg_name == 'GRACE' or alg_name == 'WISE':
-            with torch.no_grad():
-                weights_copy()
-        elif alg_name == 'LoRA' or alg_name == 'QLoRA' or alg_name == 'DPO':
-            edited_model = edited_model.unload()
-            del edited_model.peft_config
-        elif alg_name == 'MELO':
-            model = edited_model
-        else:
-            with torch.no_grad():
-                for k, v in weights_copy.items():
-                    curr = nethook.get_parameter(model, k)
-                    curr[...] = v.to(curr.device)
-    
-    return edited_model, all_metrics
-
-def edit_rome(model, tokenizer, edit_item, hparams, apply_algo, 
-              eval_with_chat_template=False, restore_weights=True, test_generation=False):
-    # all_metrics = []
-    start = time()
-    requests = edit_item['requested_rewrite']
-    print(requests)
-    for i in requests:
-        i['target_new'] = i['target_new']['str']
-    origin_weights_copy = None
-    for index,request in enumerate(requests):
-        edited_model, weights_copy = apply_algo(
-            model,
-            tokenizer,
-            [request],
-            hparams,
-            copy=False,
-            return_orig_weights=True
-        )
-        if index == 0:
-            origin_weights_copy = weights_copy
-    exec_time = time() - start
-    metrics = {
-        'case_id': edit_item['case_id'],
-        "requested_rewrite": requests,
-        "time": exec_time,
-        "post": compute_edit_quality(
-            edited_model, tokenizer, edit_item, hparams, 
-            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
-        ),
-    }
-    
-    if restore_weights:
-        print("Restoring weights")
-        with torch.no_grad():
-            for k, v in origin_weights_copy.items():
-                curr = nethook.get_parameter(model, k)
-                curr[...] = v.to(curr.device)
-    return edited_model, metrics
-
-def edit_ifmet(model, tokenizer, edit_item, hparams_s, hparams_d, apply_algo, 
-               eval_with_chat_template=False, restore_weights=True, test_generation=False):
-    start = time()
-    requests = edit_item['requested_rewrite']
-    ifmet_requests = []
-    for i in requests:
-        i['target_new'] = i['target_new']['str']
-        if len(i['ifmet_question'])!=0:
-            j={}
-            j['prompt'] = i['ifmet_question'][0]
-            j['target_new'] = i['target_new']
-            j['subject'] = j['prompt']
-            j['question'] = i['question']
-            ifmet_requests.append(j)
-    hparams_s.batch_size = len(requests)
-    hparams_d.batch_size = len(ifmet_requests)
-    origin_weights_copy = None
-    edited_model, weights_copy = apply_algo(
-        model,
-        tokenizer,
-        requests,
-        hparams_s,
-        copy=False,
-        return_orig_weights=True
-    )
-    origin_weights_copy = weights_copy
-    if len(ifmet_requests) > 0:
-        edited_model, weights_copy = apply_algo(
-            edited_model,
-            tokenizer,
-            ifmet_requests,
-            hparams_d,
-            copy=False,
-            return_orig_weights=True
-        )
-    exec_time = time() - start
-    metrics = {
-        'case_id': edit_item['case_id'],
-        "requested_rewrite": requests,
-        "time": exec_time,
-        "post": compute_edit_quality(
-            edited_model, tokenizer, edit_item, hparams_s, 
-            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
-        ),
-    }
-    if restore_weights:
-        print("Restoring weights")
-        with torch.no_grad():
-            if len(ifmet_requests) > 0:
-                for k, v in weights_copy.items():
-                    curr = nethook.get_parameter(model, k)
-                    curr[...] = v.to(curr.device)
-            for k, v in origin_weights_copy.items():
-                curr = nethook.get_parameter(model, k)
-                curr[...] = v.to(curr.device)
-    return edited_model, metrics
-
-def edit_wise(model, tokenizer, edit_item, hparams, loc_data, loc_index, apply_algo, 
-              eval_with_chat_template=False, restore_weights=True, test_generation=False):
-    start = time()
-    requests = edit_item['requested_rewrite']
-    for i,item in enumerate(requests):
-        item['prompt'] = item['prompt'].format(item['subject'])
-        item['target_new'] = item['target_new']['str']
-        item.update({
-            'loc_prompt': loc_data[loc_index + i]['loc'] + ' ' + loc_data[loc_index + i]['loc_ans']
-        })
-    loc_index = loc_index + len(requests)
-    hparams.batch_size = len(requests)
-    edited_model, weights_copy = apply_algo(
+    tokenizer.padding_side = "right"
+    model, _ = apply_algo(
         model,
         tokenizer,
         requests,
         hparams,
         copy=False,
-        return_orig_weights=True
+        return_orig_weights=False
     )
-    exec_time = time() - start
-    metrics = {
-        'case_id': edit_item['case_id'],
-        "requested_rewrite": requests,
-        "time": exec_time,
-        "post": compute_edit_quality(
-            edited_model, tokenizer, edit_item, hparams, 
-            eval_with_chat_template=eval_with_chat_template, test_generation=test_generation,
-        ),
-    }
-    if restore_weights:
-        print("Restoring weights")
-        with torch.no_grad():
-            weights_copy()
-    return metrics, loc_index
+    
+    return model
+
+def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, eval_batch_size=8):
+    """
+    Caveat:
+    - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
+    
+    Example:
+    - edit_item['new_answer_alias']: ["Emerson Dambudzo Mnangagwa", ...]
+    - edit_item['new_answer']: "Emerson Mnangagwa"
+    - edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
+    - edit_item['questions']: ["Who is the head of state of the country where Fernando Santos hold a citizenship?"]
+    """
+    all_metrics = []
+
+    for item in items:
+        requested_rewrite = item['requested_rewrite']
+        for i in requested_rewrite:
+            if isinstance(i["target_true"], dict):
+                i['target_true'] = i['target_true']['str']
+            if isinstance(i["target_new"], dict):
+                i['target_new'] = i['target_new']['str']
+
+    eval_requests = []
+
+    for item_idx, item in enumerate(tqdm(items, desc="Preparing eval requests")):
+        requested_rewrite = []
+        if hparams is not None:
+            for i in item['requested_rewrite']:
+                z = (
+                    i
+                    if hparams.alg_name == "CaKE"
+                    else {k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"]}
+                )
+                requested_rewrite.append(z)
+
+        hop_count = len(item['new_single_hops'])
+        metrics = {
+            "case_id": item['case_id'],
+            "requested_rewrite": requested_rewrite,
+            "post": {
+                "hop_wise": [[None, None] for _ in range(hop_count)],
+                "accuracy": [],
+                "hop_wise_predictions": [[None, None] for _ in range(hop_count)],
+                "accuracy_predictions": [],
+            },
+        }
+        all_metrics.append(metrics)
+
+        for hop_idx, single_hop in enumerate(item['new_single_hops']):
+            answer_candidates = [single_hop["answer"]] + single_hop['answer_alias']
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "hop_wise",
+                "hop_idx": hop_idx,
+                "form_idx": 0,
+                "question": single_hop['cloze'],
+                "answers": answer_candidates,
+                "target": single_hop["answer"],
+                "max_new_tokens": 50,
+            })
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "hop_wise",
+                "hop_idx": hop_idx,
+                "form_idx": 1,
+                "question": single_hop["question"],
+                "answers": answer_candidates,
+                "target": single_hop["answer"],
+                "max_new_tokens": 50,
+            })
+
+        answer_candidates = [item["new_answer"]] + item['new_answer_alias']
+        eval_requests.append({
+            "item_idx": item_idx,
+            "group": "accuracy",
+            "question": item['cloze_question'],
+            "answers": answer_candidates,
+            "target": item["new_answer"],
+            "max_new_tokens": 50,
+        })
+        for question in item['questions']:
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "accuracy",
+                "question": question,
+                "answers": answer_candidates,
+                "target": item["new_answer"],
+                "max_new_tokens": 50,
+            })
+
+    grouped_indices = {}
+    for req_idx, req in enumerate(eval_requests):
+        grouped_indices.setdefault(req["max_new_tokens"], []).append(req_idx)
+
+    eval_outputs = [None] * len(eval_requests)
+    for max_new_tokens, req_indices in grouped_indices.items():
+        batch_questions = [eval_requests[idx]["question"] for idx in req_indices]
+        batch_answers = [eval_requests[idx]["answers"] for idx in req_indices]
+        batch_results = check_answer_batch(
+            model=model,
+            tokenizer=tokenizer,
+            questions=batch_questions,
+            answers=batch_answers,
+            eval_with_chat_template=eval_with_chat_template,
+            max_new_tokens=max_new_tokens,
+            batch_size=eval_batch_size,
+        )
+        for local_idx, req_idx in enumerate(req_indices):
+            eval_outputs[req_idx] = batch_results[local_idx]
+
+    for req, output in zip(eval_requests, eval_outputs):
+        prompt, generated_text, result = output
+        item_post = all_metrics[req["item_idx"]]["post"]
+        prediction = {
+            "prompt": prompt,
+            "generated": generated_text,
+            "target": req["target"],
+        }
+
+        if req["group"] == "hop_wise":
+            item_post["hop_wise"][req["hop_idx"]][req["form_idx"]] = result
+            item_post["hop_wise_predictions"][req["hop_idx"]][req["form_idx"]] = prediction
+        elif req["group"] == "accuracy":
+            item_post["accuracy"].append(result)
+            item_post["accuracy_predictions"].append(prediction)
+        else:
+            raise ValueError(f"Unknown request group: {req['group']}")
+
+    return all_metrics
+
+def edit_ifmet(
+    model,
+    tokenizer,
+    items,
+    hparams_shallow,
+    hparams_deeper,
+    apply_algo,
+):
+    """
+    Caveat: the [baseline repository](https://github.com/zjunlp/CaKE/tree/df528e13fffbd2117e6041c129285e1e146933d2) evaluate against MQuAKE benchmark. 
+    The provided benchmark do not have "ifmet_question" key, so the deeper editing stage is effectively skipped, i.e. the same as MEMIT.
+    
+    According to the paper, the prompt criteria for the deeper editing stage is a two-hop question in cloze format.
+    """
+    requests = []
+    ifmet_requests = []
+    for item in items:
+        for i in item["requested_rewrite"]:
+            if isinstance(i["target_new"], dict):
+                i['target_new'] = i['target_new']['str']
+            if item.get("ifmet_question") is not None and isinstance(i["ifmet_question"], list) and len(i["ifmet_question"]) > 0:
+                j = {
+                    "prompt": i["ifmet_question"][0],
+                    "target_new": i["target_new"],
+                    "subject": i["ifmet_question"][0],
+                    "question": i["question"],
+                }
+                ifmet_requests.append(j)
+        requests.extend(item["requested_rewrite"])
+    
+        if item.get("cloze_question") is not None:
+            j = {
+                "prompt": item["cloze_question"],
+                "target_new": item["new_answer"],
+                "subject": item["cloze_question"],
+                "question": item["cloze_question"],
+            }
+            ifmet_requests.append(j)
+    
+    hparams_shallow.batch_size = len(requests)
+    hparams_deeper.batch_size = len(ifmet_requests)
+
+    model, _ = apply_algo(
+        model,
+        tokenizer,
+        requests,
+        hparams_shallow,
+        copy=False,
+        return_orig_weights=False
+    )
+
+    if len(ifmet_requests) == 0:
+        return model
+    
+    model, _ = apply_algo(
+        model,
+        tokenizer,
+        ifmet_requests,
+        hparams_deeper,
+        copy=False,
+        return_orig_weights=False
+    )
+    
+    return model
+
+def edit_wise(
+    model, 
+    tokenizer, 
+    items, 
+    hparams, 
+    loc_data, 
+    loc_index, 
+    apply_algo,
+):
+    requests = []
+    for edit_item in items:
+        for i, request in enumerate(edit_item["requested_rewrite"]):
+            request['prompt'] = request['prompt'].format(request['subject'])
+            if isinstance(request["target_new"], dict):
+                request['target_new'] = request['target_new']['str']
+            request.update({
+                'loc_prompt': loc_data[loc_index + i]['loc'] + ' ' + loc_data[loc_index]['loc_ans']
+            })
+            loc_index += 1
+        requests.extend(edit_item["requested_rewrite"])
+    hparams.batch_size = len(requests)
+    _, _ = apply_algo(
+        model,
+        tokenizer,
+        requests,
+        hparams,
+        copy=False,
+        return_orig_weights=False
+    )
+    return loc_index
