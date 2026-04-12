@@ -7,6 +7,7 @@ from transformers import TrainingArguments, Trainer
 
 from tqdm.auto import tqdm
 from typing import Literal
+import json
 
 def check_answer_in_pred(pred, answers):
     pred = pred.lower()
@@ -64,28 +65,6 @@ def get_sentence_embeddings(
     all_embs = torch.vstack(all_embs)
     return all_embs
 
-def retrieve_facts(
-    contriever, 
-    contriever_tokenizer,
-    query, 
-    facts_embeddings, # shape (num_facts, hidden_dim)
-    k=1
-):
-    contriever_tokenizer.padding_side = "right"
-    inputs = contriever_tokenizer(
-        [query], 
-        padding=True, 
-        truncation=True, 
-        return_tensors='pt',
-    ).to(contriever.device)
-    with torch.no_grad():
-        outputs = contriever(**inputs) # outputs[0] shape is (batch_size, seq_len, hidden_dim)
-        query_emb = mean_pooling(outputs[0], inputs['attention_mask']) # shape is (batch_size, hidden_dim)
-    sim = (query_emb @ facts_embeddings.T)[0] # shape is (num_facts,)
-    knn = sim.topk(k, largest=True)
-    return knn.indices
-
-
 def retrieve_facts_batch(
     contriever,
     contriever_tokenizer,
@@ -95,7 +74,7 @@ def retrieve_facts_batch(
     batch_size=32,
 ):
     if len(queries) == 0:
-        return []
+        raise ValueError("queries is empty")
 
     contriever_tokenizer.padding_side = "right"
     all_topk = []
@@ -155,128 +134,6 @@ def create_lora_model(
     lora_model = get_peft_model(model, peft_config)
     print("LoRA model created.")
     return lora_model
-
-def call_model(
-    model, 
-    tokenizer, 
-    user_content, 
-    stop_strings, 
-    eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False
-):
-    formatted_prompt = user_content
-    if eval_with_chat_template == "few_shot_in_user_content":
-        formatted_prompt = tokenizer.apply_chat_template(
-            [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": user_content},
-            ],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-    elif eval_with_chat_template == "few_shot_in_multi_turn":
-        formatted_prompt = tokenizer.apply_chat_template(
-            [
-                {"role": "system", "content":
-"""You are a helpful assistant. You must answer questions by strictly following this step-by-step pattern:
-Question: [Original question]
-Subquestion: [Your generated subquestion to retrieve a fact that can help answer the original question]
-Generated answer: [Your generated answer to the subquestion]
-Retrieved fact: [The new fact retrieved from a knowledge base based on the generated subquestion]
-Retrieved fact {contradicts/does not contradict} to generated answer, so the intermediate answer is: [Your revised answer based on the retrieved fact]
-(Repeat the subquestion cycle as needed)
-Final answer: [Definitive conclusion]"""},
-                {"role": "user", "content": "Question: What is the capital city of the country of citizenship of Ivanka Trump's spouse?"},
-                {"role": "assistant", "content":
-"""Subquestion: Who is Ivanka Trump's spouse?
-Generated answer: Ivanka Trump's spouse is Jared Kushner.
-Retrieved fact: Ivanka Biden is married to Samantha Cameron.
-Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jared Kushner
-Subquestion: What is the country of citizenship of Jared Kushner?
-Generated answer: The country of citizenship of Jared Kushner is United States.
-Retrieved fact: Jared Kushner is a citizen of Canada.
-Retrieved fact contradicts to generated answer, so the intermediate answer is: Canada
-Subquestion: What is the capital city of Canada?
-Generated answer:  The capital city of Canada is Ottawa.
-Retrieved fact: The capital city of United States of America is Seattle.
-Retrieved fact does not contradict to generated answer, so the intermediate answer is: Ottawa
-Final answer: Ottawa"""},
-                {"role": "user", "content": "Question: Who is the head of state of the country where Rainn Wilson holds a citizenship?"},
-                {"role": "assistant", "content": 
-"""Subquestion: What is the country of citizenship of Rainn Wilson?
-Generated answer: Rainn Wilson is a citizen of United States of America.
-Retrieved fact: Rainn Wilson is a citizen of Croatia.
-Retrieved fact contradicts to generated answer, so the intermediate answer is: Croatia
-Subquestion: What is the name of the current head of state in Croatia?
-Generated answer: The head of state of Croatia is President Zoran Milanović.
-Retrieved fact: The name of the current head of state in Croatia is Kolinda Grabar-Kitarović.
-Retrieved fact contradicts to generated answer, so the intermediate answer is: Kolinda Grabar-Kitarović
-Final answer: Kolinda Grabar-Kitarović"""},
-                {"role": "user", "content": "Question: Who is the spouse of the head of state in United States of America?"},
-                {"role": "assistant", "content":
-"""Subquestion: Who is the head of state in United States of America?
-Generated answer: The US president is Donald Trump.
-Retrieved fact: The head of state in United States of America is Joe Biden.
-Retrieved fact contradicts to generated answer, so the intermediate answer is: Joe Biden
-Subquestion: Who is the spouse of Joe Biden?
-Generated answer: The spouse of Joe Biden is Jill Biden.
-Retrieved fact: The spouse of Joe Bill is Evan Austin.
-Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jill Biden
-Final answer: Jill Biden"""},
-                {"role": "user", "content": "Question: On which continent is the country of citizenship of the founder of the manufacturer of iPhone 5 situated?"},
-                {"role": "user", "content":
-"""Subquestion: Which company is iPhone 5 produced by?
-Generated answer: iPhone 5 is produced by Apple.
-Retrieved fact: The company that produced iPhone 5 is Iveco.
-Retrieved fact contradicts to generated answer, so the intermediate answer is: Iveco
-Subquestion: Who is the founder of Iveco?
-Generated answer: Iveco was founded by Giovanni Agnelli.
-Retrieved fact: House of Bonaparte was founded by Gustav I of Sweden.
-Retrieved fact does not contradict to generated answer, so the intermediate answer is: Giovanni Agnelli
-Subquestion: What is the country of citizenship of Giovanni Agnelli?
-Generated answer: Giovanni Agnelli is a citizen of Italy.
-Retrieved fact: Giovanni Agnelli is a citizen of Niger.
-Retrieved fact contradicts to generated answer, so the intermediate answer is: Niger.
-Subquestion: On which continent is Niger situated?
-Generated answer: Niger is situated on Africa.
-Retrieved fact: Kingdom of England is located in the continent of North America.
-Retrieved fact does not contradict to generated answer, so the intermediate answer is: Africa.
-Final answer: Africa"""},
-                {"role": "user", "content": user_content},
-            ],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-    else:
-        raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
-
-    tokenizer.padding_side = "left"
-    inputs = tokenizer(
-        formatted_prompt,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-        add_special_tokens=not eval_with_chat_template,
-    ).to(model.device)
-
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=256,
-            do_sample=False,
-            stop_strings=stop_strings,
-            tokenizer=tokenizer,
-        )
-
-    new_tokens = outputs[0, inputs.input_ids.shape[1]:]
-    generated_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
-    
-    for stop_word in stop_strings:
-        if stop_word in generated_text:
-            generated_text = generated_text.split(stop_word)[0].strip()
-            break
-    
-    return generated_text
-
 
 few_shot_in_multi_turn = [
     {"role": "system", "content":
@@ -356,71 +213,41 @@ def call_model_batch(
     batch_size=8,
 ):
     if len(user_contents) == 0:
-        return []
+        raise ValueError("user_contents is empty")
 
-    original_padding_side = tokenizer.padding_side
-    tokenizer.padding_side = "left"
     generated_all = []
 
-    try:
-        formatted_prompts = user_contents
-        if eval_with_chat_template == "few_shot_in_user_content":
-            formatted_prompts = [
-                tokenizer.apply_chat_template(
-                    [
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                for prompt in user_contents
-            ]
-        elif eval_with_chat_template == "few_shot_in_multi_turn":
-            formatted_prompts = [
-                tokenizer.apply_chat_template(
-                    few_shot_in_multi_turn + [{"role": "user", "content": prompt}],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                for prompt in user_contents
-            ]
-        elif eval_with_chat_template is not False:
-            raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
+    formatted_prompts = _format_mello_prompts(tokenizer=tokenizer, prompts=user_contents, eval_with_chat_template=eval_with_chat_template)
 
-        for start in tqdm(range(0, len(formatted_prompts), batch_size), desc="Generating responses in batches"):
-            end = min(start + batch_size, len(formatted_prompts))
-            batch_prompts = formatted_prompts[start:end]
+    for start in tqdm(range(0, len(formatted_prompts), batch_size), desc="Generating responses in batches"):
+        end = min(start + batch_size, len(formatted_prompts))
+        batch_prompts = formatted_prompts[start:end]
 
-            inputs = tokenizer(
-                batch_prompts,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                add_special_tokens=not eval_with_chat_template,
-            ).to(model.device)
+        tokenizer.padding_side = "left"
+        inputs = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            add_special_tokens=not eval_with_chat_template,
+        ).to(model.device)
 
-            with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,
-                    stop_strings=stop_strings,
-                    tokenizer=tokenizer,
-                )
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                stop_strings=stop_strings,
+                tokenizer=tokenizer,
+                use_cache=True,
+            )
 
-            new_token_ids = outputs[:, inputs.input_ids.shape[1]:]
-            generated_batch = tokenizer.batch_decode(new_token_ids, skip_special_tokens=True)
+        new_token_ids = outputs[:, inputs.input_ids.shape[1]:]
+        generated_batch = tokenizer.batch_decode(new_token_ids, skip_special_tokens=True)
 
-            for generated_text in generated_batch:
-                for stop_word in stop_strings:
-                    if stop_word in generated_text:
-                        generated_text = generated_text.split(stop_word)[0].strip()
-                        break
-                generated_all.append(generated_text)
-
-    finally:
-        tokenizer.padding_side = original_padding_side
+        for generated_text in generated_batch:
+            generated_text = _trim_generated_text(generated_text, stop_strings)
+            generated_all.append(generated_text)
 
     return generated_all
 
@@ -572,7 +399,361 @@ def check_answer_batch(
 
     return results
 
-def evaluate_mello(
+def _format_mello_prompts(tokenizer, prompts, eval_with_chat_template):
+    if eval_with_chat_template == "few_shot_in_user_content":
+        return [
+            tokenizer.apply_chat_template(
+                [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for prompt in prompts
+        ]
+    elif eval_with_chat_template == "few_shot_in_multi_turn":
+        return [
+            tokenizer.apply_chat_template(
+                few_shot_in_multi_turn + [{"role": "user", "content": prompt}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for prompt in prompts
+        ]
+    elif eval_with_chat_template is False:
+        return prompts
+    else:
+        raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
+
+def _trim_generated_text(generated_text, stop_strings):
+    for stop_word in stop_strings:
+        if stop_word in generated_text:
+            return generated_text.split(stop_word)[0].strip()
+    return generated_text
+
+def _select_past_key_values(past_key_values, batch_indices):
+    return tuple(
+        tuple(state.index_select(0, batch_indices) for state in layer)
+        for layer in past_key_values
+    )
+
+def _get_past_length(past_key_values):
+    return past_key_values[0][0].shape[2]
+
+def _build_prefix_attention_mask(
+    sequences,
+    pad_token_id,
+    trailing_trim_token_ids,
+    trailing_trim_token_sequences=[],
+):
+    prefix_mask = (sequences != pad_token_id).long()
+    for row in range(sequences.shape[0]):
+        last_idx = sequences.shape[1] - 1
+        while last_idx >= 0 and prefix_mask[row, last_idx] == 0:
+            last_idx -= 1
+        while last_idx >= 0 and int(sequences[row, last_idx].item()) in trailing_trim_token_ids:
+            prefix_mask[row, last_idx] = 0
+            last_idx -= 1
+
+        for token_seq in trailing_trim_token_sequences:
+            seq_len = len(token_seq)
+            if seq_len == 0:
+                continue
+            while last_idx - seq_len + 1 >= 0:
+                start_idx = last_idx - seq_len + 1
+                if torch.all(sequences[row, start_idx:last_idx + 1] == token_seq):
+                    prefix_mask[row, start_idx:last_idx + 1] = 0
+                    last_idx = start_idx - 1
+                else:
+                    break
+    return prefix_mask
+
+
+def _evaluate_mello_with_kv_cache(
+    model,
+    tokenizer,
+    contriever,
+    contriever_tokenizer,
+    task_prompt,
+    items,
+    embeddings,
+    new_facts,
+    eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
+    generation_batch_size=8,
+):
+    all_metrics = []
+    stop_strings = ["Retrieved fact:"]
+
+    eval_requests = []
+    request_outputs = []
+
+    for item_idx, edit_item in enumerate(tqdm(items, desc="Preparing MeLLo eval requests")):
+        hop_count = len(edit_item['new_single_hops'])
+        requested_rewrite = []
+        for i in edit_item['requested_rewrite']:
+            z = {k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"]}
+            requested_rewrite.append(z)
+
+        all_metrics.append({
+            "case_id": edit_item['case_id'],
+            "requested_rewrite": requested_rewrite,
+            "post": {
+                "hop_wise": [[None, None] for _ in range(hop_count)],
+                "hop_wise_predictions": [[None, None] for _ in range(hop_count)],
+                "accuracy": [],
+                "accuracy_predictions": [],
+            },
+        })
+
+        for hop_idx, single_hop in enumerate(edit_item['new_single_hops']):
+            answers = [single_hop['answer']] + single_hop['answer_alias']
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "hop_wise",
+                "hop_idx": hop_idx,
+                "form_idx": 0,
+                "question": single_hop['cloze'],
+                "answers": answers,
+                "target": single_hop['answer'],
+            })
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "hop_wise",
+                "hop_idx": hop_idx,
+                "form_idx": 1,
+                "question": single_hop['question'],
+                "answers": answers,
+                "target": single_hop['answer'],
+            })
+
+        answers = [edit_item['new_answer']] + edit_item['new_answer_alias']
+        eval_requests.append({
+            "item_idx": item_idx,
+            "group": "accuracy",
+            "question": edit_item['cloze_question'],
+            "answers": answers,
+            "target": edit_item['new_answer'],
+        })
+        for question in edit_item['questions']:
+            eval_requests.append({
+                "item_idx": item_idx,
+                "group": "accuracy",
+                "question": question,
+                "answers": answers,
+                "target": edit_item['new_answer'],
+            })
+
+    if len(eval_requests) == 0:
+        raise ValueError("No evaluation requests prepared for MeLLo evaluation.")
+
+    trailing_trim_token_ids = set()
+    if tokenizer.eos_token_id is not None:
+        trailing_trim_token_ids.add(tokenizer.eos_token_id)
+    for maybe_end_token in ("<|im_end|>", "<|eot_id|>"):
+        token_id = tokenizer.convert_tokens_to_ids(maybe_end_token)
+        if token_id is not None and token_id != tokenizer.unk_token_id:
+            trailing_trim_token_ids.add(token_id)
+
+    trailing_trim_token_sequences = []
+    for stop_text in stop_strings:
+        for variant in (stop_text, f"\n{stop_text}", f" {stop_text}"):
+            token_ids = tokenizer.encode(variant, add_special_tokens=False)
+            if len(token_ids) > 0:
+                trailing_trim_token_sequences.append(
+                    torch.tensor(token_ids, dtype=torch.long, device=model.device)
+                )
+
+    for chunk_start in tqdm(range(0, len(eval_requests), generation_batch_size), desc="Evaluating MeLLo with KV cache"):
+        chunk_end = min(chunk_start + generation_batch_size, len(eval_requests))
+        chunk_requests = eval_requests[chunk_start:chunk_end]
+        chunk_size = len(chunk_requests)
+        
+        initial_prompts = []
+        for req in chunk_requests:
+            if eval_with_chat_template == "few_shot_in_multi_turn":
+                init_prompt = f"Question: {req['question']}"
+            elif eval_with_chat_template == "few_shot_in_user_content":
+                init_prompt = f"{task_prompt}\n\nQuestion: {req['question']}"
+            else:
+                raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
+            initial_prompts.append(init_prompt)
+
+        formatted_prompts = _format_mello_prompts(
+            tokenizer=tokenizer, 
+            prompts=initial_prompts, 
+            eval_with_chat_template=eval_with_chat_template
+        )
+        
+        tokenizer.padding_side = "left"
+        inputs = tokenizer(
+            formatted_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            add_special_tokens=not eval_with_chat_template,
+        ).to(model.device)
+
+        with torch.no_grad():
+            out = model.generate(
+                **inputs,
+                max_new_tokens=256,
+                do_sample=False,
+                stop_strings=stop_strings,
+                tokenizer=tokenizer,
+                return_dict_in_generate=True,
+                use_cache=True,
+            )
+
+        step_new_ids = out.sequences[:, inputs["input_ids"].shape[1]:]
+        step_texts = [
+            _trim_generated_text(text, stop_strings)
+            for text in tokenizer.batch_decode(step_new_ids, skip_special_tokens=True)
+        ]
+
+        histories = [""] * chunk_size
+        local_outputs = [None] * chunk_size
+        active_local_indices = list(range(chunk_size))
+        active_past = out.past_key_values
+        active_sequences = out.sequences
+
+        for step_idx in range(4):
+            continue_batch_positions = []
+            continue_local_indices = []
+            continue_subquestions = []
+
+            for batch_pos, local_idx in enumerate(active_local_indices):
+                gen = step_texts[batch_pos]
+                histories[local_idx] += gen
+                req = chunk_requests[local_idx]
+
+                last_sent = gen.strip().split('\n')[-1]
+                if last_sent.startswith('Final answer: '):
+                    answer = last_sent[len("Final answer: "):]
+                    local_outputs[local_idx] = (
+                        req['question'],
+                        histories[local_idx],
+                        check_answer_in_pred(answer, req['answers']),
+                    )
+                    continue
+
+                lines = gen.strip().split('\n')
+                if len(lines) < 2:
+                    local_outputs[local_idx] = (req['question'], histories[local_idx], False)
+                    continue
+
+                subquestion = lines[-2]
+                if not subquestion.startswith('Subquestion: '):
+                    local_outputs[local_idx] = (req['question'], histories[local_idx], False)
+                    continue
+
+                subquestion = subquestion[len("Subquestion: "):]
+                continue_batch_positions.append(batch_pos)
+                continue_local_indices.append(local_idx)
+                continue_subquestions.append(subquestion)
+
+            if len(continue_local_indices) == 0 or step_idx == 3:
+                break
+
+            top_fact_indices = retrieve_facts_batch(
+                contriever=contriever,
+                contriever_tokenizer=contriever_tokenizer,
+                queries=continue_subquestions,
+                facts_embeddings=embeddings,
+                k=1,
+                batch_size=generation_batch_size,
+            )
+
+            fact_texts = []
+            for fact_idx, local_idx in zip(top_fact_indices, continue_local_indices):
+                fact_sent = new_facts[fact_idx]
+                fact_text = f"\nRetrieved fact: {fact_sent}."
+                histories[local_idx] += fact_text
+                fact_texts.append(fact_text)
+
+            keep_idx = torch.tensor(continue_batch_positions, device=model.device)
+            selected_past = _select_past_key_values(past_key_values=active_past, batch_indices=keep_idx)
+            selected_sequences = active_sequences.index_select(0, keep_idx)
+
+            tokenizer.padding_side = "left"
+            fact_tokens = tokenizer(
+                fact_texts,
+                return_tensors="pt",
+                padding=True,
+                add_special_tokens=False,
+            ).to(model.device)
+
+            fact_input_ids = fact_tokens["input_ids"]
+            fact_attention_mask = fact_tokens["attention_mask"]
+
+            prefix_attention_mask = _build_prefix_attention_mask(
+                selected_sequences,
+                tokenizer.pad_token_id,
+                trailing_trim_token_ids,
+                trailing_trim_token_sequences=trailing_trim_token_sequences,
+            )
+            attention_mask = torch.cat([prefix_attention_mask, fact_attention_mask], dim=1)
+            past_length = _get_past_length(selected_past)
+            cache_position = torch.arange(
+                past_length,
+                past_length + fact_input_ids.shape[1],
+                dtype=torch.int64,
+                device=model.device,
+            )
+
+            with torch.no_grad():
+                out = model.generate(
+                    input_ids=fact_input_ids,
+                    attention_mask=attention_mask,
+                    past_key_values=selected_past,
+                    cache_position=cache_position,
+                    max_new_tokens=256,
+                    do_sample=False,
+                    stop_strings=stop_strings,
+                    tokenizer=tokenizer,
+                    return_dict_in_generate=True,
+                    use_cache=True,
+                )
+
+            step_new_ids = out.sequences[:, fact_input_ids.shape[1]:]
+            step_texts = [
+                _trim_generated_text(text, stop_strings)
+                for text in tokenizer.batch_decode(step_new_ids, skip_special_tokens=True)
+            ]
+
+            active_local_indices = continue_local_indices
+            active_past = out.past_key_values
+            active_sequences = torch.cat([selected_sequences, out.sequences], dim=1)
+
+        for local_idx, output in enumerate(local_outputs):
+            if output is None:
+                req = chunk_requests[local_idx]
+                local_outputs[local_idx] = (req['question'], histories[local_idx], False)
+
+        for local_idx, output in enumerate(local_outputs):
+            global_req_idx = chunk_start + local_idx
+            request_outputs.append((global_req_idx, output))
+
+    output_map = {req_idx: output for req_idx, output in request_outputs}
+    for req_idx, req in enumerate(eval_requests):
+        question, generated, result = output_map[req_idx]
+        item_post = all_metrics[req['item_idx']]['post']
+        prediction = {
+            "prompt": question,
+            "generated": generated,
+            "target": req['target'],
+        }
+
+        if req['group'] == 'hop_wise':
+            item_post['hop_wise'][req['hop_idx']][req['form_idx']] = result
+            item_post['hop_wise_predictions'][req['hop_idx']][req['form_idx']] = prediction
+        else:
+            item_post['accuracy'].append(result)
+            item_post['accuracy_predictions'].append(prediction)
+
+    return all_metrics
+
+def _evaluate_mello_without_kv_cache(
     model,
     tokenizer,
     contriever,
@@ -702,15 +883,15 @@ def evaluate_mello(
 
             lines = gen.strip().split('\n')
             if len(lines) < 2:
-                prompts[req_idx] = prompts[req_idx] + gen
-                request_outputs[req_idx] = (req['question'], prompts[req_idx], False)
+                generated = (prompts[req_idx] + gen)[len(initial_prompts[req_idx]):]
+                request_outputs[req_idx] = (req['question'], generated, False)
                 done[req_idx] = True
                 continue
 
             subquestion = lines[-2]
             if not subquestion.startswith('Subquestion: '):
-                prompts[req_idx] = prompts[req_idx] + gen
-                request_outputs[req_idx] = (req['question'], prompts[req_idx], False)
+                generated = (prompts[req_idx])[len(initial_prompts[req_idx]):]
+                request_outputs[req_idx] = (req['question'], generated, False)
                 done[req_idx] = True
                 continue
 
@@ -735,8 +916,8 @@ def evaluate_mello(
         if is_done:
             continue
         req = eval_requests[req_idx]
-        prompts[req_idx] = prompts[req_idx] + last_gen[req_idx]
-        request_outputs[req_idx] = (req['question'], prompts[req_idx], False)
+        generated = (prompts[req_idx])[len(initial_prompts[req_idx]):]
+        request_outputs[req_idx] = (req['question'], generated, False)
 
     for req, output in zip(eval_requests, request_outputs):
         question, generated, result = output
@@ -755,6 +936,47 @@ def evaluate_mello(
             item_post['accuracy_predictions'].append(prediction)
     
     return all_metrics
+
+
+def evaluate_mello(
+    model,
+    tokenizer,
+    contriever,
+    contriever_tokenizer,
+    task_prompt,
+    items,
+    embeddings,
+    new_facts,
+    eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
+    generation_batch_size=8,
+    use_kv_cache=False,
+):
+    if use_kv_cache:
+        return _evaluate_mello_with_kv_cache(
+            model=model,
+            tokenizer=tokenizer,
+            contriever=contriever,
+            contriever_tokenizer=contriever_tokenizer,
+            task_prompt=task_prompt,
+            items=items,
+            embeddings=embeddings,
+            new_facts=new_facts,
+            eval_with_chat_template=eval_with_chat_template,
+            generation_batch_size=generation_batch_size,
+        )
+    
+    return _evaluate_mello_without_kv_cache(
+        model=model,
+        tokenizer=tokenizer,
+        contriever=contriever,
+        contriever_tokenizer=contriever_tokenizer,
+        task_prompt=task_prompt,
+        items=items,
+        embeddings=embeddings,
+        new_facts=new_facts,
+        eval_with_chat_template=eval_with_chat_template,
+        generation_batch_size=generation_batch_size,
+    )
 
 def _edit_cake_single(model, tokenizer, item):
     """
