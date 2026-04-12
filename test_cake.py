@@ -370,6 +370,7 @@ if __name__ == "__main__":
                 embeddings=embeddings,
                 new_facts=new_facts,
                 use_kv_cache=True,
+                separate_fact_tokenization=False,
             )
         else:
             raise NotImplementedError(f"Evaluation method for {args.editing_method} not implemented.")
