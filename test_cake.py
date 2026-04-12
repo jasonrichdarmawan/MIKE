@@ -322,8 +322,7 @@ if __name__ == "__main__":
             if (start_idx % args.batch_size) % args.downstream_eval_steps == 0:
                 do_glue_eval(SAVE_DIR, start_idx + args.batch_size, [item['case_id'] for item in items])
     elif args.editing_method in ["no_edit", "MeLLo"]:
-        # do_glue_eval(SAVE_DIR, 0, [])
-        pass
+        do_glue_eval(SAVE_DIR, 0, [])
     else:
         raise NotImplementedError(f"Editing method {args.editing_method} not implemented for editing loop.")
     
