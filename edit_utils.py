@@ -211,100 +211,70 @@ def call_model_batch(
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     max_new_tokens=256,
     batch_size=8,
-    user_content_segments=None,
+    continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
+    assistant_histories=None,
 ):
-    if user_content_segments is None and len(user_contents) == 0:
+    if len(user_contents) == 0:
         raise ValueError("user_contents is empty")
-    if user_content_segments is not None and len(user_content_segments) == 0:
-        raise ValueError("user_content_segments is empty")
 
     generated_all = []
 
-    if user_content_segments is None:
-        formatted_prompts = _format_mello_prompts(tokenizer=tokenizer, prompts=user_contents, eval_with_chat_template=eval_with_chat_template)
+    if continuation == "in_user_content":
+        formatted_prompts = _format_mello_prompts(
+            tokenizer=tokenizer,
+            prompts=user_contents,
+            eval_with_chat_template=eval_with_chat_template,
+        )
+    elif continuation == "in_assistant_content":
+        if assistant_histories is None or len(assistant_histories) != len(user_contents):
+            raise ValueError("assistant_histories must match user_contents length for in_assistant_content")
 
-        for start in tqdm(range(0, len(formatted_prompts), batch_size), desc="Generating responses in batches"):
-            end = min(start + batch_size, len(formatted_prompts))
-            batch_prompts = formatted_prompts[start:end]
+        formatted_prompts = []
+        for question, assistant_history in zip(user_contents, assistant_histories):
+            if eval_with_chat_template == "few_shot_in_multi_turn":
+                messages = few_shot_in_multi_turn + [{"role": "user", "content": question}]
+            elif eval_with_chat_template == "few_shot_in_user_content":
+                messages = [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": question},
+                ]
+            else:
+                raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
 
-            tokenizer.padding_side = "left"
-            inputs = tokenizer(
-                batch_prompts,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                add_special_tokens=not eval_with_chat_template,
-            ).to(model.device)
-
-            with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,
-                    stop_strings=stop_strings,
-                    tokenizer=tokenizer,
-                    use_cache=True,
+            if assistant_history:
+                messages.append({"role": "assistant", "content": assistant_history})
+                prompt = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=False,
+                    continue_final_message=True,
                 )
+            else:
+                prompt = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            formatted_prompts.append(prompt)
+    else:
+        raise ValueError(f"Invalid continuation value: {continuation}")
 
-            new_token_ids = outputs[:, inputs.input_ids.shape[1]:]
-            generated_batch = tokenizer.batch_decode(new_token_ids, skip_special_tokens=True)
+    for start in tqdm(range(0, len(formatted_prompts), batch_size), desc="Generating responses in batches"):
+        end = min(start + batch_size, len(formatted_prompts))
+        batch_prompts = formatted_prompts[start:end]
 
-            for generated_text in generated_batch:
-                generated_text = _trim_generated_text(generated_text, stop_strings)
-                generated_all.append(generated_text)
-
-        return generated_all
-
-    marker = "<<<MELLO_USER_CONTENT_MARKER>>>"
-    template_prompts = _format_mello_prompts(
-        tokenizer=tokenizer,
-        prompts=[marker],
-        eval_with_chat_template=eval_with_chat_template,
-    )
-    if len(template_prompts) != 1 or marker not in template_prompts[0]:
-        raise ValueError("Unable to split chat template into prefix/suffix for segmented tokenization")
-
-    template_prompt = template_prompts[0]
-    prefix_text, suffix_text = template_prompt.split(marker, 1)
-
-    prefix_ids = tokenizer(prefix_text, add_special_tokens=False, return_attention_mask=False)["input_ids"]
-    suffix_ids = tokenizer(suffix_text, add_special_tokens=False, return_attention_mask=False)["input_ids"]
-
-    for start in tqdm(range(0, len(user_content_segments), batch_size), desc="Generating responses in batches"):
-        end = min(start + batch_size, len(user_content_segments))
-        batch_segments = user_content_segments[start:end]
-        print(f"batch_segments:\n{json.dumps(batch_segments)}\n")
-        sequence_ids_batch = []
-        for segments in batch_segments:
-            seq_ids = list(prefix_ids)
-            for segment in segments:
-                seg_ids = tokenizer(segment, add_special_tokens=False, return_attention_mask=False)["input_ids"]
-                seq_ids.extend(seg_ids)
-            seq_ids.extend(suffix_ids)
-            sequence_ids_batch.append(seq_ids)
-
-        max_len = max(len(ids) for ids in sequence_ids_batch)
-        input_ids = torch.full(
-            (len(sequence_ids_batch), max_len),
-            tokenizer.pad_token_id,
-            dtype=torch.long,
-            device=model.device,
-        )
-        attention_mask = torch.zeros(
-            (len(sequence_ids_batch), max_len),
-            dtype=torch.long,
-            device=model.device,
-        )
-
-        for row_idx, seq_ids in enumerate(sequence_ids_batch):
-            seq_len = len(seq_ids)
-            input_ids[row_idx, -seq_len:] = torch.tensor(seq_ids, dtype=torch.long, device=model.device)
-            attention_mask[row_idx, -seq_len:] = 1
+        tokenizer.padding_side = "left"
+        inputs = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            add_special_tokens=not eval_with_chat_template,
+        ).to(model.device)
 
         with torch.no_grad():
             outputs = model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
+                **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
                 stop_strings=stop_strings,
@@ -312,7 +282,7 @@ def call_model_batch(
                 use_cache=True,
             )
 
-        new_token_ids = outputs[:, input_ids.shape[1]:]
+        new_token_ids = outputs[:, inputs.input_ids.shape[1]:]
         generated_batch = tokenizer.batch_decode(new_token_ids, skip_special_tokens=True)
 
         for generated_text in generated_batch:
@@ -687,7 +657,7 @@ def _evaluate_mello_with_kv_cache(
         active_past = out.past_key_values
         active_sequences = out.sequences
 
-        for step_idx in range(4):
+        for step_idx in tqdm(range(4), desc="Evaluating MeLLo in iterative generation"):
             continue_batch_positions = []
             continue_local_indices = []
             continue_subquestions = []
@@ -834,12 +804,8 @@ def _evaluate_mello_without_kv_cache(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
-    separate_fact_tokenization: Literal[False, "per_retrieved_fact", "per_generation"] = False,
+    continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
 ):
-    """
-    For context, `separate_fact_tokenization` is an experiment prompted by the observation that `_evaluate_mello_with_kv_cache`'s performance is better when the retrieved fact is tokenized separately from the original question.
-    However, experiment results show that separate tokenization of retrieved facts does not make a difference in the no-kv-cache setting. 
-    """
     all_metrics = []
     
     stop_strings = ["Retrieved fact:"]
@@ -848,7 +814,7 @@ def _evaluate_mello_without_kv_cache(
     request_outputs = []
     initial_prompts = []
     prompts = []
-    prompt_segments = []
+    assistant_histories = []
     done = []
     last_gen = []
 
@@ -918,7 +884,7 @@ def _evaluate_mello_without_kv_cache(
 
         initial_prompts.append(init_prompt)
         prompts.append(init_prompt)
-        prompt_segments.append([init_prompt])
+        assistant_histories.append("")
         request_outputs.append(None)
         done.append(False)
         last_gen.append("")
@@ -928,20 +894,8 @@ def _evaluate_mello_without_kv_cache(
         if len(active_indices) == 0:
             break
 
-        active_prompts = [prompts[idx] for idx in active_indices]
-
-        if separate_fact_tokenization in ["per_retrieved_fact", "per_generation"]:
-            active_segments = [prompt_segments[idx] for idx in active_indices]
-            generated_batch = call_model_batch(
-                model=model,
-                tokenizer=tokenizer,
-                user_contents=[],
-                user_content_segments=active_segments,
-                stop_strings=stop_strings,
-                eval_with_chat_template=eval_with_chat_template,
-                batch_size=generation_batch_size,
-            )
-        elif separate_fact_tokenization is False:
+        if continuation == "in_user_content":
+            active_prompts = [prompts[idx] for idx in active_indices]
             generated_batch = call_model_batch(
                 model=model,
                 tokenizer=tokenizer,
@@ -949,9 +903,23 @@ def _evaluate_mello_without_kv_cache(
                 stop_strings=stop_strings,
                 eval_with_chat_template=eval_with_chat_template,
                 batch_size=generation_batch_size,
+                continuation=continuation,
+            )
+        elif continuation == "in_assistant_content":
+            active_questions = [eval_requests[idx]['question'] for idx in active_indices]
+            active_assistant_histories = [assistant_histories[idx] for idx in active_indices]
+            generated_batch = call_model_batch(
+                model=model,
+                tokenizer=tokenizer,
+                user_contents=active_questions,
+                stop_strings=stop_strings,
+                eval_with_chat_template=eval_with_chat_template,
+                batch_size=generation_batch_size,
+                continuation=continuation,
+                assistant_histories=active_assistant_histories,
             )
         else:
-            raise ValueError(f"Invalid separate_fact_tokenization value: {separate_fact_tokenization}")
+            raise ValueError(f"Invalid continuation value: {continuation}")
 
         retrieval_candidates = []
 
@@ -960,10 +928,17 @@ def _evaluate_mello_without_kv_cache(
             last_gen[req_idx] = gen
             req = eval_requests[req_idx]
 
+            if continuation == "in_assistant_content":
+                assistant_histories[req_idx] = assistant_histories[req_idx] + gen
+
             last_sent = gen.strip().split('\n')[-1]
             if last_sent.startswith('Final answer: '):
                 answer = last_sent[len("Final answer: "):]
-                generated = (prompts[req_idx] + gen)[len(initial_prompts[req_idx]):]
+                generated = (
+                    assistant_histories[req_idx]
+                    if continuation == "in_assistant_content"
+                    else (prompts[req_idx] + gen)[len(initial_prompts[req_idx]):]
+                )
                 request_outputs[req_idx] = (
                     req['question'],
                     generated,
@@ -974,14 +949,22 @@ def _evaluate_mello_without_kv_cache(
 
             lines = gen.strip().split('\n')
             if len(lines) < 2:
-                generated = (prompts[req_idx] + gen)[len(initial_prompts[req_idx]):]
+                generated = (
+                    assistant_histories[req_idx]
+                    if continuation == "in_assistant_content"
+                    else (prompts[req_idx] + gen)[len(initial_prompts[req_idx]):]
+                )
                 request_outputs[req_idx] = (req['question'], generated, False)
                 done[req_idx] = True
                 continue
 
             subquestion = lines[-2]
             if not subquestion.startswith('Subquestion: '):
-                generated = (prompts[req_idx])[len(initial_prompts[req_idx]):]
+                generated = (
+                    assistant_histories[req_idx]
+                    if continuation == "in_assistant_content"
+                    else (prompts[req_idx])[len(initial_prompts[req_idx]):]
+                )
                 request_outputs[req_idx] = (req['question'], generated, False)
                 done[req_idx] = True
                 continue
@@ -1002,25 +985,18 @@ def _evaluate_mello_without_kv_cache(
             for candidate_idx, (req_idx, gen, _) in enumerate(retrieval_candidates):
                 fact_sent = new_facts[top_fact_indices[candidate_idx]]
                 prompts[req_idx] = f"{prompts[req_idx]}\n{gen}\nRetrieved fact: {fact_sent}."
-                if separate_fact_tokenization == "per_retrieved_fact":
-                    if len(prompt_segments[req_idx]) == 0:
-                        prompt_segments[req_idx].append("")
-                    if prompt_segments[req_idx][-1].startswith("\nRetrieved fact:"):
-                        prompt_segments[req_idx][-1] = prompt_segments[req_idx][-1] + f"\n{gen}"
-                    else:
-                        prompt_segments[req_idx][-1] = prompt_segments[req_idx][-1] + f"\n{gen}"
-                    prompt_segments[req_idx].append(f"\nRetrieved fact: {fact_sent}.")
-                elif separate_fact_tokenization == "per_generation":
-                    prompt_segments[req_idx].append(f"\n{gen}")
-                    prompt_segments[req_idx].append(f"\nRetrieved fact: {fact_sent}.")
-                else:
-                    raise ValueError(f"Invalid separate_fact_tokenization value: {separate_fact_tokenization}")
+                if continuation == "in_assistant_content":
+                    assistant_histories[req_idx] = assistant_histories[req_idx] + f"\nRetrieved fact: {fact_sent}."
 
     for req_idx, is_done in enumerate(done):
         if is_done:
             continue
         req = eval_requests[req_idx]
-        generated = (prompts[req_idx])[len(initial_prompts[req_idx]):]
+        generated = (
+            assistant_histories[req_idx]
+            if continuation == "in_assistant_content"
+            else (prompts[req_idx])[len(initial_prompts[req_idx]):]
+        )
         request_outputs[req_idx] = (req['question'], generated, False)
 
     for req, output in zip(eval_requests, request_outputs):
@@ -1054,8 +1030,11 @@ def evaluate_mello(
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
     use_kv_cache=False,
-    separate_fact_tokenization: Literal[False, "per_retrieved_fact", "per_generation"] = False,
+    continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
 ):
+    """
+    continuation is only applicable when use_kv_cache=False
+    """
     if use_kv_cache:
         return _evaluate_mello_with_kv_cache(
             model=model,
@@ -1081,7 +1060,7 @@ def evaluate_mello(
         new_facts=new_facts,
         eval_with_chat_template=eval_with_chat_template,
         generation_batch_size=generation_batch_size,
-        separate_fact_tokenization=separate_fact_tokenization,
+        continuation=continuation,
     )
 
 def _edit_cake_single(model, tokenizer, item):
@@ -1208,7 +1187,7 @@ def edit(model, tokenizer, items, hparams, apply_algo):
     
     return model
 
-def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, eval_batch_size=8):
+def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generation_batch_size=8):
     """
     Caveat:
     - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
@@ -1312,7 +1291,7 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, eval_bat
             answers=batch_answers,
             eval_with_chat_template=eval_with_chat_template,
             max_new_tokens=max_new_tokens,
-            batch_size=eval_batch_size,
+            batch_size=generation_batch_size,
         )
         for local_idx, req_idx in enumerate(req_indices):
             eval_outputs[req_idx] = batch_results[local_idx]

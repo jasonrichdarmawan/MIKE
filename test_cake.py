@@ -106,6 +106,7 @@ if __name__ == "__main__":
         "--dtype", "bfloat16",
         "--eval_with_chat_template",
         "--batch_size", "2",
+        # "--generation_batch_size", "16",
         "--sample_size", "4",
         "--data_name", "MQuAKE-CF-3k-v2-clke",
         "--downstream_eval_steps", "2",
@@ -121,6 +122,7 @@ if __name__ == "__main__":
     parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
     parser.add_argument('--eval_with_chat_template', action='store_true')
     parser.add_argument("--batch_size", default=32, type=int)
+    parser.add_argument('--generation_batch_size', default=16, type=int)
     parser.add_argument("--sample_size", default=2999, type=int)
     parser.add_argument("--downstream_eval_steps", default=5, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
@@ -260,7 +262,7 @@ def do_glue_eval(save_dir, edit_num, case_ids):
     glue_eval = GLUEEval(
         model,
         tokenizer,
-        number_of_tests=2,
+        number_of_tests=100,
     )
     glue_results = glue_eval.evaluate(glue_results,
         out_file,
@@ -321,8 +323,10 @@ if __name__ == "__main__":
             
             if (start_idx % args.batch_size) % args.downstream_eval_steps == 0:
                 do_glue_eval(SAVE_DIR, start_idx + args.batch_size, [item['case_id'] for item in items])
-    elif args.editing_method in ["no_edit", "MeLLo"]:
+    elif args.editing_method in ["no_edit"]:
         do_glue_eval(SAVE_DIR, 0, [])
+    elif args.editing_method in ["MeLLo"]: # In-Context Learning Editing Method
+        pass
     else:
         raise NotImplementedError(f"Editing method {args.editing_method} not implemented for editing loop.")
     
@@ -350,7 +354,8 @@ if __name__ == "__main__":
                 tokenizer=tokenizer, 
                 items=items, 
                 hparams=hparams, 
-                eval_with_chat_template=args.eval_with_chat_template
+                eval_with_chat_template=args.eval_with_chat_template,
+                generation_batch_size=args.generation_batch_size,
             )
         elif args.editing_method == "MeLLo":
             # Chat models are fine-tuned on conversational data with explicit turn-taking.
@@ -365,12 +370,13 @@ if __name__ == "__main__":
                 contriever=contriever,
                 contriever_tokenizer=contriever_tokenizer,
                 eval_with_chat_template=eval_with_chat_template,
+                generation_batch_size=args.generation_batch_size,
                 task_prompt=task_prompt,
                 items=items,
                 embeddings=embeddings,
                 new_facts=new_facts,
                 use_kv_cache=True,
-                separate_fact_tokenization=False,
+                continuation="in_assistant_content",
             )
         else:
             raise NotImplementedError(f"Evaluation method for {args.editing_method} not implemented.")
