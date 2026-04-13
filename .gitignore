@@ -1,5 +1,10 @@
 */__pycache__
 *__pycache__
+*.egg-info
+build/
+
+data/
 datasets/two_hop.csv
-datasets/*
+datasets/*/
 output
+checkpoints/

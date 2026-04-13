@@ -1,11 +1,61 @@
-from EasyEdit.easyeditor import MEMITHyperParams,LoRAHyperParams,WISEHyperParams, ROMEHyperParams
+# %%
+
+from EasyEdit.easyeditor import (
+    LoRAHyperParams,
+    ROMEHyperParams,
+    MEMITHyperParams,
+    R_ROMEHyperParams,
+    AlphaEditHyperParams,
+    WISEHyperParams,
+    AlphaEditCircuitHyperParams,
+)
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
-from tqdm import tqdm
-from edit_utils import edit, edit_ifmet, edit_mello, edit_rome, cake, edit_wise, get_sent_embeddings
+import json
+from tqdm.auto import tqdm
+from edit_utils import (
+    edit,
+    evaluate_mello,
+    get_sentence_embeddings,
+    edit_wise,
+    edit_ifmet,
+    edit_cake,
+    evaluate,
+)
 from EasyEdit.easyeditor.util.alg_dict import *
 import torch
 import os
+import logging
+from utils import StreamHandler, FileHandler, BufferingLoggerWriter
+import sys
+from datetime import datetime
+
+from glue_eval.glue_eval import GLUEEval
+
+# %%
+
+def save_checkpoint(model, tokenizer, checkpoint_root, edit_num, case_id):
+    checkpoint_name = f"edit_num_{edit_num:04d}_case_{case_id:04d}"
+    checkpoint_path = os.path.join(checkpoint_root, checkpoint_name)
+    os.makedirs(checkpoint_path, exist_ok=True)
+
+    model.save_pretrained(
+        checkpoint_path,
+        safe_serialization=True,
+        max_shard_size="10GB",
+    )
+    tokenizer.save_pretrained(checkpoint_path)
+
+    metadata = {
+        "edit_num": edit_num,
+        "case_id": case_id,
+        "timestamp": datetime.now().isoformat(),
+        "checkpoint_name": checkpoint_name,
+    }
+    with open(os.path.join(checkpoint_path, "checkpoint_meta.json"), "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    return checkpoint_path
 
 def calculate_averages(data):
     """
@@ -25,13 +75,13 @@ def calculate_averages(data):
         case_hop_true_count = 0
         total_hops = 0
         for hop_pair in hop_wise:
-            case_hop_true_count += sum(1 for x in hop_pair if x)
+            case_hop_true_count += sum(hop_pair)
             total_hops += len(hop_pair)
         
         case_hop_average = case_hop_true_count / total_hops
         hop_wise_case_averages.append(case_hop_average)
         
-        accuracy_true_count = sum(1 for x in accuracy if x)
+        accuracy_true_count = sum(accuracy)
         accuracy_average = accuracy_true_count / len(accuracy)
         accuracy_case_averages.append(accuracy_average)
     
@@ -44,82 +94,306 @@ def calculate_averages(data):
         "accuracy_averages": f"{accuracy_avg:.3f}"
     }
 
+# %%
+
+if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    # sys.argv = ["", 
+    #     "--editing_method", "MeLLo",
+    #     "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+    #     "--sequential_editing",
+    #     # "--model_type", "qwen3-4b-instruct",
+    #     "--dtype", "bfloat16",
+    #     "--eval_with_chat_template",
+    #     "--batch_size", "2",
+    #     # "--generation_batch_size", "16",
+    #     "--sample_size", "4",
+    #     "--data_name", "MQuAKE-CF-3k-v2-clke",
+    #     "--downstream_eval_steps", "2",
+    #     # "--save_edited_model",
+    # ]
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--editing_method', required=True, type=str)
-    parser.add_argument('--metrics_save_dir', default='./output', type=str)
-    parser.add_argument('--datatype', default=None,type=str)
+    parser.add_argument('--sequential_editing', action='store_true')
+    parser.add_argument('--data_name', default=None, type=str)
     parser.add_argument('--model_type', default=None,type=str)
+    parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
+    parser.add_argument('--eval_with_chat_template', action='store_true')
+    parser.add_argument("--batch_size", default=32, type=int)
+    parser.add_argument('--generation_batch_size', default=16, type=int)
+    parser.add_argument("--sample_size", default=2999, type=int)
+    parser.add_argument("--downstream_eval_steps", default=5, type=int)
+    parser.add_argument('--metrics_save_dir', default='./output', type=str)
+    parser.add_argument('--checkpoint_dir', default='./checkpoints', type=str)
+    parser.add_argument('--save_edited_model', action='store_true')
     args = parser.parse_args()
 
-    if args.editing_method == 'MEMIT' or args.editing_method == 'IFMET':
-        editing_hparams = MEMITHyperParams
+    hparams = None
+    if args.editing_method in ['no_edit', "MeLLo"]: # In-Context Learning Editing Methods
+        pass
     elif args.editing_method == 'LoRA':
-        editing_hparams = LoRAHyperParams
-    elif args.editing_method == 'WISE':
-        editing_hparams = WISEHyperParams
+        hparams = LoRAHyperParams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
     elif args.editing_method == 'ROME':
-        editing_hparams = ROMEHyperParams
+        hparams = ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/ROME/{args.model_type}.yaml')
+    elif args.editing_method == 'MEMIT':
+        hparams = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/MEMIT/{args.model_type}.yaml')
+    elif args.editing_method == "R-ROME":
+        hparams = R_ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/R-ROME/{args.model_type}.yaml')
+    elif args.editing_method == "AlphaEdit":
+        hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
+    elif args.editing_method == "WISE":
+        hparams = WISEHyperParams.from_hparams(f'./EasyEdit/hparams/WISE/{args.model_type}.yaml')
+    elif args.editing_method == "IFMET":
+        hparams = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-shallow.yaml')
+        hparams_deeper = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-deeper.yaml')
+    elif args.editing_method == 'CaKE': # Use PEFT
+        pass
+    elif args.editing_method == "AlphaEdit_Circuit":
+        hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
     else:
-        editing_hparams = LoRAHyperParams
-    if args.editing_method == 'CAKE' or args.editing_method == 'Mello':
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
-    elif args.editing_method == 'IFMET':
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-shallow.yaml')
-        hparams_s=hparams
-        hparams_d=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}-deeper.yaml')
-    else:
-        hparams=editing_hparams.from_hparams(f'./EasyEdit/hparams/{args.editing_method}/{args.model_type}.yaml')
+        raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
-    if args.editing_method != 'Mello':
-        alg_name = hparams.alg_name
-        apply_algo = ALG_DICT[alg_name]
+    # In-Context Learning Editing Methods (e.g., MeLLo) do not require apply_algo
+    apply_algo = None
+    if args.editing_method in ["LoRA", "ROME", "MEMIT", "R-ROME", "AlphaEdit", "WISE", "AlphaEdit_Circuit"]:
+        apply_algo = ALG_DICT[hparams.alg_name]
+    elif args.editing_method == "IFMET":
+        apply_algo = ALG_DICT["MEMIT"]
 
-    MODEL_PATH = hparams.model_name
-    if args.editing_method == 'CAKE':
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto", torch_dtype=torch.float32)
-    # 添加FFN层的LoRA配置
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, use_fast=False)
-    tokenizer.pad_token = tokenizer.eos_token
+    model_name = (
+        hparams.model_name
+        if hasattr(hparams, 'model_name') and hparams.model_name
+        else args.model_type
+    )
+    sequential_str = "sequential" if args.sequential_editing else "restore"
+    SAVE_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    
+    if args.save_edited_model:
+        CHECKPOINTS_DIR = f'{args.checkpoint_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+        os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
+        
+# %%
 
-    import json
-    data = json.load(open(f'./datasets/{args.datatype}-cake.json','r'))
-    if args.editing_method == 'WISE':
-        loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
-        loc_data = loc_data[:7000]
-        loc_index = 0
-    elif args.editing_method == 'Mello':
-        contriever = AutoModel.from_pretrained("facebook/contriever-msmarco", device_map=f"cuda:{hparams.device}")
-        contriever_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
+if __name__ == "__main__":
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    
+    fmt = logging.Formatter('%(asctime)s %(name)s %(levelname)-9s %(message)s')
+    
+    sh = StreamHandler()
+    sh.setFormatter(fmt)
+    
+    fh_path = f"{SAVE_DIR}/output.log"
+    fh = FileHandler(fh_path, mode='w')
+    fh.setFormatter(fmt)
+    
+    logger = logging.getLogger("CaKE_Test")
+    logger.propagate = False  # Prevent log messages from being propagated to the root logger
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(sh)
+    logger.addHandler(fh)
+    
+    # Redirect stdout to the logger
+    sys.stdout = BufferingLoggerWriter(logger, logging.INFO)
+    sys.stderr = BufferingLoggerWriter(logger, logging.WARNING)
+    print(f"Saving output to {fh_path}")
+    
+# %%
+
+if __name__ == "__main__":
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+# %%
+
+if __name__ == "__main__":
+    data = json.load(open(f'./datasets/{args.data_name}.json','r'))
+    if args.sample_size > len(data):
+        raise ValueError(f"Sample size {args.sample_size} exceeds dataset size {len(data)}.")
+    data = data[:args.sample_size]
+    
+# %%
+
+if __name__ == "__main__":
+    if args.editing_method == 'MeLLo':
+        contriever_model_name = "facebook/contriever-msmarco"
+        contriever = AutoModel.from_pretrained(contriever_model_name, device_map="cuda")
+        contriever_tokenizer = AutoTokenizer.from_pretrained(contriever_model_name)
         with open('./prompts/MeLLo-prompt.txt', 'r') as f:
             task_prompt = f.read()
-        stop = ["Retrieved fact:"]
         new_facts = set()
         for d in data:
             for r in d["requested_rewrite"]:
                 new_facts.add(f'{r["prompt"].format(r["subject"])} {r["target_new"]["str"]}')
         new_facts = list(new_facts)
-        embs = get_sent_embeddings(new_facts, contriever, contriever_tokenizer, hparams.device)
+        embeddings = get_sentence_embeddings(
+            contriever=contriever,
+            contriever_tokenizer=contriever_tokenizer,
+            sentences=new_facts,
+        )
+    elif args.editing_method == 'WISE':
+        # This is from the [baseline repository](https://github.com/zjunlp/CaKE/tree/df528e13fffbd2117e6041c129285e1e146933d2)
+        # The original code use ZsRE for loc_prompts and MQuAKE for edit.
+        # However, when ran, the loss does not decrease.
+        loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
+        loc_data = loc_data[:7000]
+        loc_index = 0
 
+# %%
+
+def do_glue_eval(save_dir, edit_num, case_ids):
+    glue_results = {
+        "edit_num": edit_num,
+        "case_ids": case_ids,
+    }
+    
+    glue_eval_path = f'{save_dir}/glue_eval'
+    os.makedirs(glue_eval_path, exist_ok=True)
+    out_file = (
+        f'{glue_eval_path}/case_{{case:04d}}.json'.format(case=case_ids[-1])
+        if case_ids
+        else f'{glue_eval_path}/base.json'
+    )
+    glue_eval = GLUEEval(
+        model,
+        tokenizer,
+        number_of_tests=100,
+    )
+    glue_results = glue_eval.evaluate(glue_results,
+        out_file,
+        nli_flag=True,
+        sst_flag=True,
+        cola_flag=True,
+        rte_flag=True,
+        mmlu_flag=True,
+        mrpc_flag=True,
+    )
+    output_filename = out_file.replace('.json', '_glue.json')
+    with open(output_filename, 'w') as f:
+        json.dump(glue_results, f, indent=4)
+
+if __name__ == "__main__":
     all_metrics = []
-    for item in tqdm(data[:2]):
-        if args.editing_method == 'CAKE':
-            model, metrics = cake(model, tokenizer, item, hparams, test_generation=False)
-        elif args.editing_method == 'WISE':
-            metrics, loc_index = edit_wise(model, tokenizer, item, hparams, loc_data, loc_index, apply_algo, test_generation=False)
-        elif args.editing_method == 'Mello':
-            metrics = edit_mello(model, task_prompt, stop, tokenizer, item, hparams, contriever, contriever_tokenizer, embs, test_generation=False)
-        elif args.editing_method == 'IFMET':
-            model, metrics = edit_ifmet(model, tokenizer, item, hparams_s, hparams_d, apply_algo, test_generation=False)
-        elif args.editing_method == 'ROME':
-            model, metrics = edit_rome(model, tokenizer, item, hparams, apply_algo, test_generation=False)
+    indices = list(range(0, len(data), args.batch_size))
+
+    if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "WISE", "IFMET", "CaKE"]:
+        for start_idx in tqdm(indices, desc="Editing the model"):
+            items = data[start_idx:start_idx + args.batch_size]
+            
+            if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
+                model = edit(
+                    model=model,
+                    tokenizer=tokenizer,
+                    items=items,
+                    hparams=hparams,
+                    apply_algo=apply_algo,
+                )
+            elif args.editing_method == "WISE":
+                loc_index = edit_wise(
+                    model=model,
+                    tokenizer=tokenizer,
+                    items=items,
+                    hparams=hparams,
+                    loc_data=loc_data,
+                    loc_index=loc_index,
+                    apply_algo=apply_algo,
+                )
+            elif args.editing_method == "IFMET":
+                model = edit_ifmet(
+                    model=model,
+                    tokenizer=tokenizer,
+                    items=items,
+                    hparams_shallow=hparams,
+                    hparams_deeper=hparams_deeper,
+                    apply_algo=apply_algo,
+                )
+            elif args.editing_method == "CaKE":
+                model = edit_cake(
+                    model=model,
+                    tokenizer=tokenizer,
+                    items=items,
+                )
+            else:
+                raise NotImplementedError(f"Editing method {args.editing_method} not implemented in the main loop.")
+            
+            if (start_idx % args.batch_size) % args.downstream_eval_steps == 0:
+                do_glue_eval(SAVE_DIR, start_idx + args.batch_size, [item['case_id'] for item in items])
+    elif args.editing_method in ["no_edit"]:
+        do_glue_eval(SAVE_DIR, 0, [])
+    elif args.editing_method in ["MeLLo"]: # In-Context Learning Editing Method
+        pass
+    else:
+        raise NotImplementedError(f"Editing method {args.editing_method} not implemented for editing loop.")
+    
+    if args.save_edited_model:
+        checkpoint_path = save_checkpoint(
+            model=model,
+            tokenizer=tokenizer,
+            checkpoint_root=CHECKPOINTS_DIR,
+            edit_num=start_idx + args.batch_size,
+            case_id=items[-1]["case_id"],
+        )
+        print(f"Saved checkpoint to {checkpoint_path}")
+    
+    all_metrics = []
+    indices = list(range(0, len(data), args.batch_size))
+    for start_idx in tqdm(indices, desc="Evaluating the edited model"):
+        items = data[start_idx:start_idx + args.batch_size]
+        
+        if args.editing_method in [
+            "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE", "IFMET", "CaKE", 
+            "AlphaEdit_Circuit",
+        ]:
+            metrics = evaluate(
+                model=model, 
+                tokenizer=tokenizer, 
+                items=items, 
+                hparams=hparams, 
+                eval_with_chat_template=args.eval_with_chat_template,
+                generation_batch_size=args.generation_batch_size,
+            )
+        elif args.editing_method == "MeLLo":
+            # Chat models are fine-tuned on conversational data with explicit turn-taking.
+            # MeLLo was designed for text-davinci-003, which is not a chat model. So, the original code does not use multi turn.
+            # For fair comparison, When we evaluate MeLLo on a chat model, we evaluate by splitting the same prompt in multi turn.
+            eval_with_chat_template = False
+            if args.eval_with_chat_template:
+                eval_with_chat_template = "few_shot_in_multi_turn"
+            metrics = evaluate_mello(
+                model=model, 
+                tokenizer=tokenizer, 
+                contriever=contriever,
+                contriever_tokenizer=contriever_tokenizer,
+                eval_with_chat_template=eval_with_chat_template,
+                generation_batch_size=args.generation_batch_size,
+                task_prompt=task_prompt,
+                items=items,
+                embeddings=embeddings,
+                new_facts=new_facts,
+                use_kv_cache=True,
+                continuation="in_assistant_content",
+            )
         else:
-            model, metrics = edit(model, tokenizer, item, hparams, alg_name, apply_algo, test_generation=False)
-        print(metrics)
-        all_metrics.append(metrics)
-    res = calculate_averages(all_metrics)
-    os.makedirs(args.metrics_save_dir, exist_ok=True)
-    json.dump(all_metrics, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_metrics.json','w'), indent=4)
-    json.dump(res, open(f'{args.metrics_save_dir}/{args.editing_method}_{args.model_type}_{args.datatype}_res.json','w'), indent=4)
+            raise NotImplementedError(f"Evaluation method for {args.editing_method} not implemented.")
+        
+        if (start_idx // args.batch_size) % 2 == 0:
+            print(f"Batch index: {start_idx // args.batch_size}:\n{json.dumps(metrics[0], indent=4)}")
+        
+        all_metrics.extend(metrics)
+    
+        res = calculate_averages(all_metrics)
+        print(f"Results:\n{json.dumps(res, indent=4)}")
+        
+        metrics_filepath = f'{SAVE_DIR}/metrics.json'
+        res_filepath = f'{SAVE_DIR}/res.json'
+        print(f"Saving metrics to {metrics_filepath}")
+        print(f"Saving results to {res_filepath}")
+        json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
+        json.dump(res, open(res_filepath, 'w'), indent=4)
+
+# %%
