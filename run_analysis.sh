@@ -38,6 +38,9 @@ wait_for_gpu() {
     done
 }
 
+# ── 0. Precompute covariance + null-space projection P (shared by AlphaEdit & EAP-AlphaEdit)
+run_step "Precompute covariance + P" python precompute_P.py
+
 MODEL="meta-llama/Meta-Llama-3-8B"
 DATA_DIR="datasets/meta-llama/Meta-Llama-3-8B"
 IFMET_OUT="${DATA_DIR}/composition_incorrect_ifmet"
@@ -45,13 +48,14 @@ ALPHAEDIT_OUT="${DATA_DIR}/composition_incorrect_alphaedit"
 EAP_ALPHAEDIT_OUT="${DATA_DIR}/composition_incorrect_eap_alphaedit"
 
 # ── 1. AlphaEdit: re-edit + eval + analyses ────────────────────────────────
+echo "Cleaning up GPU after precompute..."
+wait_for_gpu
 run_step "AlphaEdit edit + analysis" python analysis/run_analysis.py \
     --model   $MODEL \
     --methods alphaedit \
     --data-dir $DATA_DIR \
     --hparams-alphaedit EasyEdit/hparams/AlphaEdit/llama3-8b.yaml \
     --batch-size         128 \
-    --force
 
 # ── 2. analyze_tables: AlphaEdit ──────────────────────────────────────────
 run_step "analyze_tables: AlphaEdit" python analysis/analyze_tables.py \
@@ -74,7 +78,6 @@ run_step "IFMET edit + analysis" python analysis/run_analysis.py \
     --hparams-ifmet-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml \
     --hparams-ifmet-deep    EasyEdit/hparams/IFMET/llama3-8b-deep.yaml \
     --batch-size         128 \
-    --force
 
 # ── 4. analyze_tables: IFMET ─────────────────────────────────────────────
 run_step "analyze_tables: IFMET" python analysis/analyze_tables.py \

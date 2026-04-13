@@ -1,7 +1,7 @@
 import os, re, subprocess
 from datetime import datetime, timedelta
 
-BASE    = "/lambda/nfs/kim/CaKE"
+BASE    = os.path.expanduser("~/kim/CaKE")
 _log_candidates = [f"{BASE}/logs/run_analysis.log", f"{BASE}/logs/run_eap_alphaedit.log"]
 LOG = max(
     (p for p in _log_candidates if os.path.exists(p)),
@@ -14,6 +14,7 @@ IFM_OUT = f"{DATA}/composition_incorrect_ifmet"
 EAP_OUT = f"{DATA}/composition_incorrect_eap_alphaedit"
 
 STEPS = [
+    "Precompute covariance + P",
     "AlphaEdit edit + analysis",
     "analyze_tables: AlphaEdit",
     "IFMET edit + analysis",
@@ -25,6 +26,7 @@ STEPS = [
 # Estimated durations (seconds)
 # Llama-3-8B on A100 40GB, batch=128
 EST = {
+    "Precompute covariance + P":       21 * 37 * 60,  # ~13h measured: 21 uncached layers × ~37 min/layer
     "AlphaEdit edit + analysis":       60 * 60 * 12,  # ~12h measured (batch=128, with neuron attribution)
     "analyze_tables: AlphaEdit":       5  * 60,
     "IFMET edit + analysis":           60 * 60 * 12,  # ~12h measured (batch=128, with neuron attribution)
@@ -62,7 +64,7 @@ def pid_alive(pid):
         return False
 
 def find_pipeline_pid():
-    for pattern in ["run_analysis.sh", "run_analysis.py"]:
+    for pattern in ["run_eap_alphaedit.sh", "run_analysis.sh", "run_analysis.py", "precompute_P.py"]:
         r = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
         pids = r.stdout.strip().split()
         if pids:
@@ -164,6 +166,17 @@ def step_remaining(step):
     s = step_status[step]
     if s in ("done", "failed"):
         return 0
+    if step == "Precompute covariance + P":
+        section = log_section(step)
+        done_passes = section.count("done in")
+        pass_pat = re.findall(r"Pass\s+(\d+)/(\d+)", section)
+        if pass_pat and done_passes > 0:
+            total = int(pass_pat[-1][1])
+            start = step_start_time(step)
+            if start:
+                secs_per_pass = (now - start).total_seconds() / done_passes
+                return secs_per_pass * (total - done_passes)
+        return EST[step]
     if "edit + analysis" in step:
         bp = batch_progress(step)
         if bp:
@@ -214,7 +227,24 @@ for step in STEPS:
 
     elif s == "running":
         print(f"    ▶  {step}")
-        if "edit + analysis" in step:
+        if step == "Precompute covariance + P":
+            section = log_section(step)
+            pass_pat = re.findall(r"Pass\s+(\d+)/(\d+)", section)
+            done_passes = section.count("done in")
+            if pass_pat:
+                cur, total = int(pass_pat[-1][0]), int(pass_pat[-1][1])
+                bar_w  = 22
+                filled = int(bar_w * done_passes / total) if total else 0
+                bar    = "█" * filled + "░" * (bar_w - filled)
+                pct    = int(100 * done_passes / total) if total else 0
+                print(f"       [{bar}] {done_passes}/{total} layers done ({pct}%)")
+                # check if now in projection phase
+                if "Projection matrices" in section:
+                    proj_pat = re.findall(r"(\d+)/(\d+)", section.split("Projection matrices")[-1])
+                    if proj_pat:
+                        p_cur, p_total = int(proj_pat[-1][0]), int(proj_pat[-1][1])
+                        print(f"       Projection matrices: {p_cur}/{p_total}")
+        elif "edit + analysis" in step:
             bp = batch_progress(step)
             if bp:
                 done_batches, total_batches, i_cur, i_size, current_phase = bp
