@@ -1,6 +1,6 @@
 import json
 
-data = json.load(open('datasets/MQuAKE-CF-3k-v2-clke.json', encoding='utf-8'))
+data = json.load(open('../datasets/MQuAKE-CF-3k-v2-clke.json', encoding='utf-8'))
 
 fields = ['single_hops_zh', 'single_hops_de', 'single_hops_fr', 'single_hops_ja',
           'new_single_hops_zh', 'new_single_hops_de', 'new_single_hops_fr', 'new_single_hops_ja',
