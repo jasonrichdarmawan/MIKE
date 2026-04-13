@@ -262,7 +262,7 @@ def do_glue_eval(save_dir, edit_num, case_ids):
     glue_eval = GLUEEval(
         model,
         tokenizer,
-        number_of_tests=2,
+        number_of_tests=100,
     )
     glue_results = glue_eval.evaluate(glue_results,
         out_file,
