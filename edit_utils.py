@@ -1,3 +1,4 @@
+from httpcore import request
 import torch
 from tqdm import tqdm
 from peft import LoraConfig, TaskType, get_peft_model
@@ -1078,14 +1079,25 @@ def edit(model, tokenizer, items, hparams, apply_algo):
         requests.extend(requested_rewrite)
     
     tokenizer.padding_side = "right"
-    model, _ = apply_algo(
-        model,
-        tokenizer,
-        requests,
-        hparams,
-        copy=False,
-        return_orig_weights=False
-    )
+    if hparams.alg_name in ["ROME", "R-ROME"]: # Editing method that edit one sample at a time.
+        for request in requests:
+            model, _ = apply_algo(
+                model,
+                tokenizer,
+                [request],
+                hparams,
+                copy=False,
+                return_orig_weights=False,
+            )
+    else:
+        model = apply_algo(
+            model,
+            tokenizer,
+            requests,
+            hparams,
+            copy=False,
+            return_orig_weights=False,
+        )
     
     return model
 
