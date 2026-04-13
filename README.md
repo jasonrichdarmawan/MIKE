@@ -361,12 +361,13 @@ CaKE
 python test_cake.py \
   --editing_method CaKE \
   --sequential_editing \
-  --model_type qwen3-4b-instruct \
+  --model_type Qwen/Qwen3-4B-Instruct-2507 \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
   --sample_size 1000 \
-  --data_name MQuAKE-CF-3k-v2-clke
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
 ```
 
 ## Contributing

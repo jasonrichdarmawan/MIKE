@@ -98,20 +98,20 @@ def calculate_averages(data):
 
 if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    sys.argv = ["", 
-        "--editing_method", "MeLLo",
-        "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
-        "--sequential_editing",
-        # "--model_type", "qwen3-4b-instruct",
-        "--dtype", "bfloat16",
-        "--eval_with_chat_template",
-        "--batch_size", "2",
-        # "--generation_batch_size", "16",
-        "--sample_size", "4",
-        "--data_name", "MQuAKE-CF-3k-v2-clke",
-        "--downstream_eval_steps", "2",
-        # "--save_edited_model",
-    ]
+    # sys.argv = ["", 
+    #     "--editing_method", "MeLLo",
+    #     "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+    #     "--sequential_editing",
+    #     # "--model_type", "qwen3-4b-instruct",
+    #     "--dtype", "bfloat16",
+    #     "--eval_with_chat_template",
+    #     "--batch_size", "2",
+    #     # "--generation_batch_size", "16",
+    #     "--sample_size", "4",
+    #     "--data_name", "MQuAKE-CF-3k-v2-clke",
+    #     "--downstream_eval_steps", "2",
+    #     # "--save_edited_model",
+    # ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -386,14 +386,14 @@ if __name__ == "__main__":
         
         all_metrics.extend(metrics)
     
-    res = calculate_averages(all_metrics)
-    print(f"Results:\n{json.dumps(res, indent=4)}")
-    
-    metrics_filepath = f'{SAVE_DIR}/metrics.json'
-    res_filepath = f'{SAVE_DIR}/res.json'
-    print(f"Saving metrics to {metrics_filepath}")
-    print(f"Saving results to {res_filepath}")
-    json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
-    json.dump(res, open(res_filepath, 'w'), indent=4)
+        res = calculate_averages(all_metrics)
+        print(f"Results:\n{json.dumps(res, indent=4)}")
+        
+        metrics_filepath = f'{SAVE_DIR}/metrics.json'
+        res_filepath = f'{SAVE_DIR}/res.json'
+        print(f"Saving metrics to {metrics_filepath}")
+        print(f"Saving results to {res_filepath}")
+        json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
+        json.dump(res, open(res_filepath, 'w'), indent=4)
 
 # %%
