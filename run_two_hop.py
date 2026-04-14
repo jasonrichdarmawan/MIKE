@@ -21,6 +21,122 @@ def _load_cases(path):
         return json.load(f)
 
 
+def _json_list(values):
+    return json.dumps(values or [])
+
+
+def _normalize_answers(canonical, aliases=None):
+    aliases = aliases or []
+    answers = list(aliases)
+    if canonical not in answers:
+        answers.append(canonical)
+    return answers
+
+
+def _build_entity_metadata(item):
+    e1 = item["requested_rewrite"]["subject"]
+    e2 = item["new_single_hops"][0]["answer"]
+    e3 = item["new_answer"]
+
+    e1_answers = [e1]
+    e2_aliases = item["new_single_hops"][0].get("answer_alias", []) or []
+    e3_aliases = item.get("new_answer_alias", []) or []
+    e2_answers = _normalize_answers(e2, e2_aliases)
+    e3_answers = _normalize_answers(e3, e3_aliases)
+
+    return {
+        "id": item["case_id"],
+        "e1": e1,
+        "e2": e2,
+        "e3": e3,
+        "e1_answers": _json_list(e1_answers),
+        "e2_answers": _json_list(e2_answers),
+        "e3_answers": _json_list(e3_answers),
+        # Keep both schema variants for compatibility with analysis helpers.
+        "e1_label": e1,
+        "e2_label": e2,
+        "e3_label": e3,
+        "e1_aliases": _json_list([]),
+        "e2_aliases": _json_list(e2_aliases),
+        "e3_aliases": _json_list(e3_aliases),
+    }
+
+
+def append_two_hop_row(two_hop_rows, item, composition_correct):
+    row = _build_entity_metadata(item)
+    row["composition_correct"] = bool(composition_correct)
+    two_hop_rows.append(row)
+
+
+def append_entity_description_rows(entity_description_rows, entity_result, item):
+    meta = _build_entity_metadata(item)
+    for i, generation in enumerate(entity_result.get("generation", [])):
+        entity_description_rows.append({
+            "id": meta["id"],
+            "source_prompt": entity_result["source_prompt"][i],
+            "source_layer": entity_result["source_layer"][i],
+            "target_layer": entity_result["target_layer"][i],
+            "generation": generation,
+            "e1": meta["e1"],
+            "e2": meta["e2"],
+            "e3": meta["e3"],
+            "e1_answers": meta["e1_answers"],
+            "e2_answers": meta["e2_answers"],
+            "e3_answers": meta["e3_answers"],
+            "e1_label": meta["e1_label"],
+            "e2_label": meta["e2_label"],
+            "e3_label": meta["e3_label"],
+            "e1_aliases": meta["e1_aliases"],
+            "e2_aliases": meta["e2_aliases"],
+            "e3_aliases": meta["e3_aliases"],
+        })
+
+
+def append_knockout_rows(attention_knockout_rows, knockout_result, item):
+    meta = _build_entity_metadata(item)
+    layers = knockout_result.get("layer", [])
+    generations = knockout_result.get("generation", [])
+
+    has_vanilla = any(layer == -1 for layer in layers)
+    for i, layer in enumerate(layers):
+        attention_knockout_rows.append({
+            "id": meta["id"],
+            "layer": layer,
+            "generation": generations[i],
+            "e3": meta["e3"],
+            "e3_answers": meta["e3_answers"],
+            "e3_label": meta["e3_label"],
+            "e3_aliases": meta["e3_aliases"],
+        })
+
+    # Compatibility fallback: add vanilla row if helper output does not include layer -1.
+    if not has_vanilla:
+        attention_knockout_rows.append({
+            "id": meta["id"],
+            "layer": -1,
+            "generation": "",
+            "e3": meta["e3"],
+            "e3_answers": meta["e3_answers"],
+            "e3_label": meta["e3_label"],
+            "e3_aliases": meta["e3_aliases"],
+        })
+
+
+def append_projection_rows(projection_rows, proj_result, item):
+    meta = _build_entity_metadata(item)
+    row_count = len(proj_result.get("layer", []))
+    for i in range(row_count):
+        projection_rows.append({
+            "id": meta["id"],
+            "layer": proj_result["layer"][i],
+            "top_k_words": _json_list(proj_result["top_k_words"][i]),
+            "top_k_probs": _json_list(proj_result["top_k_probs"][i]),
+            "e2_ranks": _json_list(proj_result["e2_ranks"][i]),
+            "e3_ranks": _json_list(proj_result["e3_ranks"][i]),
+            "prediction_rank": proj_result["prediction_rank"][i],
+        })
+
+
 from analysis.project_sublayer import project_attention
 def run_project_sublayer(model, tokenizer, item, target):
 
@@ -38,14 +154,14 @@ def run_project_sublayer(model, tokenizer, item, target):
     return project_attention(entries, model, tokenizer, target=target)
 
 
+# patchscope
+# 
 from analysis.patched_generation import get_hidden_states, generate_with_patching_all_layers
 from analysis.utils import get_layer_names
 def run_entity_description_e2_new(model, tokenizer, item, do_sample=False):
-    # Replicate generate_entity_description_with_patching(source="e1") but use e2_new as the entity.
-    # bridge = item["new_single_hops"][0]
-    bridge = item["cloze_question"]
-    source_prompt = item["new_single_hops"][1]["cloze"]
-    # source_prompt =  item["cloze_question"]
+    # Replicate generate_entity_description_with_patching(source="e1")
+    source_prompt =  item["cloze_question"]
+    
     target_prompt = (
         "Syria: Syria is a country in the Middle East, "
         "Leonardo DiCaprio: Leonardo DiCaprio is an American actor, "
@@ -57,7 +173,7 @@ def run_entity_description_e2_new(model, tokenizer, item, do_sample=False):
         "id": [item["case_id"]],
         "source_prompt": [source_prompt],
         "r1_template": [item["single_hops"][0]["cloze"].replace(" is", "")],
-        "e1_label": [bridge["answer"]],
+        "e1_label": item["requested_rewrite"]["subject"],
         "target_prompt": [target_prompt],
     }
 
@@ -161,7 +277,16 @@ def main():
     n_propagated = sum(1 for x in cases if x.get("row_role") == "propagated_eval")
     print(f"Loaded {len(cases)} rows | edit={n_edit} propagated_eval={n_propagated}")
 
+    # for metrics stored in json, as done in test_cake
     all_metrics = []
+    
+    # used to generate seperate csvs for different analyses.
+    two_hop_rows = []
+    entity_description_rows = []
+    attention_knockout_rows = []
+    attention_proj_rows = []
+    mlp_proj_rows = []
+
     skipped = 0
     edit_count = 0
     prop_eval_count = 0
@@ -198,81 +323,73 @@ def main():
             continue
 
         # Check if e3_new is successfully predicted
-        is_e3_new_given = False
+        composition_correct = False
         if "post" in metrics and "accuracy" in metrics["post"]:
             if len(metrics["post"]["accuracy"]) > 1:
-                is_e3_new_given = metrics["post"]["accuracy"][0] or metrics["post"]["accuracy"][1]
+                composition_correct = metrics["post"]["accuracy"][0] or metrics["post"]["accuracy"][1]
             elif len(metrics["post"]["accuracy"]) == 1:
-                is_e3_new_given = metrics["post"]["accuracy"][0] 
+                composition_correct = metrics["post"]["accuracy"][0] 
+        
+        metrics["composition_correct"] = composition_correct
+        append_two_hop_row(two_hop_rows, item, composition_correct)
 
-        if is_e3_new_given:
+        if composition_correct:
             # sublayer projection
-            metrics["project_sublayer"] = {}
             for target in ["attention", "mlp"]:
                 try:
                     proj_result = run_project_sublayer(model, tokenizer, item, target)
-                    metrics["project_sublayer"][f"{target}_layer"] = [_ for _ in proj_result["layer"]]
-                    metrics["project_sublayer"][f"{target}_top_k_words"] = [_ for _ in proj_result["top_k_words"]]
-                    metrics["project_sublayer"][f"{target}_top_k_probs"] = [_ for _ in proj_result["top_k_probs"]]
-                    metrics["project_sublayer"][f"{target}_e2_ranks_per_layer"] = [_ for _ in proj_result["e2_ranks"]]
-                    metrics["project_sublayer"][f"{target}_e3_ranks_per_layer"] = [_ for _ in proj_result["e3_ranks"]]
-                    metrics["project_sublayer"][f"{target}_prediction_rank"] = [_ for _ in proj_result["prediction_rank"]]
-
-                except Exception as e:
-                    metrics["project_sublayer"][f"{target}_error"] = str(e)
+                    if target == "attention":
+                        append_projection_rows(attention_proj_rows, proj_result, item)
+                    else:
+                        append_projection_rows(mlp_proj_rows, proj_result, item)
+                except Exception:
+                    pass
 
             # entity description probing for e2_new decodability
-            metrics["entity_description_e2_new"] = {}
             try:
                 entity_result = run_entity_description_e2_new(model, tokenizer, item, do_sample=False)
-
-                # find acceptable answers for e2_new
-                bridge = item["new_single_hops"][0]
-                e2_new_answers = (bridge.get("answer_alias", []) or []) + [bridge["answer"]]
-
-                # will store (source_layer, target_layer) pairs where patching successfully generated e2_new
-                successful_pairs = []
-                
-                for i, gen in enumerate(entity_result.get("generation", [])):
-                    if gen and any(answer.lower() in str(gen).lower() for answer in e2_new_answers):
-                        source_layer = entity_result["source_layer"][i]
-                        target_layer = entity_result["target_layer"][i]
-                        successful_pairs.append((source_layer, target_layer))
-
-                metrics["entity_description_e2_new"] = {
-                    "successful_patches": successful_pairs,
-                    "count": len(successful_pairs),
-                }
-            except Exception as e:
-                metrics["entity_description_e2_new"]["error"] = str(e)
+                append_entity_description_rows(entity_description_rows, entity_result, item)
+            except Exception:
+                pass
 
             # knockout bridge representation
-            metrics["knockout_bridge"] = {}
-            #TODO: e1 last remove e2
-            for knockout_source, knockout_target in [("last", "e1")]:
-                try:
-                    knockout_result = run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target, 
-                                                         k=3, prompt="composition", default_decoding=False)
-                    
-                    # Check which layers, when knocked out, hurt e3_new generation
-                    e3_new_answers = (item.get("new_answer_alias", []) or []) + [item["new_answer"]]
-                    hurt_layers = []
-                    for i, gen in enumerate(knockout_result.get("generation", [])):
-                        # If generation doesn't contain e3_new answer, knockout hurt it
-                        if gen and not any(answer.lower() in str(gen).lower() for answer in e3_new_answers):
-                            layer = knockout_result["layer"][i]
-                            hurt_layers.append(layer)
-                    
-                    metrics["knockout_bridge"][f"{knockout_source}_{knockout_target}"] = {
-                        "hurt_layers": hurt_layers,
-                        "count": len(hurt_layers),
-                    }
-                except Exception as e:
-                    metrics["knockout_bridge"][f"{knockout_source}_{knockout_target}_error"] = str(e)
+            knockout_source = "last"
+            knockout_target = "e1"
+            try:
+                knockout_result = run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target, 
+                                                        k=3, prompt="composition", default_decoding=False)
+                append_knockout_rows(attention_knockout_rows, knockout_result, item)
+            except Exception:
+                pass
         
         all_metrics.append(metrics)
 
     os.makedirs(args.metrics_save_dir, exist_ok=True)
+
+    two_hop_df = pd.DataFrame(two_hop_rows)
+    if not two_hop_df.empty:
+        two_hop_df = two_hop_df.drop_duplicates("id")
+    two_hop_df.to_csv(f"{args.metrics_save_dir}/two_hop.csv", index=False)
+
+    entity_description_dir = f"{args.metrics_save_dir}/entity_description"
+    attention_knockout_dir = f"{args.metrics_save_dir}/attention_knockout"
+    sublayer_projection_dir = f"{args.metrics_save_dir}/sublayer_projection"
+    os.makedirs(entity_description_dir, exist_ok=True)
+    os.makedirs(attention_knockout_dir, exist_ok=True)
+    os.makedirs(sublayer_projection_dir, exist_ok=True)
+
+    pd.DataFrame(entity_description_rows).to_csv(
+        f"{entity_description_dir}/e1_entity_description_s0.csv", index=False
+    )
+    pd.DataFrame(attention_knockout_rows).to_csv(
+        f"{attention_knockout_dir}/last_e1_attention_knockout_k3_composition.csv", index=False
+    )
+    pd.DataFrame(attention_proj_rows).to_csv(
+        f"{sublayer_projection_dir}/attention_projections.csv", index=False
+    )
+    pd.DataFrame(mlp_proj_rows).to_csv(
+        f"{sublayer_projection_dir}/mlp_projections.csv", index=False
+    )
 
     # TODO: Should only be done on edit rows
     edit_metrics = [m for m in all_metrics if m.get("row_role") == "edit"]
