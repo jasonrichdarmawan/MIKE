@@ -344,6 +344,22 @@ python test_cake.py \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
+We set WISE to batch_size 1 due to the `OutOfMemory` error when the `--batch_size` was set to `4` or `32`.
+
+WISE
+```bash
+python test_cake.py \
+  --editing_method WISE \
+  --sequential_editing \
+  --model_type qwen3-4b-instruct \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 1 \
+  --sample_size 1000 \
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
+```
+
 AlphaEdit_Circuit
 ```bash
 python test_cake.py \

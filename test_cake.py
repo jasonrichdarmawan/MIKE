@@ -283,7 +283,8 @@ if __name__ == "__main__":
 
     if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "WISE", "IFMET", "CaKE"]:
         for start_idx in tqdm(indices, desc="Editing the model"):
-            items = data[start_idx:start_idx + args.batch_size]
+            end = min(start_idx + args.batch_size, len(data))
+            items = data[start_idx:end]
             
             if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
                 model = edit(
@@ -321,10 +322,10 @@ if __name__ == "__main__":
             else:
                 raise NotImplementedError(f"Editing method {args.editing_method} not implemented in the main loop.")
             
-            if (start_idx % args.batch_size) % args.downstream_eval_steps == 0:
-                do_glue_eval(SAVE_DIR, start_idx + args.batch_size, [item['case_id'] for item in items])
+            if (start_idx / args.batch_size) % args.downstream_eval_steps == 0:
+                do_glue_eval(save_dir=SAVE_DIR, edit_num=end, case_ids=[item['case_id'] for item in items])
     elif args.editing_method in ["no_edit"]:
-        do_glue_eval(SAVE_DIR, 0, [])
+        do_glue_eval(save_dir=SAVE_DIR, edit_num=0, case_ids=[])
     elif args.editing_method in ["MeLLo"]: # In-Context Learning Editing Method
         pass
     else:
@@ -335,7 +336,7 @@ if __name__ == "__main__":
             model=model,
             tokenizer=tokenizer,
             checkpoint_root=CHECKPOINTS_DIR,
-            edit_num=start_idx + args.batch_size,
+            edit_num=len(data),
             case_id=items[-1]["case_id"],
         )
         print(f"Saved checkpoint to {checkpoint_path}")
@@ -347,8 +348,9 @@ if __name__ == "__main__":
     all_metrics = {language: [] for language in languages}
     indices = list(range(0, len(data), args.batch_size))
     for start_idx in tqdm(indices, desc="Evaluating the edited model"):
-        items = data[start_idx:start_idx + args.batch_size]
-        
+        end = min(start_idx + args.batch_size, len(data))
+        items = data[start_idx:end]
+
         if args.editing_method in [
             "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE", "IFMET", "CaKE", 
             "AlphaEdit_Circuit",
