@@ -371,7 +371,7 @@ def do_edit(
             else:
                 raise NotImplementedError(f"Editing method {editing_method} not implemented in the main loop.")
             
-            if (start_idx % batch_size) % glue_eval_steps == 0:
+            if (start_idx / batch_size) % glue_eval_steps == 0:
                 do_glue_eval(save_dir=glue_eval_save_dir, edit_num=end, case_ids=[item['case_id'] for item in items], number_of_tests=args.glue_eval_size)
     elif editing_method in ["no_edit"]:
         do_glue_eval(save_dir=glue_eval_save_dir, edit_num=0, case_ids=[], number_of_tests=args.glue_eval_size)
