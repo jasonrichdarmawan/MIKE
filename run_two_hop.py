@@ -1,6 +1,8 @@
 import argparse
 import json
 import os
+import ast
+from pathlib import Path
 
 import torch
 from tqdm import tqdm
@@ -12,13 +14,79 @@ from EasyEdit.easyeditor.models.alphaedit import AlphaEditHyperParams
 
 from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
 from EasyEdit.easyeditor.util import nethook
-from edit_utils import compute_edit_quality, edit
+from edit_utils import edit, evaluate
 from test_cake import calculate_averages
+from analysis.create_benchmark_cf import create_subset_cf
+from analysis.two_hop_e2_json_create import convert_row_to_case
 
 
 def _load_cases(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _prepare_cases_for_editing(model_name, swapping_strategy, input_csv_path=None, output_json_path=None):
+    """
+    Build the benchmark subset for a model, convert it to JSON cases, and return the in-memory cases.
+    """
+    if input_csv_path is None:
+        model_scoped = Path("datasets") / model_name / f"two_hop_cf_{swapping_strategy}.csv"
+        shared = Path("datasets") / f"two_hop_cf_{swapping_strategy}.csv"
+        if model_scoped.exists():
+            input_csv_path = model_scoped
+        elif shared.exists():
+            input_csv_path = shared
+            print(f"Model-scoped CSV not found. Falling back to shared CSV: {shared}")
+        else:
+            raise FileNotFoundError(
+                f"Counterfactual dataset not found at {model_scoped} or {shared}. "
+                "Run analysis/evaluate_dataset.py first or pass --cf_input_csv explicitly."
+            )
+    else:
+        input_csv_path = Path(input_csv_path)
+        if not input_csv_path.exists():
+            raise FileNotFoundError(
+                f"Counterfactual dataset not found at {input_csv_path}. "
+                "Pass a valid --cf_input_csv path."
+            )
+
+    df = pd.read_csv(input_csv_path)
+    if "Unnamed: 0" in df.columns:
+        df = df.drop(columns=["Unnamed: 0"])
+    df = df.set_index("id")
+    df["propagated_from"] = df.apply(
+        lambda row: ast.literal_eval(row["propagated_from"])
+        if row["row_role"] == "propagated_eval"
+        else row["propagated_from"],
+        axis=1,
+    )
+    df["swapped_with"] = df["swapped_with"].astype("Int64")
+
+    stats, subset_df = create_subset_cf(df, swapping_strategy)
+
+    benchmark_csv_path = Path(str(input_csv_path).replace("two_hop_cf", "two_hop_cf_benchmark"))
+    benchmark_csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    subset_df_out = subset_df.reset_index()
+    subset_df_out.to_csv(benchmark_csv_path, index=False)
+
+    cases = [convert_row_to_case(row) for _, row in subset_df_out.iterrows()]
+
+    if output_json_path is None:
+        output_json_path = benchmark_csv_path.with_name(f"{benchmark_csv_path.stem}-cake.json")
+    else:
+        output_json_path = Path(output_json_path)
+
+    output_json_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_json_path, "w", encoding="utf-8") as f:
+        json.dump(cases, f, ensure_ascii=False, indent=2)
+
+    stat_str = " | ".join([f"{k}: {v}" for k, v in stats.items()])
+    print(f"Prepared benchmark subset for editing | {stat_str}")
+    print(f"Saved benchmark CSV: {benchmark_csv_path}")
+    print(f"Saved benchmark JSON: {output_json_path}")
+
+    return cases, benchmark_csv_path, output_json_path
 
 
 def _json_list(values):
@@ -34,7 +102,8 @@ def _normalize_answers(canonical, aliases=None):
 
 
 def _build_entity_metadata(item):
-    e1 = item["requested_rewrite"]["subject"]
+    rewrite = item["requested_rewrite"][0]
+    e1 = rewrite["subject"]
     e2 = item["new_single_hops"][0]["answer"]
     e3 = item["new_answer"]
 
@@ -173,7 +242,7 @@ def run_entity_description_e2_new(model, tokenizer, item, do_sample=False):
         "id": [item["case_id"]],
         "source_prompt": [source_prompt],
         "r1_template": [item["single_hops"][0]["cloze"].replace(" is", "")],
-        "e1_label": item["requested_rewrite"]["subject"],
+        "e1_label": [item["requested_rewrite"][0]["subject"]],
         "target_prompt": [target_prompt],
     }
 
@@ -222,7 +291,7 @@ def run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target
 
         # e2_old 
         # "e1_label": [item["single_hops"][0]["answer"]],  
-        "e1_label": [item["requested_rewrite"]["subject"]],  
+        "e1_label": [item["requested_rewrite"][0]["subject"]],  
         # e3_old
         # "e2_label": [item["single_hops"][1]["answer"]],
         # e2_new
@@ -251,7 +320,15 @@ def run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target
 def main():
     parser = argparse.ArgumentParser(description="Run AlphaEdit in dataset order: edit rows are edited, propagated rows are evaluated.")
     parser.add_argument("--model_type", required=True, type=str)
-    parser.add_argument("--dataset_path", required=True, type=str)
+    parser.add_argument("--dataset_path", default=None, type=str,
+                        help="Legacy direct JSON path. If omitted, this script auto-prepares JSON from model CSV.")
+    parser.add_argument("--swapping_strategy", default="e2", choices=["e2", "e3"], type=str)
+    parser.add_argument("--cf_input_csv", default=None, type=str,
+                        help="Optional path to evaluated model CSV (e.g., datasets/<model>/two_hop_cf_e2.csv).")
+    parser.add_argument("--prepared_json_path", default=None, type=str,
+                        help="Optional output JSON path for the auto-prepared benchmark cases.")
+    parser.add_argument("--skip_prepare", action="store_true",
+                        help="Skip subset+JSON preparation and read --dataset_path directly.")
     parser.add_argument("--metrics_save_dir", default="./output", type=str)
     parser.add_argument("--max_rows", default=None, type=int)
     args = parser.parse_args()
@@ -259,6 +336,20 @@ def main():
     hparams = AlphaEditHyperParams.from_hparams(f"./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml")
     alg_name = hparams.alg_name
     apply_algo = ALG_DICT[alg_name]
+
+    if args.skip_prepare:
+        if not args.dataset_path:
+            raise ValueError("--dataset_path is required when --skip_prepare is set")
+        cases = _load_cases(args.dataset_path)
+    else:
+        json_path = args.prepared_json_path or args.dataset_path
+        cases, _, prepared_json_path = _prepare_cases_for_editing(
+            model_name=hparams.model_name,
+            swapping_strategy=args.swapping_strategy,
+            input_csv_path=args.cf_input_csv,
+            output_json_path=json_path,
+        )
+        args.dataset_path = str(prepared_json_path)
 
     model = AutoModelForCausalLM.from_pretrained(
         hparams.model_name,
@@ -269,7 +360,6 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(hparams.model_name, use_fast=False)
     tokenizer.pad_token = tokenizer.eos_token
 
-    cases = _load_cases(args.dataset_path)
     if args.max_rows is not None:
         cases = cases[: args.max_rows]
 
@@ -295,28 +385,15 @@ def main():
         row_role = item.get("row_role")
         if row_role == "edit":
             edit_count += 1
-            model, metrics = edit(
-                model,
-                tokenizer,
-                item,
-                hparams,
-                alg_name,
-                apply_algo,
-                test_generation=False,
-                restore_weights=False,
-            )
+            model = edit(model, tokenizer, [item], hparams, apply_algo)
+            metrics = evaluate(model, tokenizer, [item], hparams, eval_with_chat_template=False, generation_batch_size=1)[0]
             metrics["row_role"] = "edit"
             metrics["row_index"] = row_index
 
         elif row_role == "propagated_eval":
-            metrics = {
-                "case_id": item["case_id"],
-                "requested_rewrite": item.get("requested_rewrite", []),
-                "time": 0,
-                "post": compute_edit_quality(model, tokenizer, item, hparams, test_generation=False),
-                "row_role": "propagated_eval",
-                "row_index": row_index,
-            }
+            metrics = evaluate(model, tokenizer, [item], hparams, eval_with_chat_template=False, generation_batch_size=1)[0]
+            metrics["row_role"] = "propagated_eval"
+            metrics["row_index"] = row_index
             prop_eval_count += 1
         else:
             skipped += 1
