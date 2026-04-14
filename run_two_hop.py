@@ -9,12 +9,15 @@ from tqdm import tqdm
 import pandas as pd
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Currently testing AlphaEdit
-from EasyEdit.easyeditor.models.alphaedit import AlphaEditHyperParams
+# Editing models are AlphaEdit, AlphaEdit_Circuit, and CaKE for now.
+from EasyEdit.easyeditor import (
+    AlphaEditHyperParams,
+    AlphaEditCircuitHyperParams,
+)
 
 from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
 from EasyEdit.easyeditor.util import nethook
-from edit_utils import edit, evaluate
+from edit_utils import edit, edit_cake, evaluate
 from test_cake import calculate_averages
 from analysis.create_benchmark_cf import create_subset_cf
 from analysis.two_hop_e2_json_create import convert_row_to_case
@@ -27,7 +30,7 @@ def _load_cases(path):
 
 def _prepare_cases_for_editing(model_name, swapping_strategy, input_csv_path=None, output_json_path=None):
     """
-    Build the benchmark subset for a model, convert it to JSON cases, and return the in-memory cases.
+    Build the benchmark subset for a model, reorder edit and eval rows, convert it to JSON cases then return the in-memory cases.
     """
     if input_csv_path is None:
         model_scoped = Path("datasets") / model_name / f"two_hop_cf_{swapping_strategy}.csv"
@@ -51,15 +54,19 @@ def _prepare_cases_for_editing(model_name, swapping_strategy, input_csv_path=Non
             )
 
     df = pd.read_csv(input_csv_path)
+
+    # remove annoying column
     if "Unnamed: 0" in df.columns:
         df = df.drop(columns=["Unnamed: 0"])
-    df = df.set_index("id")
-    df["propagated_from"] = df.apply(
-        lambda row: ast.literal_eval(row["propagated_from"])
-        if row["row_role"] == "propagated_eval"
-        else row["propagated_from"],
-        axis=1,
+
+    # Keep edit rows before propagated_eval rows while preserving the original
+    df = df.sort_values(
+        "row_role",
+        key=lambda s: s.map({"edit": 0, "propagated_eval": 1}),
+        kind="stable",
     )
+
+    df = df.set_index("id")
     df["swapped_with"] = df["swapped_with"].astype("Int64")
 
     stats, subset_df = create_subset_cf(df, swapping_strategy)
@@ -70,6 +77,7 @@ def _prepare_cases_for_editing(model_name, swapping_strategy, input_csv_path=Non
     subset_df_out = subset_df.reset_index()
     subset_df_out.to_csv(benchmark_csv_path, index=False)
 
+    # create json file
     cases = [convert_row_to_case(row) for _, row in subset_df_out.iterrows()]
 
     if output_json_path is None:
@@ -94,6 +102,7 @@ def _json_list(values):
 
 
 def _normalize_answers(canonical, aliases=None):
+    """combine ex_label and ex_aliases to a list"""
     aliases = aliases or []
     answers = list(aliases)
     if canonical not in answers:
@@ -102,6 +111,7 @@ def _normalize_answers(canonical, aliases=None):
 
 
 def _build_entity_metadata(item):
+    """Extract data from json for use in analysis functions"""
     rewrite = item["requested_rewrite"][0]
     e1 = rewrite["subject"]
     e2 = item["new_single_hops"][0]["answer"]
@@ -121,7 +131,6 @@ def _build_entity_metadata(item):
         "e1_answers": _json_list(e1_answers),
         "e2_answers": _json_list(e2_answers),
         "e3_answers": _json_list(e3_answers),
-        # Keep both schema variants for compatibility with analysis helpers.
         "e1_label": e1,
         "e2_label": e2,
         "e3_label": e3,
@@ -132,12 +141,14 @@ def _build_entity_metadata(item):
 
 
 def append_two_hop_row(two_hop_rows, item, composition_correct):
+    """appends rows to be used in final two_hop.csv"""
     row = _build_entity_metadata(item)
     row["composition_correct"] = bool(composition_correct)
     two_hop_rows.append(row)
 
 
 def append_entity_description_rows(entity_description_rows, entity_result, item):
+    """appends results from entity description probing to be used in entity_description csv"""
     meta = _build_entity_metadata(item)
     for i, generation in enumerate(entity_result.get("generation", [])):
         entity_description_rows.append({
@@ -162,6 +173,7 @@ def append_entity_description_rows(entity_description_rows, entity_result, item)
 
 
 def append_knockout_rows(attention_knockout_rows, knockout_result, item):
+    """appends results from attention knockout to be used in attention_knockout csv"""
     meta = _build_entity_metadata(item)
     layers = knockout_result.get("layer", [])
     generations = knockout_result.get("generation", [])
@@ -192,6 +204,7 @@ def append_knockout_rows(attention_knockout_rows, knockout_result, item):
 
 
 def append_projection_rows(projection_rows, proj_result, item):
+    """appends results from projection to be used in projection csv"""
     meta = _build_entity_metadata(item)
     row_count = len(proj_result.get("layer", []))
     for i in range(row_count):
@@ -224,7 +237,6 @@ def run_project_sublayer(model, tokenizer, item, target):
 
 
 # patchscope
-# 
 from analysis.patched_generation import get_hidden_states, generate_with_patching_all_layers
 from analysis.utils import get_layer_names
 def run_entity_description_e2_new(model, tokenizer, item, do_sample=False):
@@ -289,13 +301,8 @@ def run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target
         "id": [item["case_id"]],
         "source_prompt": [item["cloze_question"]],
 
-        # e2_old 
-        # "e1_label": [item["single_hops"][0]["answer"]],  
+        # since we are doing knockout from last to e1, e2 and e3 are not needed
         "e1_label": [item["requested_rewrite"][0]["subject"]],  
-        # e3_old
-        # "e2_label": [item["single_hops"][1]["answer"]],
-        # e2_new
-        # "e2_label": [item["single_hops"][0]["answer"]],
 
         "r2_template": [item["single_hops"][1]["cloze"].replace(" is", "")],  # Extract template
         "r1_template": [item["single_hops"][0]["cloze"].replace(" is", "")],  # Extract template
@@ -308,7 +315,6 @@ def run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target
         "r1_template": df["r1_template"].tolist(),
         "e1_label": df["e1_label"].tolist(),
         "r2_template": df["r2_template"].tolist(),
-        # "e2_label": df["e2_label"].tolist(),
     }
     
     result = generate_answer_with_attention_knockout(entries, model, tokenizer, default_decoding, 
@@ -319,6 +325,7 @@ def run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target
 
 def main():
     parser = argparse.ArgumentParser(description="Run AlphaEdit in dataset order: edit rows are edited, propagated rows are evaluated.")
+    parser.add_argument('--editing_method', required=True, type=str)
     parser.add_argument("--model_type", required=True, type=str)
     parser.add_argument("--dataset_path", default=None, type=str,
                         help="Legacy direct JSON path. If omitted, this script auto-prepares JSON from model CSV.")
@@ -333,9 +340,22 @@ def main():
     parser.add_argument("--max_rows", default=None, type=int)
     args = parser.parse_args()
 
-    hparams = AlphaEditHyperParams.from_hparams(f"./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml")
-    alg_name = hparams.alg_name
-    apply_algo = ALG_DICT[alg_name]
+    hparams = None
+    if args.editing_method == "AlphaEdit":
+        hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
+    elif args.editing_method == 'CaKE': # Use PEFT
+        pass
+    elif args.editing_method == "AlphaEdit_Circuit":
+        hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
+    else:
+        raise ValueError(f"Unsupported editing method: {args.editing_method}")
+
+    apply_algo = None
+    if args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit"]:
+        alg_name = hparams.alg_name
+        apply_algo = ALG_DICT[alg_name]
+
+    model_name = hparams.model_name if hparams is not None else args.model_type
 
     if args.skip_prepare:
         if not args.dataset_path:
@@ -344,7 +364,7 @@ def main():
     else:
         json_path = args.prepared_json_path or args.dataset_path
         cases, _, prepared_json_path = _prepare_cases_for_editing(
-            model_name=hparams.model_name,
+            model_name=model_name,
             swapping_strategy=args.swapping_strategy,
             input_csv_path=args.cf_input_csv,
             output_json_path=json_path,
@@ -352,12 +372,12 @@ def main():
         args.dataset_path = str(prepared_json_path)
 
     model = AutoModelForCausalLM.from_pretrained(
-        hparams.model_name,
+        model_name,
         device_map="auto",
         torch_dtype=torch.float32,
     )
     
-    tokenizer = AutoTokenizer.from_pretrained(hparams.model_name, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
     tokenizer.pad_token = tokenizer.eos_token
 
     if args.max_rows is not None:
@@ -381,11 +401,17 @@ def main():
     edit_count = 0
     prop_eval_count = 0
 
+    # Main loop
     for row_index, item in enumerate(tqdm(cases, desc="Running rows in order")):
         row_role = item.get("row_role")
         if row_role == "edit":
             edit_count += 1
-            model = edit(model, tokenizer, [item], hparams, apply_algo)
+            if args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit"]:
+                model = edit(model, tokenizer, [item], hparams, apply_algo)
+            elif args.editing_method == "CaKE":
+                model = edit_cake(model, tokenizer, [item])
+            else:
+                raise ValueError(f"Unsupported editing method in run loop: {args.editing_method}")
             metrics = evaluate(model, tokenizer, [item], hparams, eval_with_chat_template=False, generation_batch_size=1)[0]
             metrics["row_role"] = "edit"
             metrics["row_index"] = row_index
