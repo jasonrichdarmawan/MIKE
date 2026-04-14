@@ -332,8 +332,22 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 
 ### Others
 
-MeLLo
+R-ROME
+```bash
+python test_cake.py \
+  --editing_method R-ROME \
+  --sequential_editing \
+  --model_type qwen3-4b-instruct \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --sample_size 1000 \
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
 ```
+
+MeLLo
+```bash
 python test_cake.py \
   --editing_method MeLLo \
   --sequential_editing \
@@ -345,17 +359,22 @@ python test_cake.py \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
-AlphaEdit
-```
+We set WISE to batch_size 1 due to the `OutOfMemory` error when the `--batch_size` was set to `4` or `32`.
+
+WISE
+```bash
 python test_cake.py \
-  --editing_method AlphaEdit \
+  --editing_method WISE \
   --sequential_editing \
   --model_type qwen3-4b-instruct \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
+  --batch_size 1 \
   --sample_size 1000 \
-  --data_name MQuAKE-CF-3k-v2-clke
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --downstream_eval_steps 32 \
+  --print_eval_steps 64 \
+  --save_edited_model
 ```
 
 AlphaEdit_Circuit
@@ -368,7 +387,8 @@ python test_cake.py \
   --eval_with_chat_template \
   --batch_size 32 \
   --sample_size 1000 \
-  --data_name MQuAKE-CF-3k-v2-clke
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
 ```
 
 CaKE

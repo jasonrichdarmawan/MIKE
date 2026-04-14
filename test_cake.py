@@ -99,10 +99,10 @@ def calculate_averages(data):
 if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     # sys.argv = ["", 
-    #     "--editing_method", "MeLLo",
-    #     "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+    #     "--editing_method", "WISE",
+    #     # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
     #     "--sequential_editing",
-    #     # "--model_type", "qwen3-4b-instruct",
+    #     "--model_type", "qwen3-4b-instruct",
     #     "--dtype", "bfloat16",
     #     "--eval_with_chat_template",
     #     "--batch_size", "2",
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--editing_method', required=True, type=str)
     parser.add_argument('--sequential_editing', action='store_true')
-    parser.add_argument('--data_name', default=None, type=str)
+    parser.add_argument('--data_name', default=None, type=str, choices=["MQuAKE-CF-3k-v2-clke"])
     parser.add_argument('--model_type', default=None,type=str)
     parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
     parser.add_argument('--eval_with_chat_template', action='store_true')
@@ -125,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument('--generation_batch_size', default=16, type=int)
     parser.add_argument("--sample_size", default=2999, type=int)
     parser.add_argument("--downstream_eval_steps", default=5, type=int)
+    parser.add_argument('--print_eval_steps', default=2, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     parser.add_argument('--checkpoint_dir', default='./checkpoints', type=str)
     parser.add_argument('--save_edited_model', action='store_true')
@@ -283,7 +284,8 @@ if __name__ == "__main__":
 
     if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "WISE", "IFMET", "CaKE"]:
         for start_idx in tqdm(indices, desc="Editing the model"):
-            items = data[start_idx:start_idx + args.batch_size]
+            end = min(start_idx + args.batch_size, len(data))
+            items = data[start_idx:end]
             
             if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
                 model = edit(
@@ -321,10 +323,10 @@ if __name__ == "__main__":
             else:
                 raise NotImplementedError(f"Editing method {args.editing_method} not implemented in the main loop.")
             
-            if (start_idx % args.batch_size) % args.downstream_eval_steps == 0:
-                do_glue_eval(SAVE_DIR, start_idx + args.batch_size, [item['case_id'] for item in items])
+            if (start_idx / args.batch_size) % args.downstream_eval_steps == 0:
+                do_glue_eval(save_dir=SAVE_DIR, edit_num=end, case_ids=[item['case_id'] for item in items])
     elif args.editing_method in ["no_edit"]:
-        do_glue_eval(SAVE_DIR, 0, [])
+        do_glue_eval(save_dir=SAVE_DIR, edit_num=0, case_ids=[])
     elif args.editing_method in ["MeLLo"]: # In-Context Learning Editing Method
         pass
     else:
@@ -335,27 +337,33 @@ if __name__ == "__main__":
             model=model,
             tokenizer=tokenizer,
             checkpoint_root=CHECKPOINTS_DIR,
-            edit_num=start_idx + args.batch_size,
+            edit_num=len(data),
             case_id=items[-1]["case_id"],
         )
         print(f"Saved checkpoint to {checkpoint_path}")
+        
+    languages = None
+    if args.data_name == "MQuAKE-CF-3k-v2-clke":
+        languages = ["en", "de", "fr", "ja", "zh"]
     
-    all_metrics = []
+    all_metrics = {language: [] for language in languages}
     indices = list(range(0, len(data), args.batch_size))
     for start_idx in tqdm(indices, desc="Evaluating the edited model"):
-        items = data[start_idx:start_idx + args.batch_size]
-        
+        end = min(start_idx + args.batch_size, len(data))
+        items = data[start_idx:end]
+
         if args.editing_method in [
             "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE", "IFMET", "CaKE", 
             "AlphaEdit_Circuit",
         ]:
             metrics = evaluate(
-                model=model, 
+                model=model,
                 tokenizer=tokenizer, 
                 items=items, 
                 hparams=hparams, 
                 eval_with_chat_template=args.eval_with_chat_template,
                 generation_batch_size=args.generation_batch_size,
+                languages=languages,
             )
         elif args.editing_method == "MeLLo":
             # Chat models are fine-tuned on conversational data with explicit turn-taking.
@@ -365,35 +373,40 @@ if __name__ == "__main__":
             if args.eval_with_chat_template:
                 eval_with_chat_template = "few_shot_in_multi_turn"
             metrics = evaluate_mello(
-                model=model, 
+                model=model,
                 tokenizer=tokenizer, 
                 contriever=contriever,
                 contriever_tokenizer=contriever_tokenizer,
-                eval_with_chat_template=eval_with_chat_template,
-                generation_batch_size=args.generation_batch_size,
                 task_prompt=task_prompt,
                 items=items,
                 embeddings=embeddings,
                 new_facts=new_facts,
+                eval_with_chat_template=eval_with_chat_template,
+                generation_batch_size=args.generation_batch_size,
+                languages=languages,
                 use_kv_cache=True,
                 continuation="in_assistant_content",
             )
         else:
             raise NotImplementedError(f"Evaluation method for {args.editing_method} not implemented.")
         
-        if (start_idx // args.batch_size) % 2 == 0:
-            print(f"Batch index: {start_idx // args.batch_size}:\n{json.dumps(metrics[0], indent=4)}")
+        if (start_idx / args.batch_size) % args.print_eval_steps == 0:
+            for language in languages:
+                print(f"Batch index={start_idx // args.batch_size}, language={language}:\n{json.dumps(metrics[language], indent=4, ensure_ascii=False)}")
         
-        all_metrics.extend(metrics)
+        for language in languages:
+            all_metrics[language].extend(metrics[language])
     
-        res = calculate_averages(all_metrics)
-        print(f"Results:\n{json.dumps(res, indent=4)}")
+            res = calculate_averages(all_metrics[language])
+            print(f"Results {language}:\n{json.dumps(res, indent=4)}")
         
-        metrics_filepath = f'{SAVE_DIR}/metrics.json'
-        res_filepath = f'{SAVE_DIR}/res.json'
-        print(f"Saving metrics to {metrics_filepath}")
-        print(f"Saving results to {res_filepath}")
-        json.dump(all_metrics, open(metrics_filepath, 'w'), indent=4)
-        json.dump(res, open(res_filepath, 'w'), indent=4)
+            folder_path = f'{SAVE_DIR}/{language}'
+            os.makedirs(folder_path, exist_ok=True)
+            metrics_filepath = f'{folder_path}/metrics.json'
+            res_filepath = f'{folder_path}/res.json'
+            print(f"Saving metrics to {metrics_filepath}")
+            print(f"Saving results to {res_filepath}")
+            json.dump(all_metrics[language], open(metrics_filepath, 'w'), indent=4, ensure_ascii=False)
+            json.dump(res, open(res_filepath, 'w'), indent=4)
 
 # %%

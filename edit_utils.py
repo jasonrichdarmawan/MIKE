@@ -1,3 +1,4 @@
+from httpcore import request
 import torch
 from tqdm import tqdm
 from peft import LoraConfig, TaskType, get_peft_model
@@ -7,15 +8,30 @@ from transformers import TrainingArguments, Trainer
 
 from tqdm.auto import tqdm
 from typing import Literal
-import json
 
-def check_answer_in_pred(pred, answers):
-    pred = pred.lower()
-    return any([a.lower() in pred for a in answers])
+def _extract_answer_text(prediction):
+    """Extract answer from <answer> tags, or return raw prediction if no tags found."""
+    import re
+    m = re.search(r"<answer>(.*?)</answer>", prediction, re.IGNORECASE | re.DOTALL)
+    text = m.group(1) if m else prediction
+    return text.strip()
+
+def check_answer_in_pred(pred, answers, extract_answer: Literal[False, "answer_tags"] = False):
+    if extract_answer == "answer_tags":
+        pred = _extract_answer_text(pred).lower()
+    else:
+        pred = pred.lower()
+    for a in answers:
+        a = a.strip().lower()
+        if not a:
+            continue
+        if a in pred or pred.startswith(a) or pred == a:
+            return True
+    return False
 
 def _format_chat_prompt(tokenizer, user_content):
     messages = [
-        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "system", "content": "You are a helpful assistant. Wrap your final answer in XML tags like this: <answer>ANSWER_HERE</answer>."},
         {"role": "user", "content": user_content}
     ]
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -49,7 +65,7 @@ def get_sentence_embeddings(
     batch_size=32
 ):
     all_embs = []
-    for i in tqdm(range(0, len(sentences), batch_size)):
+    for i in tqdm(range(0, len(sentences), batch_size), desc="Computing sentence embeddings in batches"):
         sent_batch = sentences[i:i+batch_size]
         contriever_tokenizer.padding_side = "right"
         inputs = contriever_tokenizer(
@@ -137,7 +153,7 @@ def create_lora_model(
 
 few_shot_in_multi_turn = [
     {"role": "system", "content":
-"""You are a helpful assistant. You must answer questions by strictly following this step-by-step pattern:
+"""You are a helpful assistant. Answer in the same language as the question. You must answer questions by strictly following this step-by-step pattern:
 Question: [Original question]
 Subquestion: [Your generated subquestion to retrieve a fact that can help answer the original question]
 Generated answer: [Your generated answer to the subquestion]
@@ -291,7 +307,6 @@ def call_model_batch(
 
     return generated_all
 
-
 def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_prompt_part=False):
     """
     Caveat:
@@ -365,7 +380,6 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_pro
         labels[model_inputs["attention_mask"] == 0] = -100
     model_inputs['labels'] = labels
     return model_inputs
-
 
 def check_answer_batch(
     model,
@@ -521,68 +535,13 @@ def _evaluate_mello_with_kv_cache(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
+    languages=["en", "de", "fr", "ja", "zh"],
 ):
-    all_metrics = []
     stop_strings = ["Retrieved fact:"]
-
-    eval_requests = []
+    
+    all_metrics, eval_requests = _prepare_mquake_clke(items, hparams=None, languages=languages)
+    
     request_outputs = []
-
-    for item_idx, edit_item in enumerate(tqdm(items, desc="Preparing MeLLo eval requests")):
-        hop_count = len(edit_item['new_single_hops'])
-        requested_rewrite = []
-        for i in edit_item['requested_rewrite']:
-            z = {k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"]}
-            requested_rewrite.append(z)
-
-        all_metrics.append({
-            "case_id": edit_item['case_id'],
-            "requested_rewrite": requested_rewrite,
-            "post": {
-                "hop_wise": [[None, None] for _ in range(hop_count)],
-                "hop_wise_predictions": [[None, None] for _ in range(hop_count)],
-                "accuracy": [],
-                "accuracy_predictions": [],
-            },
-        })
-
-        for hop_idx, single_hop in enumerate(edit_item['new_single_hops']):
-            answers = [single_hop['answer']] + single_hop['answer_alias']
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "hop_wise",
-                "hop_idx": hop_idx,
-                "form_idx": 0,
-                "question": single_hop['cloze'],
-                "answers": answers,
-                "target": single_hop['answer'],
-            })
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "hop_wise",
-                "hop_idx": hop_idx,
-                "form_idx": 1,
-                "question": single_hop['question'],
-                "answers": answers,
-                "target": single_hop['answer'],
-            })
-
-        answers = [edit_item['new_answer']] + edit_item['new_answer_alias']
-        eval_requests.append({
-            "item_idx": item_idx,
-            "group": "accuracy",
-            "question": edit_item['cloze_question'],
-            "answers": answers,
-            "target": edit_item['new_answer'],
-        })
-        for question in edit_item['questions']:
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "accuracy",
-                "question": question,
-                "answers": answers,
-                "target": edit_item['new_answer'],
-            })
 
     if len(eval_requests) == 0:
         raise ValueError("No evaluation requests prepared for MeLLo evaluation.")
@@ -777,7 +736,7 @@ def _evaluate_mello_with_kv_cache(
     output_map = {req_idx: output for req_idx, output in request_outputs}
     for req_idx, req in enumerate(eval_requests):
         question, generated, result = output_map[req_idx]
-        item_post = all_metrics[req['item_idx']]['post']
+        item_post = all_metrics[req["language"]][req['item_idx']]['post']
         prediction = {
             "prompt": question,
             "generated": generated,
@@ -804,75 +763,19 @@ def _evaluate_mello_without_kv_cache(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
+    languages=["en", "de", "fr", "ja", "zh"],
     continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
 ):
-    all_metrics = []
-    
     stop_strings = ["Retrieved fact:"]
-
-    eval_requests = []
+    
+    all_metrics, eval_requests = _prepare_mquake_clke(items, hparams=None, languages=languages)
+    
     request_outputs = []
     initial_prompts = []
     prompts = []
     assistant_histories = []
     done = []
     last_gen = []
-
-    for item_idx, edit_item in enumerate(tqdm(items, desc="Preparing MeLLo eval requests")):
-        hop_count = len(edit_item['new_single_hops'])
-        requested_rewrite = []
-        for i in edit_item['requested_rewrite']:
-            z = {k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"]}
-            requested_rewrite.append(z)
-
-        all_metrics.append({
-            "case_id": edit_item['case_id'],
-            "requested_rewrite": requested_rewrite,
-            "post": {
-                "hop_wise": [[None, None] for _ in range(hop_count)],
-                "hop_wise_predictions": [[None, None] for _ in range(hop_count)],
-                "accuracy": [],
-                "accuracy_predictions": [],
-            },
-        })
-
-        for hop_idx, single_hop in enumerate(edit_item['new_single_hops']):
-            answers = [single_hop['answer']] + single_hop['answer_alias']
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "hop_wise",
-                "hop_idx": hop_idx,
-                "form_idx": 0,
-                "question": single_hop['cloze'],
-                "answers": answers,
-                "target": single_hop['answer'],
-            })
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "hop_wise",
-                "hop_idx": hop_idx,
-                "form_idx": 1,
-                "question": single_hop['question'],
-                "answers": answers,
-                "target": single_hop['answer'],
-            })
-
-        answers = [edit_item['new_answer']] + edit_item['new_answer_alias']
-        eval_requests.append({
-            "item_idx": item_idx,
-            "group": "accuracy",
-            "question": edit_item['cloze_question'],
-            "answers": answers,
-            "target": edit_item['new_answer'],
-        })
-        for question in edit_item['questions']:
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "accuracy",
-                "question": question,
-                "answers": answers,
-                "target": edit_item['new_answer'],
-            })
 
     for req in eval_requests:
         if eval_with_chat_template == "few_shot_in_multi_turn":
@@ -1001,7 +904,7 @@ def _evaluate_mello_without_kv_cache(
 
     for req, output in zip(eval_requests, request_outputs):
         question, generated, result = output
-        item_post = all_metrics[req['item_idx']]['post']
+        item_post = all_metrics[req["languages"]][req['item_idx']]['post']
         prediction = {
             "prompt": question,
             "generated": generated,
@@ -1029,6 +932,7 @@ def evaluate_mello(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
+    languages=["en", "de", "fr", "ja", "zh"],
     use_kv_cache=False,
     continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
 ):
@@ -1047,6 +951,7 @@ def evaluate_mello(
             new_facts=new_facts,
             eval_with_chat_template=eval_with_chat_template,
             generation_batch_size=generation_batch_size,
+            languages=languages,
         )
     
     return _evaluate_mello_without_kv_cache(
@@ -1060,6 +965,7 @@ def evaluate_mello(
         new_facts=new_facts,
         eval_with_chat_template=eval_with_chat_template,
         generation_batch_size=generation_batch_size,
+        languages=languages,
         continuation=continuation,
     )
 
@@ -1139,7 +1045,6 @@ def _edit_cake_single(model, tokenizer, item):
 
     return model
 
-
 def edit_cake(model, tokenizer, items):
     """
     Supports both single-item and batched editing for CaKE.
@@ -1151,8 +1056,6 @@ def edit_cake(model, tokenizer, items):
       - single dict input -> `(model, metrics_dict)`
       - list input -> `(model, metrics_list)`
     """
-    if isinstance(items, dict):
-        items = [items]
 
     for item in items:
         model = _edit_cake_single(
@@ -1176,30 +1079,35 @@ def edit(model, tokenizer, items, hparams, apply_algo):
         requests.extend(requested_rewrite)
     
     tokenizer.padding_side = "right"
-    model, _ = apply_algo(
-        model,
-        tokenizer,
-        requests,
-        hparams,
-        copy=False,
-        return_orig_weights=False
-    )
+    if hparams.alg_name in ["ROME", "R-ROME"]: # Editing method that edit one sample at a time.
+        for request in requests:
+            model, _ = apply_algo(
+                model,
+                tokenizer,
+                [request],
+                hparams,
+                copy=False,
+                return_orig_weights=False,
+            )
+    else:
+        model = apply_algo(
+            model,
+            tokenizer,
+            requests,
+            hparams,
+            copy=False,
+            return_orig_weights=False,
+        )
     
     return model
 
-def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generation_batch_size=8):
+def _prepare_mquake_clke(items, hparams, languages):
     """
-    Caveat:
-    - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
+    dataset: MQuAKE-CF-3k-v2-clke
+    """
+    all_metrics = {language: [] for language in languages}
+    eval_requests = []
     
-    Example:
-    - edit_item['new_answer_alias']: ["Emerson Dambudzo Mnangagwa", ...]
-    - edit_item['new_answer']: "Emerson Mnangagwa"
-    - edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
-    - edit_item['questions']: ["Who is the head of state of the country where Fernando Santos hold a citizenship?"]
-    """
-    all_metrics = []
-
     for item in items:
         requested_rewrite = item['requested_rewrite']
         for i in requested_rewrite:
@@ -1207,9 +1115,7 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generati
                 i['target_true'] = i['target_true']['str']
             if isinstance(i["target_new"], dict):
                 i['target_new'] = i['target_new']['str']
-
-    eval_requests = []
-
+    
     for item_idx, item in enumerate(tqdm(items, desc="Preparing eval requests")):
         requested_rewrite = []
         if hparams is not None:
@@ -1221,60 +1127,85 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generati
                 )
                 requested_rewrite.append(z)
 
-        hop_count = len(item['new_single_hops'])
-        metrics = {
-            "case_id": item['case_id'],
-            "requested_rewrite": requested_rewrite,
-            "post": {
-                "hop_wise": [[None, None] for _ in range(hop_count)],
-                "accuracy": [],
-                "hop_wise_predictions": [[None, None] for _ in range(hop_count)],
-                "accuracy_predictions": [],
-            },
-        }
-        all_metrics.append(metrics)
+        for language in languages:
+            language_str = "" if language == "en" else f"_{language}"
+            hop_count = len(item[f'new_single_hops{language_str}'])
+            metrics = {
+                "case_id": item['case_id'],
+                "requested_rewrite": requested_rewrite,
+                "post": {
+                    "hop_wise": [[None, None] for _ in range(hop_count)],
+                    "accuracy": [],
+                    "hop_wise_predictions": [[None, None] for _ in range(hop_count)],
+                    "accuracy_predictions": [],
+                },
+            }
+            all_metrics[language].append(metrics)
 
-        for hop_idx, single_hop in enumerate(item['new_single_hops']):
-            answer_candidates = [single_hop["answer"]] + single_hop['answer_alias']
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "hop_wise",
-                "hop_idx": hop_idx,
-                "form_idx": 0,
-                "question": single_hop['cloze'],
-                "answers": answer_candidates,
-                "target": single_hop["answer"],
-                "max_new_tokens": 50,
-            })
-            eval_requests.append({
-                "item_idx": item_idx,
-                "group": "hop_wise",
-                "hop_idx": hop_idx,
-                "form_idx": 1,
-                "question": single_hop["question"],
-                "answers": answer_candidates,
-                "target": single_hop["answer"],
-                "max_new_tokens": 50,
-            })
+        for language in languages:
+            language_str = "" if language == "en" else f"_{language}"
+            for hop_idx, single_hop in enumerate(item[f'new_single_hops{language_str}']):
+                answer_candidates = [single_hop["answer"]] + single_hop['answer_alias']
+                eval_requests.append({
+                    "item_idx": item_idx,
+                    "language": language,
+                    "group": "hop_wise",
+                    "hop_idx": hop_idx,
+                    "form_idx": 0,
+                    "question": single_hop['cloze'],
+                    "answers": answer_candidates,
+                    "target": single_hop["answer"],
+                    "max_new_tokens": 50,
+                })
+                eval_requests.append({
+                    "item_idx": item_idx,
+                    "language": language,
+                    "group": "hop_wise",
+                    "hop_idx": hop_idx,
+                    "form_idx": 1,
+                    "question": single_hop["question"],
+                    "answers": answer_candidates,
+                    "target": single_hop["answer"],
+                    "max_new_tokens": 50,
+                })
 
-        answer_candidates = [item["new_answer"]] + item['new_answer_alias']
-        eval_requests.append({
-            "item_idx": item_idx,
-            "group": "accuracy",
-            "question": item['cloze_question'],
-            "answers": answer_candidates,
-            "target": item["new_answer"],
-            "max_new_tokens": 50,
-        })
-        for question in item['questions']:
+        for language in languages:
+            language_str = "" if language == "en" else f"_{language}"
+            answer_candidates = [item[f"new_answer{language_str}"]] + item[f'new_answer_alias{language_str}']
             eval_requests.append({
                 "item_idx": item_idx,
+                "language": language,
                 "group": "accuracy",
-                "question": question,
+                "question": item[f'cloze_question{language_str}'],
                 "answers": answer_candidates,
-                "target": item["new_answer"],
+                "target": item[f"new_answer{language_str}"],
                 "max_new_tokens": 50,
             })
+            for question in item[f'questions{language_str}']:
+                eval_requests.append({
+                    "item_idx": item_idx,
+                    "language": language,
+                    "group": "accuracy",
+                    "question": question,
+                    "answers": answer_candidates,
+                    "target": item[f"new_answer{language_str}"],
+                    "max_new_tokens": 50,
+                })
+                
+    return all_metrics, eval_requests
+
+def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generation_batch_size=8, languages=["en", "de", "fr", "ja", "zh"]):
+    """
+    Caveat:
+    - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
+    
+    Example:
+    - edit_item['new_answer_alias']: ["Emerson Dambudzo Mnangagwa", ...]
+    - edit_item['new_answer']: "Emerson Mnangagwa"
+    - edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
+    - edit_item['questions']: ["Who is the head of state of the country where Fernando Santos hold a citizenship?"]
+    """
+    all_metrics, eval_requests = _prepare_mquake_clke(items=items, hparams=hparams, languages=languages)
 
     grouped_indices = {}
     for req_idx, req in enumerate(eval_requests):
@@ -1298,7 +1229,7 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generati
 
     for req, output in zip(eval_requests, eval_outputs):
         prompt, generated_text, result = output
-        item_post = all_metrics[req["item_idx"]]["post"]
+        item_post = all_metrics[req["language"]][req["item_idx"]]["post"]
         prediction = {
             "prompt": prompt,
             "generated": generated_text,
