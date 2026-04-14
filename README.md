@@ -357,6 +357,8 @@ python test_cake.py \
   --batch_size 1 \
   --sample_size 1000 \
   --data_name MQuAKE-CF-3k-v2-clke \
+  --downstream_eval_steps 32 \
+  --print_eval_steps 64 \
   --save_edited_model
 ```
 

@@ -125,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument('--generation_batch_size', default=16, type=int)
     parser.add_argument("--sample_size", default=2999, type=int)
     parser.add_argument("--downstream_eval_steps", default=5, type=int)
+    parser.add_argument('--print_eval_steps', default=2, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     parser.add_argument('--checkpoint_dir', default='./checkpoints', type=str)
     parser.add_argument('--save_edited_model', action='store_true')
@@ -389,7 +390,7 @@ if __name__ == "__main__":
         else:
             raise NotImplementedError(f"Evaluation method for {args.editing_method} not implemented.")
         
-        if (start_idx // args.batch_size) % 2 == 0:
+        if (start_idx / args.batch_size) % args.print_eval_steps == 0:
             for language in languages:
                 print(f"Batch index={start_idx // args.batch_size}, language={language}:\n{json.dumps(metrics[language], indent=4, ensure_ascii=False)}")
         
