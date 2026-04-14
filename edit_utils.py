@@ -1212,7 +1212,7 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generati
         grouped_indices.setdefault(req["max_new_tokens"], []).append(req_idx)
 
     eval_outputs = [None] * len(eval_requests)
-    for max_new_tokens, req_indices in grouped_indices.items():
+    for max_new_tokens, req_indices in tqdm(grouped_indices.items(), desc="Evaluating in batches"):
         batch_questions = [eval_requests[idx]["question"] for idx in req_indices]
         batch_answers = [eval_requests[idx]["answers"] for idx in req_indices]
         batch_results = check_answer_batch(
@@ -1321,6 +1321,13 @@ def edit_wise(
     loc_index, 
     apply_algo,
 ):
+    """
+    Caveat:
+    1. the [EasyEdit](https://github.com/zjunlp/EasyEdit/blob/3488a66ee988d83ee7891a8abbbe6bcb24a77daf/easyeditor/editors/editor.py#L131-L136)
+    repository is using `tokenizer.padding_side = "left"` when editing the model with WISE.
+    2. the [EasyEdit](https://github.com/zjunlp/EasyEdit/blob/3488a66ee988d83ee7891a8abbbe6bcb24a77daf/easyeditor/editors/editor.py#L385-L410)
+    repository is editing per request.
+    """
     requests = []
     for edit_item in items:
         for i, request in enumerate(edit_item["requested_rewrite"]):
@@ -1328,17 +1335,19 @@ def edit_wise(
             if isinstance(request["target_new"], dict):
                 request['target_new'] = request['target_new']['str']
             request.update({
-                'loc_prompt': loc_data[loc_index + i]['loc'] + ' ' + loc_data[loc_index]['loc_ans']
+                'loc_prompt': loc_data[loc_index + i]['loc'] + ' ' + loc_data[loc_index + i]['loc_ans']
             })
             loc_index += 1
         requests.extend(edit_item["requested_rewrite"])
     hparams.batch_size = len(requests)
-    _, _ = apply_algo(
-        model,
-        tokenizer,
-        requests,
-        hparams,
-        copy=False,
-        return_orig_weights=False
-    )
+    tokenizer.padding_side = "left"
+    for request in requests:
+        _, _ = apply_algo(
+            model,
+            tokenizer,
+            [request],
+            hparams,
+            copy=False,
+            return_orig_weights=False
+        )
     return loc_index

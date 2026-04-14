@@ -7,6 +7,7 @@ from EasyEdit.easyeditor import (
     R_ROMEHyperParams,
     AlphaEditHyperParams,
     WISEHyperParams,
+    WISE,
     AlphaEditCircuitHyperParams,
 )
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
@@ -34,17 +35,40 @@ from glue_eval.glue_eval import GLUEEval
 
 # %%
 
-def save_checkpoint(model, tokenizer, checkpoint_root, edit_num, case_id):
+def load_checkpoint(model_name, device_map, dtype, editing_method, **kwargs):
+    """
+    Caveat: Only guarantee loaded checkpoint works for evaluation, not continuing editing.
+    """
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, dtype=getattr(torch, dtype))
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
+    if editing_method == ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
+        pass
+    elif editing_method == "WISE":
+        editor = WISE(model=model, config=kwargs["hparams"], device=model.device)
+        editor.load(load_path=kwargs["load_path"])
+    else:
+        raise NotImplementedError(f"Editing method {editing_method} not implemented for loading checkpoint.")
+        
+    return model, tokenizer
+
+def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num, case_id, **kwargs):
     checkpoint_name = f"edit_num_{edit_num:04d}_case_{case_id:04d}"
     checkpoint_path = os.path.join(checkpoint_root, checkpoint_name)
     os.makedirs(checkpoint_path, exist_ok=True)
 
-    model.save_pretrained(
-        checkpoint_path,
-        safe_serialization=True,
-        max_shard_size="10GB",
-    )
-    tokenizer.save_pretrained(checkpoint_path)
+    if editing_method == ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
+        model.save_pretrained(
+            checkpoint_path,
+            safe_serialization=True,
+            max_shard_size="10GB",
+        )
+        tokenizer.save_pretrained(checkpoint_path)
+    elif editing_method in ["WISE"]:
+        editor = WISE(model=model, config=kwargs["hparams"], device=model.device)
+        editor.save(f"{checkpoint_path}/wise.pt")
+    else:
+         raise NotImplementedError(f"Editing method {editing_method} not implemented for saving checkpoint.")
 
     metadata = {
         "edit_num": edit_num,
@@ -96,22 +120,26 @@ def calculate_averages(data):
 
 # %%
 
-if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    # sys.argv = ["", 
-    #     "--editing_method", "WISE",
-    #     # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
-    #     "--sequential_editing",
-    #     "--model_type", "qwen3-4b-instruct",
-    #     "--dtype", "bfloat16",
-    #     "--eval_with_chat_template",
-    #     "--batch_size", "2",
-    #     # "--generation_batch_size", "16",
-    #     "--sample_size", "4",
-    #     "--data_name", "MQuAKE-CF-3k-v2-clke",
-    #     "--downstream_eval_steps", "2",
-    #     # "--save_edited_model",
-    # ]
+# if __name__ == "__main__":
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+#     sys.argv = ["", 
+#         "--editing_method", "WISE",
+#         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+#         "--sequential_editing",
+#         "--model_type", "qwen3-4b-instruct",
+#         # "--model_type", "llama3-8b",
+#         "--dtype", "bfloat16",
+#         "--eval_with_chat_template",
+#         "--batch_size", "2",
+#         # "--generation_batch_size", "16",
+#         "--sample_size", "4",
+#         "--data_name", "MQuAKE-CF-3k-v2-clke",
+#         "--glue_eval_steps", "2",
+#         "--glue_eval_size", "2",
+#         # "--save_edited_model",
+#         # "--load_edited_model",
+#         # "--load_path", "./checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential_s4_b2/WISE/edit_num_0004_case_0004/wise.pt",
+#     ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -124,11 +152,14 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument('--generation_batch_size', default=16, type=int)
     parser.add_argument("--sample_size", default=2999, type=int)
-    parser.add_argument("--downstream_eval_steps", default=5, type=int)
+    parser.add_argument("--glue_eval_steps", default=5, type=int)
+    parser.add_argument("--glue_eval_size", default=100, type=int)
     parser.add_argument('--print_eval_steps', default=2, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     parser.add_argument('--checkpoint_dir', default='./checkpoints', type=str)
     parser.add_argument('--save_edited_model', action='store_true')
+    parser.add_argument('--load_edited_model', action='store_true')
+    parser.add_argument('--load_path', default=None, type=str)
     args = parser.parse_args()
 
     hparams = None
@@ -169,24 +200,25 @@ if __name__ == "__main__":
         else args.model_type
     )
     sequential_str = "sequential" if args.sequential_editing else "restore"
-    SAVE_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
-    os.makedirs(SAVE_DIR, exist_ok=True)
+    SAVE_METRICS_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+    os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
     
     if args.save_edited_model:
-        CHECKPOINTS_DIR = f'{args.checkpoint_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
-        os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
+        SAVE_CHECKPOINTS_DIR = f'{args.checkpoint_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+        os.makedirs(SAVE_CHECKPOINTS_DIR, exist_ok=True)
         
 # %%
 
 if __name__ == "__main__":
-    os.makedirs(SAVE_DIR, exist_ok=True)
+    os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
     
     fmt = logging.Formatter('%(asctime)s %(name)s %(levelname)-9s %(message)s')
     
     sh = StreamHandler()
     sh.setFormatter(fmt)
     
-    fh_path = f"{SAVE_DIR}/output.log"
+    fh_str = "output.log" if not args.load_edited_model else f"output_loaded.log"
+    fh_path = f"{SAVE_METRICS_DIR}/output.log"
     fh = FileHandler(fh_path, mode='w')
     fh.setFormatter(fmt)
     
@@ -204,8 +236,16 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if args.load_edited_model:
+        kwargs = {}
+        if args.editing_method == "WISE":
+            kwargs["hparams"] = hparams
+            kwargs["load_path"] = args.load_path
+        model, tokenizer = load_checkpoint(model_name=model_name, device_map="cuda", dtype=args.dtype, editing_method=args.editing_method, **kwargs)
+        print(f"Loaded edited model from checkpoint {args.load_path} for {args.editing_method}.")
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -237,17 +277,10 @@ if __name__ == "__main__":
             contriever_tokenizer=contriever_tokenizer,
             sentences=new_facts,
         )
-    elif args.editing_method == 'WISE':
-        # This is from the [baseline repository](https://github.com/zjunlp/CaKE/tree/df528e13fffbd2117e6041c129285e1e146933d2)
-        # The original code use ZsRE for loc_prompts and MQuAKE for edit.
-        # However, when ran, the loss does not decrease.
-        loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
-        loc_data = loc_data[:7000]
-        loc_index = 0
 
 # %%
 
-def do_glue_eval(save_dir, edit_num, case_ids):
+def do_glue_eval(save_dir, edit_num, case_ids, number_of_tests):
     glue_results = {
         "edit_num": edit_num,
         "case_ids": case_ids,
@@ -263,7 +296,7 @@ def do_glue_eval(save_dir, edit_num, case_ids):
     glue_eval = GLUEEval(
         model,
         tokenizer,
-        number_of_tests=100,
+        number_of_tests=number_of_tests,
     )
     glue_results = glue_eval.evaluate(glue_results,
         out_file,
@@ -278,70 +311,121 @@ def do_glue_eval(save_dir, edit_num, case_ids):
     with open(output_filename, 'w') as f:
         json.dump(glue_results, f, indent=4)
 
-if __name__ == "__main__":
-    all_metrics = []
-    indices = list(range(0, len(data), args.batch_size))
-
-    if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "WISE", "IFMET", "CaKE"]:
+def do_edit(
+    model,
+    tokenizer,
+    data,
+    editing_method,
+    batch_size,
+    glue_eval_steps,
+    glue_eval_save_dir,
+    **kwargs,
+):
+    if editing_method == "WISE":
+        # This is from the [baseline repository](https://github.com/zjunlp/CaKE/tree/df528e13fffbd2117e6041c129285e1e146933d2)
+        # The original code use ZsRE for loc_prompts and MQuAKE for edit.
+        # However, when ran, the loss does not decrease.
+        loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
+        loc_data = loc_data[:7000]
+        loc_index = 0
+    
+    indices = list(range(0, len(data), batch_size))
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "WISE", "IFMET", "CaKE"]:
         for start_idx in tqdm(indices, desc="Editing the model"):
-            end = min(start_idx + args.batch_size, len(data))
+            end = min(start_idx + batch_size, len(data))
             items = data[start_idx:end]
             
-            if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
+            if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
                 model = edit(
                     model=model,
                     tokenizer=tokenizer,
                     items=items,
-                    hparams=hparams,
-                    apply_algo=apply_algo,
+                    hparams=kwargs["hparams"],
+                    apply_algo=kwargs["apply_algo"],
                 )
-            elif args.editing_method == "WISE":
+            elif editing_method == "WISE":
                 loc_index = edit_wise(
                     model=model,
                     tokenizer=tokenizer,
                     items=items,
-                    hparams=hparams,
+                    hparams=kwargs["hparams"],
                     loc_data=loc_data,
                     loc_index=loc_index,
-                    apply_algo=apply_algo,
+                    apply_algo=kwargs["apply_algo"],
                 )
-            elif args.editing_method == "IFMET":
+            elif editing_method == "IFMET":
                 model = edit_ifmet(
                     model=model,
                     tokenizer=tokenizer,
                     items=items,
-                    hparams_shallow=hparams,
-                    hparams_deeper=hparams_deeper,
-                    apply_algo=apply_algo,
+                    hparams_shallow=kwargs["hparams_shallow"],
+                    hparams_deeper=kwargs["hparams_deeper"],
+                    apply_algo=kwargs["apply_algo"],
                 )
-            elif args.editing_method == "CaKE":
+            elif editing_method == "CaKE":
                 model = edit_cake(
                     model=model,
                     tokenizer=tokenizer,
                     items=items,
                 )
             else:
-                raise NotImplementedError(f"Editing method {args.editing_method} not implemented in the main loop.")
+                raise NotImplementedError(f"Editing method {editing_method} not implemented in the main loop.")
             
-            if (start_idx / args.batch_size) % args.downstream_eval_steps == 0:
-                do_glue_eval(save_dir=SAVE_DIR, edit_num=end, case_ids=[item['case_id'] for item in items])
-    elif args.editing_method in ["no_edit"]:
-        do_glue_eval(save_dir=SAVE_DIR, edit_num=0, case_ids=[])
-    elif args.editing_method in ["MeLLo"]: # In-Context Learning Editing Method
+            if (start_idx % batch_size) % glue_eval_steps == 0:
+                do_glue_eval(save_dir=glue_eval_save_dir, edit_num=end, case_ids=[item['case_id'] for item in items], number_of_tests=args.glue_eval_size)
+    elif editing_method in ["no_edit"]:
+        do_glue_eval(save_dir=glue_eval_save_dir, edit_num=0, case_ids=[], number_of_tests=args.glue_eval_size)
+    elif editing_method in ["MeLLo"]: # In-Context Learning Editing Method
         pass
     else:
-        raise NotImplementedError(f"Editing method {args.editing_method} not implemented for editing loop.")
-    
-    if args.save_edited_model:
+        raise NotImplementedError(f"Editing method {editing_method} not implemented for editing loop.")
+
+if __name__ == "__main__":    
+    if not args.load_edited_model:
+        kwargs = {}
+        if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
+            kwargs["hparams"] = hparams
+            kwargs["apply_algo"] = apply_algo
+        elif args.editing_method == "WISE":
+            kwargs["hparams"] = hparams
+            kwargs["apply_algo"] = apply_algo
+        elif args.editing_method == "IFMET":
+            kwargs["hparams_shallow"] = hparams
+            kwargs["hparams_deeper"] = hparams_deeper
+            kwargs["apply_algo"] = apply_algo
+        do_edit(
+            model=model,
+            tokenizer=tokenizer,
+            data=data,
+            editing_method=args.editing_method,
+            batch_size=args.batch_size,
+            glue_eval_steps=args.glue_eval_steps,
+            glue_eval_save_dir=SAVE_METRICS_DIR,
+            **kwargs,
+        )
+        
+# %%
+        
+if __name__ == "__main__":
+    if args.save_edited_model and not args.load_edited_model:
+        kwargs = {}
+        if args.editing_method == "WISE":
+            kwargs["hparams"] = hparams
+        
         checkpoint_path = save_checkpoint(
             model=model,
             tokenizer=tokenizer,
-            checkpoint_root=CHECKPOINTS_DIR,
+            editing_method=args.editing_method,
+            checkpoint_root=SAVE_CHECKPOINTS_DIR,
             edit_num=len(data),
-            case_id=items[-1]["case_id"],
+            case_id=data[-1]["case_id"],
+            **kwargs,
         )
         print(f"Saved checkpoint to {checkpoint_path}")
-        
+
+# %%
+
+if __name__ == "__main__":
     languages = None
     if args.data_name == "MQuAKE-CF-3k-v2-clke":
         languages = ["en", "de", "fr", "ja", "zh"]
@@ -400,10 +484,12 @@ if __name__ == "__main__":
             res = calculate_averages(all_metrics[language])
             print(f"Results {language}:\n{json.dumps(res, indent=4)}")
         
-            folder_path = f'{SAVE_DIR}/{language}'
+            folder_path = f'{SAVE_METRICS_DIR}/{language}'
             os.makedirs(folder_path, exist_ok=True)
-            metrics_filepath = f'{folder_path}/metrics.json'
-            res_filepath = f'{folder_path}/res.json'
+            metrics_str = "metrics.json" if not args.load_edited_model else "metrics_loaded.json"
+            metrics_filepath = f'{folder_path}/{metrics_str}'
+            res_str = "res.json" if not args.load_edited_model else "res_loaded.json"
+            res_filepath = f'{folder_path}/{res_str}'
             print(f"Saving metrics to {metrics_filepath}")
             print(f"Saving results to {res_filepath}")
             json.dump(all_metrics[language], open(metrics_filepath, 'w'), indent=4, ensure_ascii=False)
