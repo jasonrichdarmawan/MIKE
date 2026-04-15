@@ -417,7 +417,7 @@ def check_answer_batch(
                 for question in questions
             ]
 
-        for start in range(0, len(formatted_prompts), batch_size):
+        for start in tqdm(range(0, len(formatted_prompts), batch_size), desc="Checking answers in batches"):
             end = min(start + batch_size, len(formatted_prompts))
             batch_prompts = formatted_prompts[start:end]
             batch_answers = answers[start:end]
@@ -539,7 +539,7 @@ def _evaluate_mello_with_kv_cache(
 ):
     stop_strings = ["Retrieved fact:"]
     
-    all_metrics, eval_requests = _prepare_mquake_clke(items, hparams=None, languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=languages)
     
     request_outputs = []
 
@@ -768,7 +768,7 @@ def _evaluate_mello_without_kv_cache(
 ):
     stop_strings = ["Retrieved fact:"]
     
-    all_metrics, eval_requests = _prepare_mquake_clke(items, hparams=None, languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=languages)
     
     request_outputs = []
     initial_prompts = []
@@ -1101,7 +1101,7 @@ def edit(model, tokenizer, items, hparams, apply_algo):
     
     return model
 
-def _prepare_mquake_clke(items, hparams, languages):
+def _prepare_mquake_clke(items, alg_name, languages):
     """
     dataset: MQuAKE-CF-3k-v2-clke
     """
@@ -1118,14 +1118,13 @@ def _prepare_mquake_clke(items, hparams, languages):
     
     for item_idx, item in enumerate(tqdm(items, desc="Preparing eval requests")):
         requested_rewrite = []
-        if hparams is not None:
-            for i in item['requested_rewrite']:
-                z = (
-                    i
-                    if hparams.alg_name == "CaKE"
-                    else {k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"]}
-                )
-                requested_rewrite.append(z)
+        for i in item['requested_rewrite']:
+            z = (
+                i
+                if alg_name == "CaKE"
+                else {k: v for k, v in i.items() if k not in ["rephrase_prompt", "learning_prompt"]}
+            )
+            requested_rewrite.append(z)
 
         for language in languages:
             language_str = "" if language == "en" else f"_{language}"
@@ -1194,7 +1193,7 @@ def _prepare_mquake_clke(items, hparams, languages):
                 
     return all_metrics, eval_requests
 
-def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generation_batch_size=8, languages=["en", "de", "fr", "ja", "zh"]):
+def evaluate(model, tokenizer, items, alg_name, eval_with_chat_template, generation_batch_size=8, languages=["en", "de", "fr", "ja", "zh"]):
     """
     Caveat:
     - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
@@ -1205,7 +1204,13 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generati
     - edit_item['cloze_question']: "The head of state of the country where Fernando Santos holds citizenship is"
     - edit_item['questions']: ["Who is the head of state of the country where Fernando Santos hold a citizenship?"]
     """
-    all_metrics, eval_requests = _prepare_mquake_clke(items=items, hparams=hparams, languages=languages)
+    
+    if alg_name not in [
+        "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE",
+        "IFMET", "CaKE", "AlphaEdit_Circuit",
+    ]:
+        raise ValueError(f"Unknown alg_name: {alg_name}")
+    all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=languages)
 
     grouped_indices = {}
     for req_idx, req in enumerate(eval_requests):
@@ -1213,6 +1218,12 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generati
 
     eval_outputs = [None] * len(eval_requests)
     for max_new_tokens, req_indices in tqdm(grouped_indices.items(), desc="Evaluating in batches"):
+        """
+        Caveat: `WISEAdapter` class in the EasyEdit [repository](https://github.com/zjunlp/EasyEdit/blob/3488a66ee988d83ee7891a8abbbe6bcb24a77daf/easyeditor/models/wise/WISE.py#L530-L549) relies on distance-based routing in forward,
+        so evaluation must use per-sample generation (batch_size=1).
+        """
+        effective_batch_size = 1 if alg_name == "WISE" else generation_batch_size
+
         batch_questions = [eval_requests[idx]["question"] for idx in req_indices]
         batch_answers = [eval_requests[idx]["answers"] for idx in req_indices]
         batch_results = check_answer_batch(
@@ -1222,7 +1233,7 @@ def evaluate(model, tokenizer, items, hparams, eval_with_chat_template, generati
             answers=batch_answers,
             eval_with_chat_template=eval_with_chat_template,
             max_new_tokens=max_new_tokens,
-            batch_size=generation_batch_size,
+            batch_size=effective_batch_size,
         )
         for local_idx, req_idx in enumerate(req_indices):
             eval_outputs[req_idx] = batch_results[local_idx]

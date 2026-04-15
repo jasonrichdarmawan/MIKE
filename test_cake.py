@@ -137,8 +137,8 @@ def calculate_averages(data):
 #         "--glue_eval_steps", "2",
 #         "--glue_eval_size", "2",
 #         # "--save_edited_model",
-#         # "--load_edited_model",
-#         # "--load_path", "./checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential_s4_b2/WISE/edit_num_0004_case_0004/wise.pt",
+#         "--load_edited_model",
+#         "--load_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential_s1000_b32/WISE/edit_num_1000_case_1001/wise.pt",
 #     ]
 
 if __name__ == "__main__":
@@ -218,7 +218,7 @@ if __name__ == "__main__":
     sh.setFormatter(fmt)
     
     fh_str = "output.log" if not args.load_edited_model else f"output_loaded.log"
-    fh_path = f"{SAVE_METRICS_DIR}/output.log"
+    fh_path = f"{SAVE_METRICS_DIR}/{fh_str}"
     fh = FileHandler(fh_path, mode='w')
     fh.setFormatter(fmt)
     
@@ -242,7 +242,7 @@ if __name__ == "__main__":
             kwargs["hparams"] = hparams
             kwargs["load_path"] = args.load_path
         model, tokenizer = load_checkpoint(model_name=model_name, device_map="cuda", dtype=args.dtype, editing_method=args.editing_method, **kwargs)
-        print(f"Loaded edited model from checkpoint {args.load_path} for {args.editing_method}.")
+        print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_path}.")
     else:
         model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
         tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -293,6 +293,7 @@ def do_glue_eval(save_dir, edit_num, case_ids, number_of_tests):
         if case_ids
         else f'{glue_eval_path}/base.json'
     )
+    tokenizer.padding_side = "left"
     glue_eval = GLUEEval(
         model,
         tokenizer,
@@ -310,6 +311,8 @@ def do_glue_eval(save_dir, edit_num, case_ids, number_of_tests):
     output_filename = out_file.replace('.json', '_glue.json')
     with open(output_filename, 'w') as f:
         json.dump(glue_results, f, indent=4)
+    
+    return output_filename
 
 def do_edit(
     model,
@@ -317,8 +320,6 @@ def do_edit(
     data,
     editing_method,
     batch_size,
-    glue_eval_steps,
-    glue_eval_save_dir,
     **kwargs,
 ):
     if editing_method == "WISE":
@@ -371,10 +372,17 @@ def do_edit(
             else:
                 raise NotImplementedError(f"Editing method {editing_method} not implemented in the main loop.")
             
-            if (start_idx / batch_size) % glue_eval_steps == 0:
-                do_glue_eval(save_dir=glue_eval_save_dir, edit_num=end, case_ids=[item['case_id'] for item in items], number_of_tests=args.glue_eval_size)
+            if (start_idx / batch_size) % kwargs["glue_eval_steps"] == 0:
+                fh = do_glue_eval(
+                    save_dir=kwargs["glue_eval_save_dir"], 
+                    edit_num=end, 
+                    case_ids=[item['case_id'] for item in items], 
+                    number_of_tests=kwargs["glue_eval_size"]
+                )
+                print(f"Saved GLUE evaluation results to {fh} after editing up to case_id {items[-1]['case_id']}.")
     elif editing_method in ["no_edit"]:
-        do_glue_eval(save_dir=glue_eval_save_dir, edit_num=0, case_ids=[], number_of_tests=args.glue_eval_size)
+        fh = do_glue_eval(save_dir=kwargs["glue_eval_save_dir"], edit_num=0, case_ids=[], number_of_tests=kwargs["glue_eval_size"])
+        print(f"Saved GLUE evaluation results to {fh}.")
     elif editing_method in ["MeLLo"]: # In-Context Learning Editing Method
         pass
     else:
@@ -383,6 +391,9 @@ def do_edit(
 if __name__ == "__main__":    
     if not args.load_edited_model:
         kwargs = {}
+        kwargs["glue_eval_save_dir"] = SAVE_METRICS_DIR
+        kwargs["glue_eval_steps"] = args.glue_eval_steps
+        kwargs["glue_eval_size"] = args.glue_eval_size
         if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
             kwargs["hparams"] = hparams
             kwargs["apply_algo"] = apply_algo
@@ -399,8 +410,6 @@ if __name__ == "__main__":
             data=data,
             editing_method=args.editing_method,
             batch_size=args.batch_size,
-            glue_eval_steps=args.glue_eval_steps,
-            glue_eval_save_dir=SAVE_METRICS_DIR,
             **kwargs,
         )
         
@@ -444,7 +453,7 @@ if __name__ == "__main__":
                 model=model,
                 tokenizer=tokenizer, 
                 items=items, 
-                hparams=hparams, 
+                alg_name=args.editing_method, 
                 eval_with_chat_template=args.eval_with_chat_template,
                 generation_batch_size=args.generation_batch_size,
                 languages=languages,
