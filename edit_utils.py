@@ -1359,7 +1359,6 @@ def edit_wise(
             })
             loc_index += 1
         requests.extend(edit_item["requested_rewrite"])
-    hparams.batch_size = len(requests)
     tokenizer.padding_side = "left"
     for request in requests:
         _, _ = apply_algo(

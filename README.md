@@ -337,6 +337,10 @@ python test_cake.py \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
+LoRA
+```bash
+```
+
 R-ROME
 ```bash
 python test_cake.py \
@@ -393,8 +397,8 @@ python test_cake.py \
 
 AlphaEdit_Circuit
 ```bash
-MODEL_TYPE=qwen3-4b-instruct
 MODEL_TYPE=tiny-aya-global
+MODEL_TYPE=qwen3-4b-instruct
 python test_cake.py \
   --editing_method AlphaEdit_Circuit \
   --model_type $MODEL_TYPE \
@@ -403,7 +407,7 @@ python test_cake.py \
   --batch_size 32 \
   --generation_batch_size 64 \
   --sample_size 1000 \
-  --main_eval_steps 0 \
+  --main_eval_steps 1 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
