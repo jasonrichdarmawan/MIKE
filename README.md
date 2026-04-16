@@ -301,9 +301,11 @@ MEMIT needs pre-computed covariance
 Note: [legacy-datasets/wikipedia](https://huggingface.co/datasets/legacy-datasets/wikipedia) have samples with very long text. Meanwhile, our GPUs are 2x 3090. Consequently, computing the activations even for 1 sample but with 11k tokens will resulted in OutOfMemory error. So, we use `--batch_tokens 4096` to truncate the 11k tokens to maximum of 4096 tokens.
 
 ```bash
+MODEL_NAME=Qwen/Qwen3-4B-Instruct-2507
+MODEL_NAME=CohereLabs/tiny-aya-global
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   python -m EasyEdit.easyeditor.models.rome.layer_stats \
-  --model_name Qwen/Qwen3-4B-Instruct-2507 \
+  --model_name $MODEL_NAME \
   --apply_chat_template \
   --dataset wikipedia \
   --layers 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35 \
@@ -311,22 +313,40 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --to_collect mom2 \
   --sample_size 100000 \
   --batch_size 1 \
+  --batch_tokens 4096 \
   --precision float32 \
   --stats_dir data/stats
 ```
 
 ### Others
 
+no_edit
+```bash
+MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+MODEL_TYPE=CohereLabs/tiny-aya-global
+python test_cake.py \
+  --editing_method no_edit \
+  --model_type $MODEL_TYPE \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --sample_size 1000 \
+  --generation_batch_size 128 \
+  --glue_eval_steps 0 \
+  --main_eval_steps 0 \
+  --data_name MQuAKE-CF-3k-v2-clke
+```
+
 R-ROME
 ```bash
 python test_cake.py \
   --editing_method R-ROME \
-  --sequential_editing \
   --model_type qwen3-4b-instruct \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
   --sample_size 1000 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
@@ -335,12 +355,25 @@ MeLLo
 ```bash
 python test_cake.py \
   --editing_method MeLLo \
-  --sequential_editing \
+  --model_type Qwen/Qwen3-4B-Instruct-2507 \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 2 \
+  --sample_size 4 \
+  --main_eval_steps 0 \
+  --data_name MQuAKE-CF-3k-v2-clke
+```
+
+MeLLo_KV
+```bash
+python test_cake.py \
+  --editing_method MeLLo_KV \
   --model_type Qwen/Qwen3-4B-Instruct-2507 \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
   --sample_size 1000 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
@@ -348,26 +381,29 @@ WISE
 ```bash
 python test_cake.py \
   --editing_method WISE \
-  --sequential_editing \
   --model_type qwen3-4b-instruct \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
   --sample_size 1000 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
 
 AlphaEdit_Circuit
 ```bash
+MODEL_TYPE=qwen3-4b-instruct
+MODEL_TYPE=tiny-aya-global
 python test_cake.py \
   --editing_method AlphaEdit_Circuit \
-  --sequential_editing \
-  --model_type qwen3-4b-instruct \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
+  --generation_batch_size 64 \
   --sample_size 1000 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
@@ -376,12 +412,12 @@ CaKE
 ```bash
 python test_cake.py \
   --editing_method CaKE \
-  --sequential_editing \
   --model_type Qwen/Qwen3-4B-Instruct-2507 \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
   --sample_size 1000 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```

@@ -535,11 +535,11 @@ def _evaluate_mello_with_kv_cache(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
-    languages=["en", "de", "fr", "ja", "zh"],
+    **kwargs
 ):
     stop_strings = ["Retrieved fact:"]
     
-    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=kwargs["languages"])
     
     request_outputs = []
 
@@ -763,12 +763,12 @@ def _evaluate_mello_without_kv_cache(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
-    languages=["en", "de", "fr", "ja", "zh"],
     continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
+    **kwargs
 ):
     stop_strings = ["Retrieved fact:"]
     
-    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=kwargs["languages"])
     
     request_outputs = []
     initial_prompts = []
@@ -904,7 +904,7 @@ def _evaluate_mello_without_kv_cache(
 
     for req, output in zip(eval_requests, request_outputs):
         question, generated, result = output
-        item_post = all_metrics[req["languages"]][req['item_idx']]['post']
+        item_post = all_metrics[req["language"]][req['item_idx']]['post']
         prediction = {
             "prompt": question,
             "generated": generated,
@@ -932,9 +932,8 @@ def evaluate_mello(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
-    languages=["en", "de", "fr", "ja", "zh"],
     use_kv_cache=False,
-    continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
+    **kwargs,
 ):
     """
     continuation is only applicable when use_kv_cache=False
@@ -951,7 +950,7 @@ def evaluate_mello(
             new_facts=new_facts,
             eval_with_chat_template=eval_with_chat_template,
             generation_batch_size=generation_batch_size,
-            languages=languages,
+            **kwargs
         )
     
     return _evaluate_mello_without_kv_cache(
@@ -965,8 +964,8 @@ def evaluate_mello(
         new_facts=new_facts,
         eval_with_chat_template=eval_with_chat_template,
         generation_batch_size=generation_batch_size,
-        languages=languages,
-        continuation=continuation,
+        continuation=kwargs["continuation"],
+        **kwargs
     )
 
 def _edit_cake_single(model, tokenizer, item):
@@ -1090,7 +1089,7 @@ def edit(model, tokenizer, items, hparams, apply_algo):
                 return_orig_weights=False,
             )
     else:
-        model = apply_algo(
+        model, _ = apply_algo(
             model,
             tokenizer,
             requests,
@@ -1119,6 +1118,8 @@ def _prepare_mquake_clke(items, alg_name, languages):
     for item_idx, item in enumerate(tqdm(items, desc="Preparing eval requests")):
         requested_rewrite = []
         for i in item['requested_rewrite']:
+            if alg_name == "no_edit":
+                break
             z = (
                 i
                 if alg_name == "CaKE"
@@ -1193,7 +1194,15 @@ def _prepare_mquake_clke(items, alg_name, languages):
                 
     return all_metrics, eval_requests
 
-def evaluate(model, tokenizer, items, alg_name, eval_with_chat_template, generation_batch_size=8, languages=["en", "de", "fr", "ja", "zh"]):
+def evaluate(
+    model, 
+    tokenizer, 
+    items, 
+    alg_name, 
+    eval_with_chat_template, 
+    generation_batch_size=8, 
+    **kwargs,
+):
     """
     Caveat:
     - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
@@ -1210,7 +1219,7 @@ def evaluate(model, tokenizer, items, alg_name, eval_with_chat_template, generat
         "IFMET", "CaKE", "AlphaEdit_Circuit",
     ]:
         raise ValueError(f"Unknown alg_name: {alg_name}")
-    all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=kwargs["languages"])
 
     grouped_indices = {}
     for req_idx, req in enumerate(eval_requests):
