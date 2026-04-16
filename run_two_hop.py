@@ -18,7 +18,7 @@ from EasyEdit.easyeditor import (
 from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
 from EasyEdit.easyeditor.util import nethook
 from edit_utils import edit, edit_cake, evaluate
-from test_cake import calculate_averages
+from test_cake import calculate_averages, save_checkpoint
 from analysis.create_benchmark_cf import create_subset_cf
 from analysis.two_hop_e2_json_create import convert_row_to_case
 
@@ -400,6 +400,7 @@ def main():
     skipped = 0
     edit_count = 0
     prop_eval_count = 0
+    checkpoint_saved = False
 
     # Main loop
     for row_index, item in enumerate(tqdm(cases, desc="Running rows in order")):
@@ -417,6 +418,12 @@ def main():
             metrics["row_index"] = row_index
 
         elif row_role == "propagated_eval":
+            # Save model checkpoint after last edit row
+            if not checkpoint_saved:
+                checkpoint_dir = os.path.join(args.metrics_save_dir, "checkpoints")
+                save_checkpoint(model, tokenizer, checkpoint_dir, edit_count, item["case_id"])
+                checkpoint_saved = True
+            
             metrics = evaluate(model, tokenizer, [item], hparams, eval_with_chat_template=False, generation_batch_size=1)[0]
             metrics["row_role"] = "propagated_eval"
             metrics["row_index"] = row_index
