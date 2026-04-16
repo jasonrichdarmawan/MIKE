@@ -964,7 +964,6 @@ def evaluate_mello(
         new_facts=new_facts,
         eval_with_chat_template=eval_with_chat_template,
         generation_batch_size=generation_batch_size,
-        continuation=kwargs["continuation"],
         **kwargs
     )
 
