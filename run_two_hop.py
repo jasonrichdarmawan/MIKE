@@ -23,11 +23,6 @@ from analysis.create_benchmark_cf import create_subset_cf
 from analysis.two_hop_e2_json_create import convert_row_to_case
 
 
-def _load_cases(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
 def _prepare_cases_for_editing(model_name, swapping_strategy, input_csv_path=None, output_json_path=None):
     """
     Build the benchmark subset for a model, reorder edit and eval rows, convert it to JSON cases then return the in-memory cases.
@@ -55,22 +50,18 @@ def _prepare_cases_for_editing(model_name, swapping_strategy, input_csv_path=Non
 
     df = pd.read_csv(input_csv_path)
 
+    # based on analysis:create_benchmark_cf.py 120:125
     # remove annoying column
     if "Unnamed: 0" in df.columns:
         df = df.drop(columns=["Unnamed: 0"])
 
-    # Keep edit rows before propagated_eval rows while preserving the original
-    df = df.sort_values(
-        "row_role",
-        key=lambda s: s.map({"edit": 0, "propagated_eval": 1}),
-        kind="stable",
-    )
-
     df = df.set_index("id")
+    df["propagated_from"] = df.apply(lambda row: ast.literal_eval(row["propagated_from"]) if row["row_role"] == "propagated_eval" else row["propagated_from"], axis=1)
     df["swapped_with"] = df["swapped_with"].astype("Int64")
 
     stats, subset_df = create_subset_cf(df, swapping_strategy)
 
+    # save the benchmark subset CSV for reference
     benchmark_csv_path = Path(str(input_csv_path).replace("two_hop_cf", "two_hop_cf_benchmark"))
     benchmark_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -357,10 +348,12 @@ def main():
 
     model_name = hparams.model_name if hparams is not None else args.model_type
 
+    # load or prepare cases from json/csv
     if args.skip_prepare:
         if not args.dataset_path:
             raise ValueError("--dataset_path is required when --skip_prepare is set")
-        cases = _load_cases(args.dataset_path)
+        with open(args.dataset_path, "r", encoding="utf-8") as f:
+            cases = json.load(f)
     else:
         json_path = args.prepared_json_path or args.dataset_path
         cases, _, prepared_json_path = _prepare_cases_for_editing(
@@ -380,6 +373,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
     tokenizer.pad_token = tokenizer.eos_token
 
+    # limit number of rows for testing
     if args.max_rows is not None:
         cases = cases[: args.max_rows]
 
@@ -400,10 +394,10 @@ def main():
     skipped = 0
     edit_count = 0
     prop_eval_count = 0
-    checkpoint_saved = False
 
-    # Main loop
-    for row_index, item in enumerate(tqdm(cases, desc="Running rows in order")):
+    # Sequential edits -> edits done before eval
+    # Edit loop
+    for row_index, item in enumerate(tqdm(cases, desc="Editing the model")):
         row_role = item.get("row_role")
         if row_role == "edit":
             edit_count += 1
@@ -413,20 +407,32 @@ def main():
                 model = edit_cake(model, tokenizer, [item])
             else:
                 raise ValueError(f"Unsupported editing method in run loop: {args.editing_method}")
-            metrics = evaluate(model, tokenizer, [item], hparams, eval_with_chat_template=False, generation_batch_size=1)[0]
-            metrics["row_role"] = "edit"
-            metrics["row_index"] = row_index
 
+    # save model
+    checkpoint_dir = os.path.join(args.metrics_save_dir, "checkpoints")
+    save_checkpoint(model, tokenizer, checkpoint_dir, edit_count, item["case_id"])
+    
+    # Evaluation loop
+    for row_index, item in enumerate(tqdm(cases, desc="Evaluating the model")):
+        eval_result = evaluate(
+            model,
+            tokenizer,
+            [item],
+            hparams,
+            # since this script is targeting a instruct model we will use chat template
+            eval_with_chat_template=True,
+            generation_batch_size=1,
+            languages=["en"],
+        )
+        metrics = eval_result["en"][0]
+        metrics["row_index"] = row_index
+
+        # add row role for stats
+        row_role = item.get("row_role")
+        if row_role == "edit":
+            metrics["row_role"] = "edit"
         elif row_role == "propagated_eval":
-            # Save model checkpoint after last edit row
-            if not checkpoint_saved:
-                checkpoint_dir = os.path.join(args.metrics_save_dir, "checkpoints")
-                save_checkpoint(model, tokenizer, checkpoint_dir, edit_count, item["case_id"])
-                checkpoint_saved = True
-            
-            metrics = evaluate(model, tokenizer, [item], hparams, eval_with_chat_template=False, generation_batch_size=1)[0]
             metrics["row_role"] = "propagated_eval"
-            metrics["row_index"] = row_index
             prop_eval_count += 1
         else:
             skipped += 1
@@ -438,8 +444,8 @@ def main():
             if len(metrics["post"]["accuracy"]) > 1:
                 composition_correct = metrics["post"]["accuracy"][0] or metrics["post"]["accuracy"][1]
             elif len(metrics["post"]["accuracy"]) == 1:
-                composition_correct = metrics["post"]["accuracy"][0] 
-        
+                composition_correct = bool(metrics["post"]["accuracy"][0])
+
         metrics["composition_correct"] = composition_correct
         append_two_hop_row(two_hop_rows, item, composition_correct)
 
@@ -452,14 +458,20 @@ def main():
                         append_projection_rows(attention_proj_rows, proj_result, item)
                     else:
                         append_projection_rows(mlp_proj_rows, proj_result, item)
-                except Exception:
+                except Exception as e:
+                    print(f"Error occurred while running sublayer projection for item: {item}")
+                    print(f"Error details: {e}")
+                    exit(0)
                     pass
 
             # entity description probing for e2_new decodability
             try:
                 entity_result = run_entity_description_e2_new(model, tokenizer, item, do_sample=False)
                 append_entity_description_rows(entity_description_rows, entity_result, item)
-            except Exception:
+            except Exception as e:
+                print(f"Error occurred while running entity description probing for item: {item}")
+                print(f"Error details: {e}")
+                exit(0)
                 pass
 
             # knockout bridge representation
@@ -469,7 +481,10 @@ def main():
                 knockout_result = run_knockout_bridge(model, tokenizer, item, knockout_source, knockout_target, 
                                                         k=3, prompt="composition", default_decoding=False)
                 append_knockout_rows(attention_knockout_rows, knockout_result, item)
-            except Exception:
+            except Exception as e:
+                print(f"Error occurred while running knockout bridge representation for item: {item}")
+                print(f"Error details: {e}")
+                exit(0)
                 pass
         
         all_metrics.append(metrics)
@@ -501,9 +516,7 @@ def main():
         f"{sublayer_projection_dir}/mlp_projections.csv", index=False
     )
 
-    # TODO: Should only be done on edit rows
-    edit_metrics = [m for m in all_metrics if m.get("row_role") == "edit"]
-    overall_res = calculate_averages(edit_metrics)
+    overall_res = calculate_averages(all_metrics)
 
     all_metrics_payload = {
         "in_order": all_metrics,
