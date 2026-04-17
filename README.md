@@ -337,8 +337,18 @@ python test_cake.py \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
-LoRA
+ROME
 ```bash
+python test_cake.py \
+  --editing_method ROME \
+  --model_type tiny-aya-global \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --sample_size 1000 \
+  --main_eval_steps 0 \
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
 ```
 
 R-ROME
