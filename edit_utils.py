@@ -199,7 +199,7 @@ Retrieved fact: The spouse of Joe Bill is Evan Austin.
 Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jill Biden
 Final answer: Jill Biden"""},
     {"role": "user", "content": "Question: On which continent is the country of citizenship of the founder of the manufacturer of iPhone 5 situated?"},
-    {"role": "user", "content":
+    {"role": "assistant", "content":
 """Subquestion: Which company is iPhone 5 produced by?
 Generated answer: iPhone 5 is produced by Apple.
 Retrieved fact: The company that produced iPhone 5 is Iveco.
@@ -583,6 +583,9 @@ def _evaluate_mello_with_kv_cache(
             prompts=initial_prompts, 
             eval_with_chat_template=eval_with_chat_template
         )
+        
+        if chunk_start == 0:
+            print(f"Formatted prompt for the batch idx=0:\n{formatted_prompts[0]}")
         
         tokenizer.padding_side = "left"
         inputs = tokenizer(

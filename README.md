@@ -383,9 +383,11 @@ python test_cake.py \
 
 WISE
 ```bash
+MODEL_TYPE=qwen3-4b-instruct
+MODEL_TYPE=tiny-aya-global
 python test_cake.py \
   --editing_method WISE \
-  --model_type qwen3-4b-instruct \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
