@@ -42,7 +42,7 @@ def load_checkpoint(model_name, device_map, dtype, editing_method, **kwargs):
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, dtype=getattr(torch, dtype))
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     
-    if editing_method == ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
         pass
     elif editing_method == "WISE":
         editor = WISE(model=model, config=kwargs["hparams"], device=model.device)
@@ -123,14 +123,14 @@ def calculate_averages(data):
 # if __name__ == "__main__":
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = ["", 
-#         "--editing_method", "AlphaEdit_Circuit",
-#         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+#         "--editing_method", "MeLLo",
+#         "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "qwen3-4b-instruct",
 #         # "--model_type", "llama3-8b",
-#         "--model_type", "tiny-aya-global",
+#         # "--model_type", "tiny-aya-global",
 #         "--dtype", "bfloat16",
-#         "--eval_with_chat_template",
+#         # "--eval_with_chat_template",
 #         "--batch_size", "2",
 #         "--generation_batch_size", "16",
 #         "--sample_size", "4",
@@ -553,9 +553,15 @@ if __name__ == "__main__":
 # %%
     
 if __name__ == "__main__":
-    all_metrics = {}
     
     if args.main_eval_steps == 0:
+        all_metrics = {}
+        
+        kwargs = {}
+        if args.data_name == "MQuAKE-CF-3k-v2-clke":
+            kwargs["languages"] = ["en", "de", "fr", "ja", "zh"]
+            all_metrics = {language: [] for language in kwargs["languages"]}
+        
         indices = list(range(0, len(data), args.batch_size))
         for start_idx in tqdm(indices, desc="Evaluating the edited model"):
             end = min(start_idx + args.batch_size, len(data))
@@ -566,7 +572,10 @@ if __name__ == "__main__":
                 model=model,
                 tokenizer=tokenizer,
                 items=items,
+                eval_with_chat_template=args.eval_with_chat_template,
+                generation_batch_size=args.generation_batch_size,
                 editing_method=args.editing_method,
+                load_edited_model=args.load_edited_model,
                 **kwargs
             )
             

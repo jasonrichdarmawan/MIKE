@@ -404,7 +404,8 @@ python test_cake.py \
   --sample_size 1000 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
+  --load_edited_model \
+  --load_path checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/WISE/edit_num_1000_case_1001
 ```
 
 AlphaEdit_Circuit

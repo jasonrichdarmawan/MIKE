@@ -285,7 +285,7 @@ def call_model_batch(
             return_tensors="pt",
             padding=True,
             truncation=True,
-            add_special_tokens=not eval_with_chat_template,
+            add_special_tokens=eval_with_chat_template == False,
         ).to(model.device)
 
         with torch.no_grad():
@@ -361,7 +361,7 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_pro
         truncation=True,
         max_length=256,
         return_tensors="np",
-        add_special_tokens=not apply_chat_template,
+        add_special_tokens=apply_chat_template == False,
     )
     prompt_inputs = tokenizer(
         prompt_sequences,
@@ -369,7 +369,7 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_pro
         truncation=True,
         max_length=256,
         return_tensors=None,
-        add_special_tokens=not apply_chat_template,
+        add_special_tokens=apply_chat_template == False,
     )
 
     labels = model_inputs["input_ids"].copy()
@@ -426,7 +426,7 @@ def check_answer_batch(
                 batch_prompts,
                 return_tensors="pt",
                 padding=True,
-                add_special_tokens=not eval_with_chat_template,
+                add_special_tokens=eval_with_chat_template == False,
             ).to(model.device)
 
             input_pad_length = tokens["input_ids"].shape[1]
@@ -475,7 +475,7 @@ def _format_mello_prompts(tokenizer, prompts, eval_with_chat_template):
             )
             for prompt in prompts
         ]
-    elif eval_with_chat_template is False:
+    elif eval_with_chat_template == False:
         return prompts
     else:
         raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
@@ -593,7 +593,7 @@ def _evaluate_mello_with_kv_cache(
             return_tensors="pt",
             padding=True,
             truncation=True,
-            add_special_tokens=not eval_with_chat_template,
+            add_special_tokens=eval_with_chat_template == False,
         ).to(model.device)
 
         with torch.no_grad():
@@ -682,7 +682,7 @@ def _evaluate_mello_with_kv_cache(
                 fact_texts,
                 return_tensors="pt",
                 padding=True,
-                add_special_tokens=False,
+                add_special_tokens=eval_with_chat_template == False,
             ).to(model.device)
 
             fact_input_ids = fact_tokens["input_ids"]
@@ -783,7 +783,7 @@ def _evaluate_mello_without_kv_cache(
     for req in eval_requests:
         if eval_with_chat_template == "few_shot_in_multi_turn":
             init_prompt = f"Question: {req['question']}"
-        elif eval_with_chat_template == "few_shot_in_user_content":
+        elif eval_with_chat_template in [False, "few_shot_in_user_content"]:
             init_prompt = f"{task_prompt}\n\nQuestion: {req['question']}"
         else:
             raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
