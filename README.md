@@ -339,6 +339,8 @@ python test_cake.py \
 
 ROME
 ```bash
+MODEL_TYPE=qwen3-4b-instruct
+MODEL_TYPE=tiny-aya-global
 python test_cake.py \
   --editing_method ROME \
   --model_type tiny-aya-global \
@@ -353,12 +355,15 @@ python test_cake.py \
 
 R-ROME
 ```bash
+MODEL_TYPE=qwen3-4b-instruct
+MODEL_TYPE=tiny-aya-global
 python test_cake.py \
   --editing_method R-ROME \
-  --model_type qwen3-4b-instruct \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
+  --generation_batch_size 128 \
   --sample_size 1000 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
@@ -408,23 +413,6 @@ python test_cake.py \
   --load_path checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/WISE/edit_num_1000_case_1001
 ```
 
-AlphaEdit_Circuit
-```bash
-MODEL_TYPE=tiny-aya-global
-MODEL_TYPE=qwen3-4b-instruct
-python test_cake.py \
-  --editing_method AlphaEdit_Circuit \
-  --model_type $MODEL_TYPE \
-  --dtype bfloat16 \
-  --eval_with_chat_template \
-  --batch_size 32 \
-  --generation_batch_size 64 \
-  --sample_size 1000 \
-  --main_eval_steps 1 \
-  --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
-```
-
 CaKE
 ```bash
 python test_cake.py \
@@ -435,6 +423,39 @@ python test_cake.py \
   --batch_size 32 \
   --sample_size 1000 \
   --main_eval_steps 0 \
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
+```
+
+AlphaEdit
+```bash
+MODEL_TYPE=tiny-aya-global
+python test_cake.py \
+  --editing_method AlphaEdit_Circuit \
+  --model_type $MODEL_TYPE \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --generation_batch_size 128 \
+  --sample_size 1000 \
+  --main_eval_steps 1 \
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
+```
+
+AlphaEdit_Circuit
+```bash
+MODEL_TYPE=qwen3-4b-instruct
+MODEL_TYPE=tiny-aya-global
+python test_cake.py \
+  --editing_method AlphaEdit_Circuit \
+  --model_type $MODEL_TYPE \
+  --dtype bfloat16 \
+  --eval_with_chat_template \
+  --batch_size 32 \
+  --generation_batch_size 64 \
+  --sample_size 1000 \
+  --main_eval_steps 1 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
