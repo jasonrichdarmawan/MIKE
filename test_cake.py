@@ -126,14 +126,14 @@ def calculate_averages(data):
 # if __name__ == "__main__":
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = ["", 
-#         "--editing_method", "ROME",
+#         "--editing_method", "AlphaEdit_Circuit",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
-#         # "--model_type", "qwen3-4b-instruct",
 #         # "--model_type", "llama3-8b",
+#         # "--model_type", "qwen3-4b-instruct",
 #         "--model_type", "tiny-aya-global",
 #         "--dtype", "bfloat16",
-#         # "--eval_with_chat_template",
+#         "--eval_with_chat_template",
 #         "--batch_size", "2",
 #         "--generation_batch_size", "16",
 #         "--sample_size", "4",
@@ -141,9 +141,9 @@ def calculate_averages(data):
 #         "--glue_eval_steps", "0",
 #         "--glue_eval_size", "2",
 #         "--main_eval_steps", "0",
-#         "--save_edited_model",
-#         "--load_edited_model",
-#         "--load_path", "./checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s4_b2/ROME/edit_num_0004_case_0004",
+#         # "--save_edited_model",
+#         # "--load_edited_model",
+#         # "--load_path", "./checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s4_b2/ROME/edit_num_0004_case_0004",
 #     ]
 
 if __name__ == "__main__":
