@@ -35,18 +35,21 @@ from glue_eval.glue_eval import GLUEEval
 
 # %%
 
-def load_checkpoint(model_name, device_map, dtype, editing_method, **kwargs):
+def load_checkpoint(model_name, device_map, dtype, editing_method, load_path, **kwargs):
     """
     Caveat: Only guarantee loaded checkpoint works for evaluation, not continuing editing.
     """
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, dtype=getattr(torch, dtype))
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = None
+    tokenizer = None
     
     if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
-        pass
+        model = AutoModelForCausalLM.from_pretrained(load_path, device_map=device_map, dtype=getattr(torch, dtype))
+        tokenizer = AutoTokenizer.from_pretrained(load_path)
     elif editing_method == "WISE":
+        model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, dtype=getattr(torch, dtype))
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         editor = WISE(model=model, config=kwargs["hparams"], device=model.device)
-        editor.load(load_path=kwargs["load_path"])
+        editor.load(load_path=load_path)
     else:
         raise NotImplementedError(f"Editing method {editing_method} not implemented for loading checkpoint.")
         
@@ -123,12 +126,12 @@ def calculate_averages(data):
 # if __name__ == "__main__":
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = ["", 
-#         "--editing_method", "MeLLo",
-#         "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+#         "--editing_method", "ROME",
+#         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "qwen3-4b-instruct",
 #         # "--model_type", "llama3-8b",
-#         # "--model_type", "tiny-aya-global",
+#         "--model_type", "tiny-aya-global",
 #         "--dtype", "bfloat16",
 #         # "--eval_with_chat_template",
 #         "--batch_size", "2",
@@ -138,9 +141,9 @@ def calculate_averages(data):
 #         "--glue_eval_steps", "0",
 #         "--glue_eval_size", "2",
 #         "--main_eval_steps", "0",
-#         # "--save_edited_model",
-#         # "--load_edited_model",
-#         # "--load_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential_s1000_b32/WISE/edit_num_1000_case_1001/wise.pt",
+#         "--save_edited_model",
+#         "--load_edited_model",
+#         "--load_path", "./checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s4_b2/ROME/edit_num_0004_case_0004",
 #     ]
 
 if __name__ == "__main__":
@@ -241,8 +244,14 @@ if __name__ == "__main__":
         kwargs = {}
         if args.editing_method == "WISE":
             kwargs["hparams"] = hparams
-            kwargs["load_path"] = args.load_path
-        model, tokenizer = load_checkpoint(model_name=model_name, device_map="cuda", dtype=args.dtype, editing_method=args.editing_method, **kwargs)
+        model, tokenizer = load_checkpoint(
+            model_name=model_name, 
+            device_map="cuda", 
+            dtype=args.dtype, 
+            editing_method=args.editing_method, 
+            load_path=args.load_path,
+            **kwargs
+        )
         print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_path}.")
     else:
         model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
