@@ -385,12 +385,15 @@ python test_cake.py \
 
 MeLLo_KV
 ```bash
+MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+MODEL_TYPE=CohereLabs/tiny-aya-global
 python test_cake.py \
   --editing_method MeLLo_KV \
-  --model_type Qwen/Qwen3-4B-Instruct-2507 \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
+  --generation_batch_size 16 \
   --sample_size 1000 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke
@@ -431,7 +434,7 @@ AlphaEdit
 ```bash
 MODEL_TYPE=tiny-aya-global
 python test_cake.py \
-  --editing_method AlphaEdit_Circuit \
+  --editing_method AlphaEdit \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
