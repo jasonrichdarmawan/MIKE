@@ -438,7 +438,7 @@ python test_cake.py \
   --batch_size 32 \
   --generation_batch_size 128 \
   --sample_size 1000 \
-  --main_eval_steps 1 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
@@ -455,7 +455,7 @@ python test_cake.py \
   --batch_size 32 \
   --generation_batch_size 64 \
   --sample_size 1000 \
-  --main_eval_steps 1 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
