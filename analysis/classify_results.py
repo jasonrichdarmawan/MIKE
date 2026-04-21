@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from utils import get_answers, check_answer_in_pred
+from analysis.utils import get_answers, check_answer_in_pred
 
 
 def find_layers_by_classification(classified_generations: pd.DataFrame, classification: str | bool, col_name: str, apply_min: bool):
@@ -298,18 +298,18 @@ def main(args):
 
     two_hop = pd.read_csv(f"{args.results_dir}/two_hop.csv", index_col=0)
     base = two_hop[["id", "composition_correct"]]
-    df = base.merge(
-        entity_description_layers["e1"]["e2"], on="id", how="left").merge(
-        entity_description_layers["e1"]["e3"], on="id", how="left").merge(
-        entity_description_layers["last"]["e2"], on="id", how="left").merge(
-        entity_description_layers["last"]["e3"], on="id", how="left").merge(
-        activation_patching_layers["e1"]["original"], on="id", how="left").merge(
-        activation_patching_layers["last"]["original"], on="id", how="left").merge(
-        sublayer_projection_layers["attention"]["prediction"], on="id", how="left").merge(
-        sublayer_projection_layers["attention"]["e2"], on="id", how="left").merge(
-        sublayer_projection_layers["mlp"]["prediction"], on="id", how="left").merge(
-        sublayer_projection_layers["mlp"]["e2"], on="id", how="left").merge(
-        attention_knockout_layers["last"]["e1"], on="id", how="left")
+    df = base \
+        .merge(entity_description_layers["e1"]["e2"], on="id", how="left") \
+        .merge(entity_description_layers["e1"]["e3"], on="id", how="left") \
+        .merge(entity_description_layers["last"]["e2"], on="id", how="left") \
+        .merge(entity_description_layers["last"]["e3"], on="id", how="left") \
+        .merge(activation_patching_layers["e1"]["original"], on="id", how="left") \
+        .merge(activation_patching_layers["last"]["original"], on="id", how="left") \
+        .merge(sublayer_projection_layers["attention"]["prediction"], on="id", how="left") \
+        .merge(sublayer_projection_layers["attention"]["e2"], on="id", how="left") \
+        .merge(sublayer_projection_layers["mlp"]["prediction"], on="id", how="left") \
+        .merge(sublayer_projection_layers["mlp"]["e2"], on="id", how="left") \
+        .merge(attention_knockout_layers["last"]["e1"], on="id", how="left")
 
     df.to_csv(f"{args.results_dir}/layers.csv")
 

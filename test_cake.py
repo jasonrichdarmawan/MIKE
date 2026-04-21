@@ -27,7 +27,7 @@ from EasyEdit.easyeditor.util.alg_dict import *
 import torch
 import os
 import logging
-from utils import StreamHandler, FileHandler, BufferingLoggerWriter
+from utils import setup_logger
 import sys
 from datetime import datetime
 
@@ -204,37 +204,24 @@ if __name__ == "__main__":
         else args.model_type
     )
     sequential_str = f"sequential{args.main_eval_steps}"
-    SAVE_METRICS_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+    
+    # add YYYYMMDD_HHMMSS
+    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    SAVE_METRICS_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}_{datetime_str}'
     os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
     
     if args.save_edited_model:
-        SAVE_CHECKPOINTS_DIR = f'{args.checkpoint_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+        SAVE_CHECKPOINTS_DIR = f'{args.checkpoint_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}_{datetime_str}'
         os.makedirs(SAVE_CHECKPOINTS_DIR, exist_ok=True)
         
 # %%
 
 if __name__ == "__main__":
-    os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
-    
-    fmt = logging.Formatter('%(asctime)s %(name)s %(levelname)-9s %(message)s')
-    
-    sh = StreamHandler()
-    sh.setFormatter(fmt)
-    
     fh_str = "output.log" if not args.load_edited_model else f"output_loaded.log"
     fh_path = f"{SAVE_METRICS_DIR}/{fh_str}"
-    fh = FileHandler(fh_path, mode='w')
-    fh.setFormatter(fmt)
     
-    logger = logging.getLogger("CaKE_Test")
-    logger.propagate = False  # Prevent log messages from being propagated to the root logger
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(sh)
-    logger.addHandler(fh)
+    logger = setup_logger(log_file=fh_path)
     
-    # Redirect stdout to the logger
-    sys.stdout = BufferingLoggerWriter(logger, logging.INFO)
-    sys.stderr = BufferingLoggerWriter(logger, logging.WARNING)
     print(f"Saving output to {fh_path}")
     
 # %%
@@ -590,6 +577,6 @@ if __name__ == "__main__":
             
             if (start_idx / args.batch_size) % 2 == 0:
                 for key in metrics.keys():
-                    print(f"Batch index={start_idx // args.batch_size}, key={key}:\n{json.dumps(metrics[key], indent=4, ensure_ascii=False)}")
+                    print(f"Batch index={start_idx // args.batch_size}, key={key}:\n{json.dumps(metrics[key][0], indent=4, ensure_ascii=False)}")
 
 # %%

@@ -266,8 +266,10 @@ def main(args):
         "meta-llama/Llama-2-7b-hf": 32,
         "meta-llama/Llama-2-13b-hf": 40,
         "meta-llama/Meta-Llama-3-8B": 32,
-        "meta-llama/Meta-Llama-3-70B": 80
+        "meta-llama/Meta-Llama-3-70B": 80,
+        "Qwen/Qwen3-4B-Instruct-2507": 36,
     }
+    
     layers = {}
     for model in args.models:
         print(f"Processing {model} stages")

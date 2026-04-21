@@ -72,15 +72,17 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
   - Run `analysis/two_hop_cf_create.py` to create the counterfactual benchmark. It will generate `datasets/two_hop_cf_{swapping_strategy}.csv`.
     `--swapping_strategy`: The swapping strategy to generate counterfactuals, either swapping `e2` values or swapping `e3` values.
     ```bash
-    python analysis/two_hop_cf_create.py --input_path datasets/two_hop.csv --swapping_strategy e2
+    python -m analysis.two_hop_cf_create --input_path datasets/two_hop.csv --swapping_strategy e2
     ```
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop_{swapping_strategy}.csv` dataset. It will generate `datasets/{model_name}/two_hop_cf_{swapping_strategy}.csv` file. Use it for the subsequent experiments.
     ```bash
-    python analysis/evaluate_dataset.py Qwen/Qwen3.5-4B --input-path datasets/two_hop_cf_e2.csv
+    MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+    MODEL_TYPE=CohereLabs/tiny-aya-global
+    python -m analysis.evaluate_dataset $MODEL_TYPE --input-path datasets/two_hop_cf_e2.csv
     ```
   - Run `analysis/create_benchmark_cf.py` to create valid counterfactual benchmark. It will generate `datasets/{model_name}/two_hop_cf_benchmark_{swapping_strategy}.csv`
     ```bash
-    python analysis/create_benchmark_cf.py --input_path datasets/Qwen/Qwen3.5-4B-Base/two_hop_cf_e3.csv
+    python -m analysis.create_benchmark_cf --input_path datasets/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2.csv
     ```
 
 - Constructing MQuAKE for multi-lingual knowledge editing benchmark:

@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from datasets import Dataset
-from utils import load_model, load_tokenizer, _format_prompt, generate_and_test_answers, get_answers, _extract_answer_text_xml_tag, check_answer_in_pred
+from analysis.utils import load_model, load_tokenizer, _format_prompt, generate_and_test_answers, get_answers, _extract_answer_text_xml_tag, check_answer_in_pred
 
 from tqdm.auto import tqdm
 
@@ -176,7 +176,7 @@ def parse_args():
     ]
     CHAT_MODELS = [
         "Qwen/Qwen2.5-7B-Instruct", "meta-llama/Meta-Llama-3-8B-Instruct",
-        "Qwen/Qwen3.5-4B"
+        "Qwen/Qwen3.5-4B", "Qwen/Qwen3-4B-Instruct-2507", "CohereLabs/tiny-aya-global",
     ]
     
     MODELS = BASE_MODELS + CHAT_MODELS
