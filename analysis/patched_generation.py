@@ -255,23 +255,54 @@ def generate_with_attention_knockout(model, tokenizer, layer_idx: int, prompt: l
             else:
                 hidden_states = args[0]
             batch_size = hidden_states.shape[0]
-            num_tokens = hidden_states.shape[1]
-            attention_weight_size = (batch_size, model.config.num_attention_heads, num_tokens, num_tokens) # shape: (batch_size, num_heads, query_len, key_len)
-            prev_attention_mask = kwargs["attention_mask"]
-            new_attention_mask = torch.zeros(attention_weight_size, dtype=prev_attention_mask.dtype).to(
-                prev_attention_mask.device) + prev_attention_mask
+            query_len = hidden_states.shape[1]
+            prev_attention_mask = kwargs.get("attention_mask", None) # shape (batch_size, num_heads, query_len, key_len) or (batch_size, 1, query_len, key_len) or None
+            cache_position = kwargs.get("cache_position", None)
+
+            if prev_attention_mask is not None and prev_attention_mask.dim() == 4:
+                kv_len = prev_attention_mask.shape[-1]
+            elif cache_position is not None:
+                kv_len = int(cache_position.max().item()) + 1
+            else:
+                kv_len = query_len
+
+            attention_weight_size = (batch_size, model.config.num_attention_heads, query_len, kv_len) # shape: (batch_size, num_heads, query_len, key_len)
+            min_value = torch.finfo(hidden_states.dtype).min
+
+            if cache_position is not None:
+                query_positions = cache_position.to(hidden_states.device)
+            else:
+                query_positions = torch.arange(query_len, device=hidden_states.device)
+            key_positions = torch.arange(kv_len, device=hidden_states.device)
+            causal_bool = key_positions[None, :] <= query_positions[:, None]
+            causal_bool = causal_bool[None, None, :, :].expand(batch_size, model.config.num_attention_heads, query_len, kv_len)
+
+            new_attention_mask = torch.zeros(attention_weight_size, dtype=hidden_states.dtype, device=hidden_states.device)
+            new_attention_mask = new_attention_mask.masked_fill(~causal_bool, min_value)
+
+            if prev_attention_mask is not None:
+                if prev_attention_mask.dim() != 4:
+                    raise ValueError(f"Unsupported attention_mask shape: {tuple(prev_attention_mask.shape)}")
+                if prev_attention_mask.shape[-1] != kv_len:
+                    prev_attention_mask = prev_attention_mask[..., :kv_len]
+                if prev_attention_mask.shape[1] == 1 and model.config.num_attention_heads > 1:
+                    prev_attention_mask = prev_attention_mask.expand(-1, model.config.num_attention_heads, -1, -1)
+                if prev_attention_mask.dtype == torch.bool:
+                    new_attention_mask = new_attention_mask.masked_fill(~prev_attention_mask.to(hidden_states.device), min_value)
+                else:
+                    new_attention_mask = new_attention_mask + prev_attention_mask.to(hidden_states.device, dtype=hidden_states.dtype)
+
             if source == "all":
                 new_attention_mask[target_position[0], :, :, target_position[1]] = torch.finfo(model.dtype).min
             elif source == "last":
-                if num_tokens != 1:
+                if query_len != 1:
                     # Index 2 is Query (Receiver), Index 3 is Key (Sender)
                     # -1 refers to the LAST token in the sequence (the Query)
                     # target_position[1] refers to the token index of target_token_str (the Key)
                     new_attention_mask[target_position[0], :, -1, target_position[1]] = torch.finfo(model.dtype).min
             else:
-                if num_tokens != 1:
-                    new_attention_mask[target_position[0], :, source_position, target_position[1]] = torch.finfo(
-                        model.dtype).min
+                if query_len != 1:
+                    new_attention_mask[target_position[0], :, source_position, target_position[1]] = torch.finfo(model.dtype).min
 
             new_kwargs["attention_mask"] = new_attention_mask
             return original_forward_func(*new_args, **new_kwargs)

@@ -48,7 +48,7 @@ micromamba activate multihop
 
 pip install SPARQLWrapper==2.0.0
 
-micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.5.1 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
+micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.10.8 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
 
 pip install "numpy>=1.24,<2" scipy sentence-transformers==3.2.1
 
@@ -99,6 +99,30 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
   python analysis/llm_translate.py --dataset_path $DATA_PATH --model $MODEL --endpoint $ENDPOINT --api_key $API_KEY --case_id ${=CASE_ID} --language ${=LANGUAGE}
   ```
 
+- Ours:
+  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop_cf_e2.csv` dataset. It will generate `datasets/{model_name}/two_hop_cf_e2.csv` file. Use it for the subsequent experiments.
+    ```bash
+    MODEL_TYPE=CohereLabs/tiny-aya-global
+    MODEL_TYPE=Qwen/Qwen3-4B-Insturct-2507
+    python analysis/evaluate_dataset.py $MODEL_TYPE --input-path datasets/two_hop_cf_e2.csv
+    ```
+  - Run `analysis/create_benchmark_cf.py` to create the benchmark based on `datasets/{model_name}/two_hop_cf_e2.csv`. It will generate `datasets/{model_name}/two_hop_cf_benchmark_e2.csv`
+    ```bash
+    INPUT_PATH=datasets/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2.csv
+    python analysis/create_benchmark_cf.py --input_path $INPUT_PATH
+    ```
+  - Run `run_two_hop.py`. It will edit the model, evaluate the model, do sublayer projections, patchscopes, and attention knockout. Then, it will analyze and generate figures.
+
+    Note: set `MODEL_TYPE` to HuggingFace's model name when `EDITING_METHOD == "no_edit"`
+    ```bash
+    EDITING_METHOD=no_edit
+    EDITING_METHOD=AlphaEdit
+    EDITING_METHOD=AlphaEdit_Circuit
+
+    MODEL_TYPE=qwen3-4b-instruct
+    MODEL_TYPE=tiny-aya-global
+    python run_two_hop.py --editing_method $EDITING_METHOD --model_type $MODEL_TYPE --dtype bfloat16 --sample_size 1000 --batch_size 32 --eval_with_chat_template --do_evaluate --do_sublayer_projections --do_knockout_attention
+    ```
 - E. Biran et al. [1]:
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
     ```bash

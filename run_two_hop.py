@@ -43,30 +43,32 @@ from analysis.analyze_results import (
 
 # %%
 
-if __name__ == "__main__":
-    import os
-    import sys
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    sys.argv = [
-        "run_two_hop.py",
-        "--editing_method", "AlphaEdit_Circuit",
-        "--model_type", "qwen3-4b-instruct",
-        # "--model_type", "tiny-aya-global",
-        # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
-        # "--model_type", "CohereLabs/tiny-aya-global",
-        "--dtype", "bfloat16",
-        "--sample_size", "1000",
-        "--batch_size", "32",
-        "--save_edited_model",
-        # "--load_edited_model",
-        # "--load_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s16_s2/AlphaEdit_20260421-160250/edit_num_0014_case_0779",
-        # "--load_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260421-160120/edit_num_0739_case_80844",
-        "--eval_with_chat_template",
-        # "--redo_evaluate",
-        # "--redo_sublayer_projections",
-        # "--redo_patchscopes",
-        # "--redo_knockout",
-    ]
+# if __name__ == "__main__":
+#     import os
+#     import sys
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#     sys.argv = [
+#         "run_two_hop.py",
+#         "--editing_method", "no_edit",
+#         # "--model_type", "qwen3-4b-instruct",
+#         # "--model_type", "tiny-aya-global",
+#         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+#         "--model_type", "CohereLabs/tiny-aya-global",
+#         "--dtype", "bfloat16",
+#         "--sample_size", "1000",
+#         "--batch_size", "32",
+#         # "--save_edited_model",
+#         # "--load_edited_model",
+#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s16_s2/AlphaEdit_20260421-160250/edit_num_0014_case_0779",
+#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260421-160120/edit_num_0739_case_80844",
+#         # "--load_eval_path", "output/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/no_edit_20260421-224559",
+#         "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/no_edit_20260421-225846",
+#         "--eval_with_chat_template",
+#         # "--do_evaluate",
+#         # "--do_sublayer_projections",
+#         # "--do_patchscopes",
+#         "--do_knockout_attention",
+#     ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evalaute in order: edit rows are edited, propagated rows are evaluated.")
@@ -81,12 +83,13 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_dir", default="./checkpoints", type=str)
     parser.add_argument("--save_edited_model", action="store_true")
     parser.add_argument("--load_edited_model", action="store_true")
-    parser.add_argument("--load_path", default=None, type=str, help="Path to load the edited model checkpoint. Required if --load_edited_model is set.")
+    parser.add_argument("--load_model_path", default=None, type=str, help="Path to load the edited model checkpoint. Required if --load_edited_model is set.")
+    parser.add_argument("--load_eval_path", default=None, type=str, help="Path to load evaluation results. Required if --load_edited_model is set.")
     parser.add_argument("--eval_with_chat_template", action="store_true")
-    parser.add_argument("--redo_evaluate", action="store_true", help="Whether to redo evaluation even if metrics already exist. By default, if --load_edited_model is set and existing metrics are found, evaluation will be skipped and existing metrics will be loaded.")
-    parser.add_argument("--redo_sublayer_projections", action="store_true", help="Whether to redo sublayer projection even if projection results already exist. By default, if existing projection results are found, they will be loaded instead of re-running the projection.")
-    parser.add_argument("--redo_patchscopes", action="store_true", help="Whether to redo patchscope computation even if results already exist.")
-    parser.add_argument("--redo_knockout", action="store_true", help="Whether to redo attention knockout even if results already exist.")
+    parser.add_argument("--do_evaluate", action="store_true", help="Whether to do evaluation. By default, if --load_edited_model is set and existing metrics are found, evaluation will be skipped and existing metrics will be loaded.")
+    parser.add_argument("--do_sublayer_projections", action="store_true", help="Whether to do sublayer projection. By default, if existing projection results are found, they will be loaded instead of re-running the projection.")
+    parser.add_argument("--do_patchscopes", action="store_true", help="Whether to do patchscope computation even if results already exist.")
+    parser.add_argument("--do_knockout_attention", action="store_true", help="Whether to do attention knockout even if results already exist.")
     parser.add_argument("--generation_batch_size", default=128, type=int)
     args = parser.parse_args()
 
@@ -109,8 +112,10 @@ if __name__ == "__main__":
 
     model_name = hparams.model_name if hparams is not None else args.model_type
     
-    if args.load_edited_model and args.load_path:
-        datetime_str = args.load_path.split("/")[-2].split("_")[-1]
+    if args.load_edited_model and args.load_model_path:
+        datetime_str = args.load_model_path.split("/")[-2].split("_")[-1]
+    elif args.load_eval_path:
+        datetime_str = args.load_eval_path.split("/")[-1].split("_")[-1]
     else:
         datetime_str = datetime.now().strftime("%Y%m%d-%H%M%S")
     SAVE_METRICS_DIR = f"{args.metrics_save_dir}/{model_name}/two_hop_cf_{args.swapping_strategy}/sequential_s{args.sample_size}_s{args.batch_size}/{args.editing_method}_{datetime_str}"
@@ -121,15 +126,9 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    if args.load_edited_model and args.load_path:
-        if args.redo_evaluate:
-            fh_path = f"{SAVE_METRICS_DIR}/output_loaded.log"
-        else:
-            datetime_str = datetime.now().strftime("%Y%m%d-%H%M%S")
-            fh_path = f"{SAVE_METRICS_DIR}/output_loaded_{datetime_str}.log"
-    else:
-        fh_path = f"{SAVE_METRICS_DIR}/output.log"
-        os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
+    datetime_str = datetime.now().strftime("%Y%m%d-%H%M%S")
+    fh_path = f"{SAVE_METRICS_DIR}/output_{datetime_str}.log"
+    os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
     logger = setup_logger(log_file=fh_path)
     print(f"Saving metrics to {fh_path}")
     
@@ -194,15 +193,15 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    if args.load_edited_model and args.load_path:
+    if args.load_edited_model and args.load_model_path:
         model, tokenizer = load_checkpoint(
             model_name=model_name,
             device_map="cuda",
             dtype=args.dtype,
             editing_method=args.editing_method,
-            load_path=args.load_path,
+            load_path=args.load_model_path,
         )
-        print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_path}")
+        print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_model_path}")
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -226,7 +225,7 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    if not (args.load_edited_model and args.load_path):
+    if not (args.load_edited_model and args.load_model_path):
         edit_cases = [item for item in cases if item["row_role"] == "edit"]
         # split edit_cases into list of lists, each of length args.batch_size (except possibly the last one)
         edit_cases = [edit_cases[i:i + args.batch_size] for i in range(0, len(edit_cases), args.batch_size)]
@@ -302,7 +301,7 @@ def do_evaluate(
             
             res = calculate_averages(data=all_metrics[key])
             print(f"Batch {idx} | key={key} averages:\n{json.dumps(res, indent=4, ensure_ascii=False)}")
-            res_str = "res.json" if not args.load_edited_model else "res_loaded.json"
+            res_str = "res.json"
             res_filepath = os.path.join(folder_path, res_str)
             json.dump(res, open(res_filepath, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
     
@@ -317,7 +316,7 @@ if __name__ == "__main__":
     
     kwargs = {}
     kwargs["languages"] = ["en"]
-    if args.load_edited_model and args.load_path and not args.redo_evaluate:
+    if not args.do_evaluate:
         for language in kwargs["languages"]:
             metrics_path = os.path.join(SAVE_METRICS_DIR, language, "metrics.json")
             with open(metrics_path, "r", encoding="utf-8") as f:
@@ -376,8 +375,10 @@ if __name__ == "__main__":
     )
     composition_correct_subset = cf_benchmark[composition_correct_mask]
     os.makedirs(f"{SAVE_METRICS_DIR}/composition_correct", exist_ok=True)
-    composition_correct_subset.to_csv(f"{SAVE_METRICS_DIR}/composition_correct/two_hop_cf_benchmark_{args.swapping_strategy}.csv")
-    
+    csv_path = f"{SAVE_METRICS_DIR}/composition_correct/two_hop_cf_benchmark_{args.swapping_strategy}.csv"
+    composition_correct_subset.to_csv(csv_path)
+    print(f"Composition correct subset saved to {csv_path}")
+
     composition_incorrect_mask = (
         (cf_benchmark["first_hop_correct"] == True)
         & (cf_benchmark["second_hop_correct"] == True)
@@ -385,7 +386,59 @@ if __name__ == "__main__":
     )
     composition_incorrect_subset = cf_benchmark[composition_incorrect_mask]
     os.makedirs(f"{SAVE_METRICS_DIR}/composition_incorrect", exist_ok=True)
-    composition_incorrect_subset.to_csv(f"{SAVE_METRICS_DIR}/composition_incorrect/two_hop_cf_benchmark_{args.swapping_strategy}.csv")
+    csv_path = f"{SAVE_METRICS_DIR}/composition_incorrect/two_hop_cf_benchmark_{args.swapping_strategy}.csv"
+    composition_incorrect_subset.to_csv(csv_path)
+    print(f"Composition incorrect subset saved to {csv_path}")
+
+    subsets = {
+        "composition_correct": composition_correct_subset,
+        "composition_incorrect": composition_incorrect_subset,
+    }
+    subset_sizes = {name: len(df) for name, df in subsets.items()}
+    print(
+        "Subset sizes | " +
+        " ".join([f"{name}={size}" for name, size in subset_sizes.items()])
+    )
+
+# %%
+
+def create_empty_subset_artifacts(
+    save_metrics_dir: str,
+    subset_str: str,
+):
+    base_dir = Path(save_metrics_dir) / subset_str
+    os.makedirs(base_dir, exist_ok=True)
+
+    empty_files = {
+        base_dir / "sublayer_projection" / "attention_projections.csv": [
+            "id", "layer", "top_k_words", "top_k_probs", "e2_ranks", "e3_ranks", "prediction_rank"
+        ],
+        base_dir / "sublayer_projection" / "mlp_projections.csv": [
+            "id", "layer", "top_k_words", "top_k_probs", "e2_ranks", "e3_ranks", "prediction_rank"
+        ],
+        base_dir / "entity_description" / "e1_entity_description_s0.csv": [
+            "id", "source_layer", "target_layer", "generation"
+        ],
+        base_dir / "entity_description" / "last_entity_description_s0.csv": [
+            "id", "source_layer", "target_layer", "generation"
+        ],
+        base_dir / "attention_knockout" / "last_e1_attention_knockout_k3_composition.csv": [
+            "id", "layer", "generation"
+        ],
+    }
+
+    for path, columns in empty_files.items():
+        os.makedirs(path.parent, exist_ok=True)
+        pd.DataFrame(columns=columns).to_csv(path)
+    print(f"Created empty placeholder artifacts for {subset_str} at {base_dir}")
+
+if __name__ == "__main__":
+    for subset_str, subset in subsets.items():
+        if subset.empty:
+            create_empty_subset_artifacts(
+                save_metrics_dir=SAVE_METRICS_DIR,
+                subset_str=subset_str,
+            )
 
 # %%
 
@@ -429,12 +482,14 @@ def do_sublayer_projections(
         generations.to_csv(output_path, index=False)
         print(f"Sublayer projection for {target} saved to {output_path}")
 
+
 if __name__ == "__main__":
-    if (
-        not args.load_edited_model
-        or args.redo_sublayer_projections
-    ):
-        for subset, subset_str in [(composition_correct_subset, "composition_correct"), (composition_incorrect_subset, "composition_incorrect")]:
+
+    if args.do_sublayer_projections:
+        for subset_str, subset in subsets.items():
+            if subset.empty:
+                print(f"Skipping sublayer projection for {subset_str}: empty subset")
+                continue
             do_sublayer_projections(
                 subset=subset,
                 generation_batch_size=args.generation_batch_size,
@@ -485,11 +540,11 @@ def do_patchscopes(
         print(f"Entity description for {source} saved to {output_path}")
 
 if __name__ == "__main__":
-    if (
-        not args.load_edited_model
-        or args.redo_patchscopes
-    ):
-        for subset, subset_str in [(composition_correct_subset, "composition_correct"), (composition_incorrect_subset, "composition_incorrect")]:
+    if args.do_patchscopes:
+        for subset_str, subset in subsets.items():
+            if subset.empty:
+                print(f"Skipping patchscope generation for {subset_str}: empty subset")
+                continue
             do_patchscopes(
                 subset=subset,
                 generation_batch_size=args.generation_batch_size,
@@ -542,19 +597,17 @@ def do_knockout_attention(
     print(f"Attention knockout results saved to {output_path}")
 
 if __name__ == "__main__":
-    if (
-        not args.load_edited_model
-        or args.redo_knockout
-    ):
-        for subset, subset_str in [(composition_correct_subset, "composition_correct"), (composition_incorrect_subset, "composition_incorrect")]:
+    if args.do_knockout_attention:
+        for subset_str, subset in subsets.items():
+            if subset.empty:
+                print(f"Skipping attention knockout for {subset_str}: empty subset")
+                continue
             do_knockout_attention(
                 subset=subset,
                 generation_batch_size=args.generation_batch_size,
                 save_metrics_dir=SAVE_METRICS_DIR,
                 subset_str=subset_str,
             )
-            
-breakpoint()
 
 # %%
 
@@ -585,7 +638,7 @@ def do_classify_results(
     df.to_csv(f"{results_dir}/layers.csv")
 
 if __name__ == "__main__":
-    for subset_str in ["composition_correct", "composition_incorrect"]:
+    for subset_str, subset in subsets.items():
         do_classify_results(
             results_dir=f"{SAVE_METRICS_DIR}/{subset_str}",
             swapping_strategy=args.swapping_strategy,
@@ -607,25 +660,29 @@ def do_analyze_results(
     print(f"Correct setting example count: {len(layers['correct'])}")
     print(f"Incorrect setting example count: {len(layers['incorrect'])}")
     print(
-        f"Correct setting prediction in sublayer:\n", 
+        f"Correct setting prediction in sublayers:\n", 
         f"{get_sublayer_counts(df=layers['correct'], target='prediction')}"
     )
     print(
         f"Incorrect setting prediction in sublayers:\n",
         f"{get_sublayer_counts(df=layers['incorrect'], target='prediction')}"
     )
-    
+
     plots_dir = f"{save_metrics_dir}/plots"
     plot_stage_boxplots(
         correct_df=layers["correct"],
         incorrect_df=layers["incorrect"],
         path=plots_dir,
     )
+    print(f"Stage boxplots saved to {plots_dir}")
+    
+    path = f"{plots_dir}/min_entity_description_layers.pdf"
     plot_min_entity_description_layers(
         df=pd.concat([layers['correct'], layers['incorrect']]),
-        path=f"{plots_dir}/min_entity_description_layers.pdf",
+        path=path,
         layers=n_layers,
     )
+    print(f"Min entity description layer plots saved to {path}")
     
     entity_description_dir = f"{save_metrics_dir}/composition_correct/entity_description"
     entity_descriptions = {
@@ -640,6 +697,7 @@ def do_analyze_results(
             seeds=1,
         ),
     }
+
     print(
         f"Correct setting entity description counts:\n",
         get_entity_counts(df=layers["correct"])
@@ -648,21 +706,31 @@ def do_analyze_results(
         f"Incorrect setting entity description counts:\n",
         get_entity_counts(df=layers["incorrect"])
     )
-    plot_layer_matrix(
-        generations=entity_descriptions["e1"],
-        target_classification="e2",
-        path=f"{plots_dir}/entity_description_e1_e2.pdf",
-    )
-    plot_layer_matrix(
-        generations=entity_descriptions["last"],
-        target_classification="e2",
-        path=f"{plots_dir}/entity_description_last_e2.pdf",
-    )
-    plot_layer_matrix(
-        generations=entity_descriptions["last"],
-        target_classification="e3",
-        path=f"{plots_dir}/entity_description_last_e3.pdf",
-    )
+    
+    if not entity_descriptions["e1"].empty:
+        path = f"{plots_dir}/entity_description_e1_e2.pdf"
+        plot_layer_matrix(
+            generations=entity_descriptions["e1"],
+            target_classification="e2",
+            path=path,
+        )
+        print(f"Entity description layer matrix plots saved to {path}")
+    if not entity_descriptions["last"].empty:
+        path = f"{plots_dir}/entity_description_last_e2.pdf"
+        plot_layer_matrix(
+            generations=entity_descriptions["last"],
+            target_classification="e2",
+            path=f"{plots_dir}/entity_description_last_e2.pdf",
+        )
+        print(f"Entity description layer matrix plots saved to {path}")
+        
+        path = f"{plots_dir}/entity_description_last_e3.pdf"
+        plot_layer_matrix(
+            generations=entity_descriptions["last"],
+            target_classification="e3",
+            path=path,
+        )
+        print(f"Entity description layer matrix plots saved to {path}")
 
 if __name__ == "__main__":
     n_layers = None
