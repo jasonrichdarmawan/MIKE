@@ -7,9 +7,9 @@ import pandas as pd
 import torch
 
 from datasets import Dataset
-from patched_generation import get_hidden_states, generate_with_patching_all_layers
-from utils import get_layer_names, load_model, load_tokenizer
-
+from analysis.patched_generation import get_hidden_states, generate_with_patching_all_layers
+from analysis.utils import get_layer_names, load_model, load_tokenizer
+from tqdm.auto import tqdm
 
 def generate_entity_description_with_patching(entries: list[str], model, tokenizer, source: str, do_sample: bool):
     """
@@ -89,22 +89,27 @@ def main(args):
             "x"
         )
     dataset["target_prompt"] = target_prompt
-    dataset = Dataset.from_pandas(dataset, preserve_index=False)
 
     model = load_model(args.model_name)
     model.eval()
     tokenizer = load_tokenizer(args.model_name)
-    generations = dataset.map(
-        generate_entity_description_with_patching,
-        fn_kwargs={"model": model, "tokenizer": tokenizer, "source": args.source,
-                   "do_sample": args.do_sample},
-        batched=True,
-        batch_size=args.batch_size,
-        remove_columns=dataset.column_names
-    )
-
-    generations = generations.to_pandas()
-
+    
+    dataset = dataset.reset_index().rename(columns={"index": "id"})
+    records = dataset.to_dict("records")
+    generation_frames = []
+    for start in tqdm(range(0, len(dataset), args.batch_size), desc="Generating"):
+        batch = records[start:start + args.batch_size]
+        entries = {k: [row[k] for row in batch] for k in batch[0].keys()}
+        generated = generate_entity_description_with_patching(
+            emtries=entries,
+            model=model,
+            tokenizer=tokenizer,
+            source=args.source,
+            do_sample=args.do_sample,
+        )
+        generation_frames.append(pd.DataFrame(generated))
+    
+    generations = pd.concat(generation_frames)
     generations = generations.sort_values(["id", "source_layer", "target_layer"])
     generations = generations.reset_index(drop=True)
     if not args.output_path:

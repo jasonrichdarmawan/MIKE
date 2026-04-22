@@ -3,7 +3,7 @@
 from pathlib import Path
 import argparse
 
-from classify_results import load_activation_patching
+from analysis.classify_results import load_activation_patching
 
 # %%
 """

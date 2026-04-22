@@ -4,12 +4,21 @@ from pathlib import Path
 import pandas as pd
 
 from datasets import Dataset
-from patched_generation import generate_with_attention_knockout_all_layers
-from utils import load_model, load_tokenizer, last_relation_word
+from analysis.patched_generation import generate_with_attention_knockout_all_layers
+from analysis.utils import load_model, load_tokenizer, last_relation_word
 
+from tqdm.auto import tqdm
 
-def generate_answer_with_attention_knockout(entries, model, tokenizer, default_decoding: bool, knockout_source: str,
-                                            knockout_target: str, k=0, prompt="composition"):
+def generate_answer_with_attention_knockout(
+    entries,
+    model, 
+    tokenizer, 
+    default_decoding: bool, 
+    knockout_source: str,
+    knockout_target: str, 
+    k=0, 
+    prompt="composition"
+):
     """
     Example:
     - source_prompt: "the head of state of the country of citizenship of Stephen Harper is"
@@ -101,22 +110,29 @@ def main(args):
     if not args.input_path:
         args.input_path = f"../datasets/{args.model_name}/two_hop.csv"
     dataset = pd.read_csv(args.input_path, index_col=0)
-    dataset = Dataset.from_pandas(dataset, preserve_index=False)
 
     model = load_model(args.model_name)
     model.eval()
     tokenizer = load_tokenizer(args.model_name)
-    generations = dataset.map(
-        generate_answer_with_attention_knockout,
-        fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": args.default_decoding,
-                   "knockout_source": args.knockout_source, "knockout_target": args.knockout_target, "k": args.k,
-                   "prompt": args.prompt},
-        batched=True,
-        batch_size=args.batch_size,
-        remove_columns=dataset.column_names
-    )
-
-    generations = generations.to_pandas()
+    
+    dataset = dataset.reset_index().rename(columns={"index": "id"})
+    records = dataset.to_dict(orient="records")
+    generation_frames = []
+    for start in tqdm(range(0, len(records), args.batch_size), desc="Generating with attention knockout"):
+        batch = records[start:start + args.batch_size]
+        entries = {k: [row[k] for row in batch] for k in batch[0].keys()}
+        generated = generate_answer_with_attention_knockout(
+            entries=entries,
+            model=model,
+            tokenizer=tokenizer, 
+            default_decoding=args.default_decoding,
+            knockout_source=args.knockout_source,
+            knockout_target=args.knockout_target,
+            k=args.k,
+            prompt=args.prompt
+        )
+        generation_frames.append(pd.DataFrame(generated))
+    generations = pd.concat(generation_frames)
     generations = generations.sort_values(["id", "layer"])
     generations = generations.reset_index(drop=True)
     if not args.output_path:

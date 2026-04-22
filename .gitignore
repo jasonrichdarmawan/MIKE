@@ -1,5 +1,10 @@
 */__pycache__
 *__pycache__
+*.egg-info
+build/
+
+data/
 datasets/two_hop.csv
-datasets/gpt2
+datasets/*/
 output
+checkpoints/
