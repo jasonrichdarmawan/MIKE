@@ -199,14 +199,34 @@ def get_top_k_tokens(tokenizer, scores: Float[Tensor, "num_prompts num_layers vo
 def get_token_ranks(projections: Float[Tensor, "num_layers vocab_size"], tokens: list[int]) -> Shaped[ndarray, "num_layers num_tokens"]:
     """
     The goal is for each layer, to count how many vocabulary entries have a higher score than that token.
+
+    NOTE — high-sample runs (500+ samples × multiple languages):
+        The looping implementation below (lines 208-213) is fine for small-scale use.
+        For large-scale runs, comment out lines 208-213 and uncomment lines 216-226
+        (the GPU argsort block) directly — no other adjustments needed.
     """
+    # ── looping implementation (simple, fine for small sample counts) ──────────
     projections = projections.float().cpu()
-    vals = projections[:, tokens] # shape (num_layers, num_tokens)
+    vals = projections[:, tokens]                        # (num_layers, num_tokens)
     ranks = np.empty_like(vals, dtype=int)
     for layer in range(projections.shape[0]):
         for i, val in enumerate(vals[layer]):
             ranks[layer][i] = (projections[layer] > val).sum()
     return ranks
+
+    # ── GPU argsort implementation (comment lines 208-213, uncomment below) ────
+    # proj = projections.float()                         # stays on GPU
+    # device = proj.device
+    # num_layers, vocab_size = proj.shape
+    # # argsort descending: order[l, i] = vocab index of the i-th highest score at layer l
+    # order = torch.argsort(-proj, dim=1)                # (num_layers, vocab_size)
+    # # rank_map[l, token_id] = rank of that token at layer l
+    # rank_map = torch.empty_like(order)
+    # rank_map.scatter_(1, order,
+    #                   torch.arange(vocab_size, device=device).unsqueeze(0).expand(num_layers, -1))
+    # token_tensor = torch.tensor(tokens, dtype=torch.long, device=device)
+    # ranks = rank_map[:, token_tensor]                  # (num_layers, num_tokens)
+    # return ranks.cpu().numpy()
 
 
 def generate_with_attention_knockout(model, tokenizer, layer_idx: int, prompt: list[str], source: list[str], target_token_str: list[str], default_decoding: bool,
@@ -307,31 +327,59 @@ def generate_with_attention_knockout_all_layers(model, tokenizer, prompt: list[s
     return generations_by_layer
 
 
-def get_entity_ranks(model, tokenizer, projections: Float[Tensor, "num_prompts num_layers vocab_size"], entities: list[list[str]]) -> list[Shaped[ndarray, "num_layers num_entities"]]:
+def get_entity_ranks(model, tokenizer, projections: Float[Tensor, "num_prompts num_layers vocab_size"], entities: list[list[str]], use_all_tokens: bool = False) -> list[Shaped[ndarray, "num_layers num_entities"]]:
     """
-    The goal is for each prompt, for each layer, to count how many vocabulary entries have a higher score than that token.
+    For each prompt and layer, rank each entity alias in vocabulary space.
 
     Example:
     - entities: [["Charles III of the United Kingdom", ...], ...]
 
-    Caveat: rank based on the first token of each entity
+    Args:
+        use_all_tokens: If False (default), rank is based on the FIRST token of each
+            entity alias — fast but unreliable for scripts tokenised at character level
+            (Devanagari/CJK), where first characters are common and rank trivially low.
+            If True, rank for each alias is the MEAN rank across ALL its tokens,
+            evaluated independently at the last-token projection position.  This is
+            more robust across scripts at the cost of a small extra compute step.
+            Callers that were working fine with first-token ranking need not change.
     """
     entities = [ent + [e.lower() for e in ent] for ent in entities]
     if get_prepend_space(model):
         entities = [ent + [" " + e for e in ent] for ent in entities]
-    tokenized_entity: list[list[list[int]]] = [tokenizer(ent, add_special_tokens=False).input_ids for ent in entities]
+    # Tokenize per-entity; skip empty entity lists to avoid tokenizer crash on []
+    tokenized_entity: list[list[list[int]]] = [
+        tokenizer(ent, add_special_tokens=False).input_ids if ent else []
+        for ent in entities
+    ]
+    vocab_size = projections.shape[-1]
+    num_layers = projections.shape[1]
     ranks = []
     for proj, tokens in zip(projections, tokenized_entity):
-        first_tokens = [t[0] for t in tokens]
-        ranks.append(get_token_ranks(proj, first_tokens))
+        valid_tokens = [t for t in tokens if t]
+        if not valid_tokens:
+            ranks.append(np.full((num_layers, 1), vocab_size - 1, dtype=int))
+        elif not use_all_tokens:
+            # Original behaviour: rank of first token only (backward compatible)
+            first_tokens = [t[0] for t in valid_tokens]
+            ranks.append(get_token_ranks(proj, first_tokens))
+        else:
+            # Mean rank across all tokens of each alias, evaluated independently.
+            # For an alias with k tokens, get_token_ranks returns (num_layers, k);
+            # average across k → (num_layers, 1) per alias, then concatenate aliases.
+            alias_rank_cols = []
+            for alias_toks in valid_tokens:
+                per_tok_ranks = get_token_ranks(proj, alias_toks)  # (num_layers, k)
+                alias_rank_cols.append(per_tok_ranks.mean(axis=1, keepdims=True).astype(int))
+            ranks.append(np.concatenate(alias_rank_cols, axis=1))  # (num_layers, num_aliases)
     return ranks
 
 
-def get_sublayer_projection(model, tokenizer, prompt: list[str], bridge_entities: list[list[str]], answers: list[list[str]], layers: list[str]
-                            ) -> tuple[Shaped[ndarray, "num_prompts num_layers k"], 
-                                       Float[Tensor, "num_prompts num_layers k"], 
-                                       list[Shaped[ndarray, "num_layers num_bridge_entities"]], 
-                                       list[Shaped[ndarray, "num_layers num_answers"]], 
+def get_sublayer_projection(model, tokenizer, prompt: list[str], bridge_entities: list[list[str]], answers: list[list[str]], layers: list[str],
+                            use_all_tokens: bool = False
+                            ) -> tuple[Shaped[ndarray, "num_prompts num_layers k"],
+                                       Float[Tensor, "num_prompts num_layers k"],
+                                       list[Shaped[ndarray, "num_layers num_bridge_entities"]],
+                                       list[Shaped[ndarray, "num_layers num_answers"]],
                                        list[Shaped[ndarray, "num_layers 1"]]]:
     """
     The goals are:
@@ -342,6 +390,10 @@ def get_sublayer_projection(model, tokenizer, prompt: list[str], bridge_entities
     - prompt: ["the head of state of the country of citizenship of Stephen Harper is", ...]
     - bridge_entities: [["Canada", ...], ...]
     - answers: [["Charles III of the United Kingdom", ...], ...]
+
+    Args:
+        use_all_tokens: passed through to get_entity_ranks — see that function's docstring.
+            Set True for multilingual evals to avoid first-token bias in character-level scripts.
     """
     prompt_inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(model.device) # shape (num_prompts, seq_len)
 
@@ -366,8 +418,8 @@ def get_sublayer_projection(model, tokenizer, prompt: list[str], bridge_entities
         projections = out_embeddings(norm(sublayer_values.to(norm_device))) # shape (num_prompts, num_layers, vocab_size)
     top_k_words, top_k_probabilities = get_top_k_tokens(tokenizer, projections) # shape (num_prompts, num_layers, k), (num_prompts, num_layers, k)
 
-    answer_ranks = get_entity_ranks(model, tokenizer, projections, answers) # list of shape (num_layers, num_answers)
-    bridge_entity_ranks = get_entity_ranks(model, tokenizer, projections, bridge_entities) # list of shape (num_layers, num_bridge_entities)
+    answer_ranks = get_entity_ranks(model, tokenizer, projections, answers, use_all_tokens=use_all_tokens)
+    bridge_entity_ranks = get_entity_ranks(model, tokenizer, projections, bridge_entities, use_all_tokens=use_all_tokens)
 
     prediction_ranks = [] # list of shape (num_layers, 1)
     predicted_tokens = logits[:, -1, :].max(dim=-1).indices # shape (num_prompts,)

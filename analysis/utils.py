@@ -8,6 +8,19 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, GPT2LMHeadModel, \
 
 from jaxtyping import Float
 
+# Optional model classes added in newer transformers versions
+try:
+    from transformers import Qwen3ForCausalLM
+except ImportError:
+    class Qwen3ForCausalLM:
+        pass
+
+try:
+    from transformers import Cohere2ForCausalLM
+except ImportError:
+    class Cohere2ForCausalLM:
+        pass
+
 HF_TOKEN = ""
 
 
@@ -25,14 +38,23 @@ def load_model(model_name, device="cuda"):
         return AutoModelForCausalLM.from_pretrained(model_name, token=HF_TOKEN).to(device)
 
 
+def _is_llama_like(model):
+    """
+    True for architectures that share the model.model.layers[i].self_attn / .mlp
+    path and model.model.norm — covers LLaMA, Gemma, Qwen2, Qwen3, Cohere2
+    and any future model that follows the same layout.
+    """
+    return type(model) in (
+        LlamaForCausalLM, GemmaForCausalLM,
+        Qwen2ForCausalLM, Qwen3ForCausalLM,
+        Cohere2ForCausalLM,
+    )
+
+
 def get_layer_names(model):
     if type(model) is GPT2LMHeadModel:
         return [f"transformer.h.{i}" for i in range(model.config.num_hidden_layers)]
-    elif type(model) is LlamaForCausalLM:
-        return [f"model.layers.{i}" for i in range(model.config.num_hidden_layers)]
-    elif type(model) is GemmaForCausalLM:
-        return [f"model.layers.{i}" for i in range(model.config.num_hidden_layers)]
-    elif type(model) is Qwen2ForCausalLM:
+    elif _is_llama_like(model):
         return [f"model.layers.{i}" for i in range(model.config.num_hidden_layers)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -41,7 +63,7 @@ def get_layer_names(model):
 def get_attention_layers_names(model):
     if type(model) is GPT2LMHeadModel:
         return [f"transformer.h.{i}.attn" for i in range(model.config.num_hidden_layers)]
-    elif type(model) is LlamaForCausalLM:
+    elif _is_llama_like(model):
         return [f"model.layers.{i}.self_attn" for i in range(model.config.num_hidden_layers)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -50,7 +72,7 @@ def get_attention_layers_names(model):
 def get_mlp_layers_names(model):
     if type(model) is GPT2LMHeadModel:
         return [f"transformer.h.{i}.mlp" for i in range(model.config.num_hidden_layers)]
-    elif type(model) is LlamaForCausalLM or type(model) is Qwen2ForCausalLM:
+    elif _is_llama_like(model):
         return [f"model.layers.{i}.mlp" for i in range(model.config.num_hidden_layers)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -64,9 +86,7 @@ def get_attention_modules(model, layer: int, k=0):
     top = min(layer + k + 1, model.config.num_hidden_layers)
     if type(model) is GPT2LMHeadModel:
         return [model.transformer.h[l].attn for l in range(bot, top)]
-    elif type(model) is LlamaForCausalLM:
-        return [model.model.layers[l].self_attn for l in range(bot, top)]
-    elif type(model) is GemmaForCausalLM:
+    elif _is_llama_like(model):
         return [model.model.layers[l].self_attn for l in range(bot, top)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -75,9 +95,7 @@ def get_attention_modules(model, layer: int, k=0):
 def get_norm_module(model):
     if type(model) is GPT2LMHeadModel:
         return model.transformer.ln_f
-    elif type(model) is LlamaForCausalLM:
-        return model.model.norm
-    elif type(model) is GemmaForCausalLM:
+    elif _is_llama_like(model):
         return model.model.norm
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -91,9 +109,9 @@ def get_prepend_space(model):
             return True
         elif "Llama-2" in model.config._name_or_path:
             return False
-    elif type(model) is Qwen2ForCausalLM:
+    elif type(model) in (Qwen2ForCausalLM, Qwen3ForCausalLM):
         return True
-    elif type(model) is GemmaForCausalLM:
+    elif type(model) in (GemmaForCausalLM, Cohere2ForCausalLM):
         return True
     else:
         raise ValueError(f"Model type {type(model)} not supported")
