@@ -24,6 +24,27 @@ INTER_PASS_SLEEP_SECONDS = 60  # wait between completion passes
 _logger = logging.getLogger(__name__)
 
 
+def _load_env_file(env_path: str) -> None:
+    """Load KEY=VALUE pairs from a local env file into os.environ."""
+    if not os.path.exists(env_path):
+        return
+
+    with open(env_path, encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_load_env_file(os.path.join(PROJECT_ROOT, "gpt-oss.env"))
+
+
 def _is_retryable(exc: BaseException) -> bool:
     """Retry only on rate-limit or transient server errors, not bad requests."""
     if isinstance(exc, RateLimitError):
@@ -52,8 +73,8 @@ def _before_sleep(retry_state):
 
 # %%
 
-ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "https://algoverse-2026-02-resource.openai.azure.com/openai/v1/")
-API_KEY  = os.environ.get("AZURE_OPENAI_API_KEY",  "9W4R1LKl3FOZVrjGfuQlYf16aaX196wTZnGjQz8LHhRNEiWhmMw4JQQJ99CCACHYHv6XJ3w3AAAAACOGJhQm")
+ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
+API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
 
 TARGET_LANGUAGES = {
     "fr": "French",
