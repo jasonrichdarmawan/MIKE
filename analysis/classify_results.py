@@ -5,9 +5,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
-from utils import get_answers, check_answer_in_pred
+from analysis.utils import get_answers, check_answer_in_pred
 
 
 def find_layers_by_classification(classified_generations: pd.DataFrame, classification: str | bool, col_name: str, apply_min: bool):
@@ -75,15 +75,15 @@ def classify_by_vanilla(generations: pd.DataFrame, merged: pd.DataFrame):
       - or the generated text string is exactly identical to the vanilla output.
     """
     merged["answers"] = pd.Series(
-        [get_answers(row, "e3")["e3_answers"] for row in tqdm(merged.to_dict("records"))],
+        [get_answers(row, "e3")["e3_answers"] for row in tqdm(merged.to_dict("records"), desc="Getting answers for classification")],
         index=merged.index
     )
     merged["generation_correct"] = pd.Series(
-        [check_answer_in_pred(row["generation"], row["answers"]) for row in tqdm(merged.to_dict("records"))],
+        [check_answer_in_pred(row["generation"], row["answers"]) for row in tqdm(merged.to_dict("records"), desc="Classifying generation correctness")],
         index=merged.index
     )
     merged["generation_vanilla_correct"] = pd.Series(
-        [check_answer_in_pred(row["generation_vanilla"], row["answers"]) for row in tqdm(merged.to_dict("records"))],
+        [check_answer_in_pred(row["generation_vanilla"], row["answers"]) for row in tqdm(merged.to_dict("records"), desc="Classifying vanilla generation correctness")],
         index=merged.index
     )
     return ((merged["generation_vanilla_correct"] & merged["generation_correct"]) |
@@ -121,7 +121,7 @@ def classify_prediction_correct_row(row):
 
 def classify_prediction_correct(generations: pd.DataFrame, target=None):
     return pd.Series(
-        [classify_prediction_correct_row(row) for row in tqdm(generations.to_dict("records"))],
+        [classify_prediction_correct_row(row) for row in tqdm(generations.to_dict("records"), desc="Classifying prediction correctness")],
         index=generations.index
     )
 
@@ -153,7 +153,7 @@ def classify_entity_row(row):
 
 def classify_entity(generations: pd.DataFrame, target=None):
     return pd.Series(
-        [classify_entity_row(row) for row in tqdm(generations.to_dict("records"))],
+        [classify_entity_row(row) for row in tqdm(generations.to_dict("records"), desc="Classifying entity")],
         index=generations.index
     )
 
@@ -176,7 +176,7 @@ def classify_generations(generations_path: str, classification_fn, target=None, 
 
     else:
         try:
-            generations = pd.read_csv(generations_path, index_col=0, dtype={"id": int}, escapechar='\\')
+            generations = pd.read_csv(generations_path, index_col=0, dtype={"id": int})
         except ValueError:
             print(f"Fixing generations from {generations_path}")
             with open(generations_path, "rb") as f:
@@ -185,7 +185,7 @@ def classify_generations(generations_path: str, classification_fn, target=None, 
             content = content.replace(b"\x0d", b"")
             with open(generations_path, "wb") as f:
                 f.write(content)
-            generations = pd.read_csv(generations_path, index_col=0, dtype={"id": int}, escapechar='\\')
+            generations = pd.read_csv(generations_path, index_col=0, dtype={"id": int})
 
         print(f"Loaded generations from {generations_path}")
         generations["classification"] = classification_fn(generations, target)
@@ -298,18 +298,18 @@ def main(args):
 
     two_hop = pd.read_csv(f"{args.results_dir}/two_hop.csv", index_col=0)
     base = two_hop[["id", "composition_correct"]]
-    df = base.merge(
-        entity_description_layers["e1"]["e2"], on="id", how="left").merge(
-        entity_description_layers["e1"]["e3"], on="id", how="left").merge(
-        entity_description_layers["last"]["e2"], on="id", how="left").merge(
-        entity_description_layers["last"]["e3"], on="id", how="left").merge(
-        activation_patching_layers["e1"]["original"], on="id", how="left").merge(
-        activation_patching_layers["last"]["original"], on="id", how="left").merge(
-        sublayer_projection_layers["attention"]["prediction"], on="id", how="left").merge(
-        sublayer_projection_layers["attention"]["e2"], on="id", how="left").merge(
-        sublayer_projection_layers["mlp"]["prediction"], on="id", how="left").merge(
-        sublayer_projection_layers["mlp"]["e2"], on="id", how="left").merge(
-        attention_knockout_layers["last"]["e1"], on="id", how="left")
+    df = base \
+        .merge(entity_description_layers["e1"]["e2"], on="id", how="left") \
+        .merge(entity_description_layers["e1"]["e3"], on="id", how="left") \
+        .merge(entity_description_layers["last"]["e2"], on="id", how="left") \
+        .merge(entity_description_layers["last"]["e3"], on="id", how="left") \
+        .merge(activation_patching_layers["e1"]["original"], on="id", how="left") \
+        .merge(activation_patching_layers["last"]["original"], on="id", how="left") \
+        .merge(sublayer_projection_layers["attention"]["prediction"], on="id", how="left") \
+        .merge(sublayer_projection_layers["attention"]["e2"], on="id", how="left") \
+        .merge(sublayer_projection_layers["mlp"]["prediction"], on="id", how="left") \
+        .merge(sublayer_projection_layers["mlp"]["e2"], on="id", how="left") \
+        .merge(attention_knockout_layers["last"]["e1"], on="id", how="left")
 
     df.to_csv(f"{args.results_dir}/layers.csv")
 

@@ -9,8 +9,12 @@ from baukit import Trace, TraceDict
 
 from jaxtyping import Float, Int, Shaped
 
-from utils import get_prepend_space, get_layer_names, get_attention_modules, get_attention_layers_names, \
-    get_norm_module, get_mlp_layers_names
+from analysis.utils import (
+    get_prepend_space, get_layer_names, get_attention_modules, get_attention_layers_names,
+    get_norm_module, get_mlp_layers_names,
+)
+
+from tqdm.auto import tqdm
 
 
 def find_tokens(tokenizer, string_tokens: Int[Tensor, "prompt_size"], substring: str, prepend_space: bool, last=True):
@@ -54,7 +58,13 @@ def get_hidden_states(model, tokenizer, entities: list[str], prompts: list[str])
         model(**prompt_inputs)
         for i, idx in enumerate(entity_idx):
             if idx is not None:
-                entity_hidden_states[i] = torch.stack([trace[layer].output[0][i][idx].cpu() for layer in layers])
+                stacked = []
+                for layer in layers:
+                    output = trace[layer].output
+                    if type(output) is tuple:
+                        output = output[0]
+                    stacked.append(output[i][idx].cpu())
+                entity_hidden_states[i] = torch.stack(stacked)
 
     return torch.stack(entity_hidden_states)
 
@@ -134,11 +144,15 @@ def generate_with_patching_layer(model, tokenizer, hidden_state: Float[Tensor, "
     inputs, target_position = generate_patching_inputs(model, tokenizer, target_prompt, target_token_str)
 
     def replace_hidden_state_hook(output):
-        hs = output[0]
+        hs = output
+        if type(output) is tuple:
+            hs = hs[0]
         if hs.shape[1] == 1:  # After first replacement the hidden state is cached
             return output
         hs[target_position] = hidden_state.to(hs.device)
-        return (hs,) + output[1:]
+        if type(output) is tuple:
+            return (hs,) + output[1:]
+        return hs
 
     with torch.no_grad(), Trace(model, layer=target_layer, retain_output=False, edit_output=replace_hidden_state_hook):
         if do_sample:
@@ -172,8 +186,8 @@ def generate_with_patching_all_layers(model, tokenizer, hidden_states: Float[Ten
     layer_names = get_layer_names(model)
     layer_count = len(get_layer_names(model))
     generations = np.ndarray((layer_count, layer_count), dtype=object)
-    for source_layer in range(layer_count):
-        for target_layer in range(layer_count):
+    for source_layer in tqdm(range(layer_count), desc="Patching layers"):
+        for target_layer in tqdm(range(layer_count), desc="Generating"):
             hidden_state = hidden_states[:, source_layer, :]
             generations[source_layer, target_layer] = generate_with_patching_layer(model,
                                                                                    tokenizer,
@@ -241,23 +255,54 @@ def generate_with_attention_knockout(model, tokenizer, layer_idx: int, prompt: l
             else:
                 hidden_states = args[0]
             batch_size = hidden_states.shape[0]
-            num_tokens = hidden_states.shape[1]
-            attention_weight_size = (batch_size, model.config.num_attention_heads, num_tokens, num_tokens) # shape: (batch_size, num_heads, query_len, key_len)
-            prev_attention_mask = kwargs["attention_mask"]
-            new_attention_mask = torch.zeros(attention_weight_size, dtype=prev_attention_mask.dtype).to(
-                prev_attention_mask.device) + prev_attention_mask
+            query_len = hidden_states.shape[1]
+            prev_attention_mask = kwargs.get("attention_mask", None) # shape (batch_size, num_heads, query_len, key_len) or (batch_size, 1, query_len, key_len) or None
+            cache_position = kwargs.get("cache_position", None)
+
+            if prev_attention_mask is not None and prev_attention_mask.dim() == 4:
+                kv_len = prev_attention_mask.shape[-1]
+            elif cache_position is not None:
+                kv_len = int(cache_position.max().item()) + 1
+            else:
+                kv_len = query_len
+
+            attention_weight_size = (batch_size, model.config.num_attention_heads, query_len, kv_len) # shape: (batch_size, num_heads, query_len, key_len)
+            min_value = torch.finfo(hidden_states.dtype).min
+
+            if cache_position is not None:
+                query_positions = cache_position.to(hidden_states.device)
+            else:
+                query_positions = torch.arange(query_len, device=hidden_states.device)
+            key_positions = torch.arange(kv_len, device=hidden_states.device)
+            causal_bool = key_positions[None, :] <= query_positions[:, None]
+            causal_bool = causal_bool[None, None, :, :].expand(batch_size, model.config.num_attention_heads, query_len, kv_len)
+
+            new_attention_mask = torch.zeros(attention_weight_size, dtype=hidden_states.dtype, device=hidden_states.device)
+            new_attention_mask = new_attention_mask.masked_fill(~causal_bool, min_value)
+
+            if prev_attention_mask is not None:
+                if prev_attention_mask.dim() != 4:
+                    raise ValueError(f"Unsupported attention_mask shape: {tuple(prev_attention_mask.shape)}")
+                if prev_attention_mask.shape[-1] != kv_len:
+                    prev_attention_mask = prev_attention_mask[..., :kv_len]
+                if prev_attention_mask.shape[1] == 1 and model.config.num_attention_heads > 1:
+                    prev_attention_mask = prev_attention_mask.expand(-1, model.config.num_attention_heads, -1, -1)
+                if prev_attention_mask.dtype == torch.bool:
+                    new_attention_mask = new_attention_mask.masked_fill(~prev_attention_mask.to(hidden_states.device), min_value)
+                else:
+                    new_attention_mask = new_attention_mask + prev_attention_mask.to(hidden_states.device, dtype=hidden_states.dtype)
+
             if source == "all":
                 new_attention_mask[target_position[0], :, :, target_position[1]] = torch.finfo(model.dtype).min
             elif source == "last":
-                if num_tokens != 1:
+                if query_len != 1:
                     # Index 2 is Query (Receiver), Index 3 is Key (Sender)
                     # -1 refers to the LAST token in the sequence (the Query)
                     # target_position[1] refers to the token index of target_token_str (the Key)
                     new_attention_mask[target_position[0], :, -1, target_position[1]] = torch.finfo(model.dtype).min
             else:
-                if num_tokens != 1:
-                    new_attention_mask[target_position[0], :, source_position, target_position[1]] = torch.finfo(
-                        model.dtype).min
+                if query_len != 1:
+                    new_attention_mask[target_position[0], :, source_position, target_position[1]] = torch.finfo(model.dtype).min
 
             new_kwargs["attention_mask"] = new_attention_mask
             return original_forward_func(*new_args, **new_kwargs)
@@ -300,7 +345,7 @@ def generate_with_attention_knockout_all_layers(model, tokenizer, prompt: list[s
     - target_token_str: "the country of citizenship of Stephen Harper" / "the head of state of Canada" / "citizenship" / "state"
     """
     generations_by_layer = {}
-    for layer in range(-1, model.config.num_hidden_layers):
+    for layer in tqdm(range(-1, model.config.num_hidden_layers), desc="Knockout attention at layers"):
         generations_by_layer[layer] = generate_with_attention_knockout(model, tokenizer, layer, prompt, source,
                                                                        target_token_str, default_decoding, k,
                                                                        return_probabilities)
@@ -327,12 +372,19 @@ def get_entity_ranks(model, tokenizer, projections: Float[Tensor, "num_prompts n
     return ranks
 
 
-def get_sublayer_projection(model, tokenizer, prompt: list[str], bridge_entities: list[list[str]], answers: list[list[str]], layers: list[str]
-                            ) -> tuple[Shaped[ndarray, "num_prompts num_layers k"], 
-                                       Float[Tensor, "num_prompts num_layers k"], 
-                                       list[Shaped[ndarray, "num_layers num_bridge_entities"]], 
-                                       list[Shaped[ndarray, "num_layers num_answers"]], 
-                                       list[Shaped[ndarray, "num_layers 1"]]]:
+def get_sublayer_projection(
+    model, 
+    tokenizer, 
+    prompt: list[str], 
+    bridge_entities: list[list[str]], 
+    answers: list[list[str]], 
+    layers: list[str],
+) -> tuple[Shaped[ndarray, "num_prompts num_layers k"], 
+           Float[Tensor, "num_prompts num_layers k"], 
+           list[Shaped[ndarray, "num_layers num_bridge_entities"]], 
+           list[Shaped[ndarray, "num_layers num_answers"]], 
+           list[Shaped[ndarray, "num_layers 1"]]
+]:
     """
     The goals are:
     - to project the attention / mlp sublayer outputs to the vocabulary space and get the top k tokens.

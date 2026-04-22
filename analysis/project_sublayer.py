@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from datasets import Dataset
-from patched_generation import get_attention_projection, get_mlp_projection
-from utils import load_model, load_tokenizer, get_answers
+from analysis.patched_generation import get_attention_projection, get_mlp_projection
+from analysis.utils import load_model, load_tokenizer, get_answers
 
+from tqdm.auto import tqdm
 
 def project_attention(entries, model, tokenizer, target: str):
     tokenizer.padding_side = "left"
@@ -64,23 +64,30 @@ def main(args):
     print(args)
     if not args.input_path:
         args.input_path = f"../datasets/{args.model_name}/two_hop.csv"
-    dataset = pd.read_csv(args.input_path, index_col=0)
-    dataset = Dataset.from_pandas(dataset, preserve_index=False)
+    dataset = pd.read_csv(args.input_path)
 
     model = load_model(args.model_name)
     model.eval()
     tokenizer = load_tokenizer(args.model_name)
-    dataset = dataset.map(get_answers, fn_kwargs={"key": "e3"})
-    dataset = dataset.map(get_answers, fn_kwargs={"key": "e2"})
-    generations = dataset.map(
-        project_attention,
-        fn_kwargs={"model": model, "tokenizer": tokenizer, "target": args.target},
-        batched=True,
-        batch_size=args.batch_size,
-        remove_columns=dataset.column_names
-    )
+    dataset = dataset.reset_index().rename(columns={"index": "id"})
+    records = dataset.to_dict("records")
+    for row in records:
+        row.update(get_answers(row, key="e3"))
+        row.update(get_answers(row, key="e2"))
 
-    generations = generations.to_pandas()
+    generation_frames = []
+    for start in tqdm(range(0, len(records), args.batch_size), desc=f"Generating {args.target} projections"):
+        batch = records[start:start + args.batch_size]
+        entries = {k: [row[k] for row in batch] for k in batch[0].keys()}
+        generated = project_attention(
+            entries,
+            model=model,
+            tokenizer=tokenizer,
+            target=args.target,
+        )
+        generation_frames.append(pd.DataFrame(generated))
+
+    generations = pd.concat(generation_frames)
     generations = generations.sort_values(["id", "layer"])
     generations = generations.reset_index(drop=True)
     generations["top_k_words"] = generations["top_k_words"].apply(list)

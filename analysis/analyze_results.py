@@ -62,11 +62,29 @@ def plot_layer_matrix(generations: pd.DataFrame, target_classification: str | bo
     - if target_classification is False:
       - entity_description
     """
+    required_cols = {"source_layer", "target_layer", "classification"}
+    if generations.empty or not required_cols.issubset(set(generations.columns)):
+        with sns.plotting_context("paper", font_scale=1.5):
+            fig, ax = plt.subplots()
+            ax.text(0.5, 0.5, "No data available", ha="center", va="center")
+            ax.set_axis_off()
+            save_plot(path, legend=False)
+        return
+
     success_matrix = (generations.groupby(["source_layer", "target_layer"])["classification"].
                       value_counts(normalize=True).
                       unstack("classification").
                       fillna(0)
                       * 100)
+
+    if target_classification not in success_matrix.columns:
+        with sns.plotting_context("paper", font_scale=1.5):
+            fig, ax = plt.subplots()
+            ax.text(0.5, 0.5, f"No '{target_classification}' data", ha="center", va="center")
+            ax.set_axis_off()
+            save_plot(path, legend=False)
+        return
+
     matrix = success_matrix[target_classification].unstack("target_layer").fillna(0)
     plot_matrix(matrix.to_numpy(), matrix.columns, "Target Layer", "Source Layer")
     save_plot(path, legend=True)
@@ -126,14 +144,22 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
     correct_df = correct_df.copy()
     incorrect_df = incorrect_df.copy()
 
+    preprocess_cols = [
+        "e1_e2_entity_layer",
+        "last_e1_attention_knockout_layers",
+        "attention_e2_projection_layers",
+        "last_e2_entity_layer",
+        "last_e3_entity_layer",
+        "mlp_prediction_projection_layers",
+    ]
+
     for df in [correct_df, incorrect_df]:
-        for col in ["e1_e2_entity_layer", "last_e1_attention_knockout_layers", "attention_e2_projection_layers",
-                    "last_e2_entity_layer", "last_e3_entity_layer", "mlp_prediction_projection_layers"]:
+        for col in preprocess_cols:
             df[col] = df[col].apply(lambda x: min(x) if type(x) is list and len(x) > 0 else np.nan)
 
-    correct_df["info_prop"] = correct_df.apply(lambda row: np.nanmean(
-        [row["last_e1_attention_knockout_layers"], row["attention_e2_projection_layers"], row["last_e2_entity_layer"]]),
-                                               axis=1)
+    correct_df["info_prop"] = correct_df[
+        ["last_e1_attention_knockout_layers", "attention_e2_projection_layers", "last_e2_entity_layer"]
+    ].mean(axis=1, skipna=True)
     correct_data = pd.melt(correct_df, value_vars=["e1_e2_entity_layer", "info_prop", "last_e3_entity_layer",
                                                    "mlp_prediction_projection_layers"], value_name='value',
                            var_name='stage')
@@ -141,9 +167,9 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
     print("Correct setting stages:")
     print(get_stage_layers(correct_df))
 
-    incorrect_df["info_prop"] = incorrect_df.apply(lambda row: np.nanmean(
-        [row["last_e1_attention_knockout_layers"], row["attention_e2_projection_layers"], row["last_e2_entity_layer"]]),
-                                                   axis=1)
+    incorrect_df["info_prop"] = incorrect_df[
+        ["last_e1_attention_knockout_layers", "attention_e2_projection_layers", "last_e2_entity_layer"]
+    ].mean(axis=1, skipna=True)
     incorrect_data = pd.melt(incorrect_df, value_vars=["e1_e2_entity_layer", "info_prop", "last_e3_entity_layer",
                                                        "mlp_prediction_projection_layers"], value_name='value',
                              var_name='stage')
@@ -159,6 +185,7 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
         "mlp_prediction_projection_layers": "Prediction Extracted"
     }
     combined = combined.replace(labels)
+
     with sns.plotting_context("paper", font_scale=1.5):
         fig, ax = plt.subplots()
         hatches = ['//', '..']
@@ -266,8 +293,10 @@ def main(args):
         "meta-llama/Llama-2-7b-hf": 32,
         "meta-llama/Llama-2-13b-hf": 40,
         "meta-llama/Meta-Llama-3-8B": 32,
-        "meta-llama/Meta-Llama-3-70B": 80
+        "meta-llama/Meta-Llama-3-70B": 80,
+        "Qwen/Qwen3-4B-Instruct-2507": 36,
     }
+    
     layers = {}
     for model in args.models:
         print(f"Processing {model} stages")

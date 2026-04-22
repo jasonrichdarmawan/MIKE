@@ -7,7 +7,7 @@ import requests
 from SPARQLWrapper import SPARQLWrapper, JSON
 from tqdm import tqdm
 
-from utils import print_dataset_statistics
+from analysis.utils import print_dataset_statistics
 
 ENTITY_TYPES = [
     "Q5",  # human
