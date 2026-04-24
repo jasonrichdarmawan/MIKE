@@ -46,28 +46,28 @@ from analysis.analyze_results import (
 # if __name__ == "__main__":
 #     import os
 #     import sys
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = [
 #         "run_two_hop.py",
-#         "--editing_method", "no_edit",
+#         "--editing_method", "AlphaEdit",
 #         # "--model_type", "qwen3-4b-instruct",
-#         # "--model_type", "tiny-aya-global",
+#         "--model_type", "tiny-aya-global",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
-#         "--model_type", "CohereLabs/tiny-aya-global",
+#         # "--model_type", "CohereLabs/tiny-aya-global",
 #         "--dtype", "bfloat16",
-#         "--sample_size", "1000",
-#         "--batch_size", "32",
+#         "--sample_size", "4",
+#         "--batch_size", "2",
 #         # "--save_edited_model",
 #         # "--load_edited_model",
 #         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s16_s2/AlphaEdit_20260421-160250/edit_num_0014_case_0779",
 #         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260421-160120/edit_num_0739_case_80844",
 #         # "--load_eval_path", "output/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/no_edit_20260421-224559",
-#         "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/no_edit_20260421-225846",
+#         # "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/no_edit_20260421-225846",
 #         "--eval_with_chat_template",
-#         # "--do_evaluate",
+#         "--do_evaluate",
 #         # "--do_sublayer_projections",
 #         # "--do_patchscopes",
-#         "--do_knockout_attention",
+#         # "--do_knockout_attention",
 #     ]
 
 if __name__ == "__main__":
