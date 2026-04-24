@@ -32,9 +32,9 @@ def find_layers_by_classification(classified_generations: pd.DataFrame, classifi
 
     Caveats:
     - if classification is str:
-      - knockout_attention
       - entity_description
     - if classification is bool:
+      - knockout_attention
       - sublayer_projection
       - activation_patching
     - if layer_col == "layer", then the .csv file from experiments:
@@ -201,6 +201,13 @@ def classify_generations(generations_path: str, classification_fn, target=None, 
 
 
 def load_attention_knockouts(dataset_dir: str):
+    """
+    Example:
+    ret['last']['e1']:
+    classification | id.   | last_e1_attention_knockout_layers
+    0              | 36468 | [19, 20, 21, 22, 23, 24, 25]
+    1              | 71021 | [5, 6, 7, 8, 9, 10, ..., 25]
+    """
     ret = defaultdict(dict)
     for source in ["last", "e1", "r1", "r2"]:
         for target in ["e1", "r1", "r2"]:
@@ -232,6 +239,15 @@ def load_activation_patching(dataset_dir: str, case_name: str | None=None):
 
 def load_entity_description_generations(dataset_dir: str):
     """
+    Example:
+    layers['last']['e2']:
+    classification | id    | last_e2_entity_layer
+    0              | 36468 | NaN
+    1              | 71021 | NaN
+    layers['last']['e3']:
+    classification | id    | last_e3_entity_layer
+    0              | 36468 | [14]
+    1              | 71021 | [34]
     Caveat:
     - Biran et al. [1] entity description generaton experiment' require to classify generations from 3 csv files. However, 1 csv file size is approximately 9.05 GB.
 
@@ -257,6 +273,26 @@ def load_entity_description_generations(dataset_dir: str):
 
 def load_sublayer_projections(dataset_dir: str):
     """
+    Note: 'prediction' refers to the predicted tokens rank based on `predicted_tokens = logits[:, -1, :].max(dim=-1).indices`.
+    
+    Example:
+    layers['attention']['prediction']:
+    classification | id    | attention_prediction_projection_layers
+    0              | 36468 | [29]
+    1              | 71021 | NaN
+    layers['attention']['e2']:
+    classification | id    | attention_e2_projection_layers
+    0              | 36468 | [27]
+    1              | 71021 | [25, 27, 28, 34]
+    layers['mlp']['prediction']:
+    classification | id    | mlp_prediction_projection_layers
+    0              | 36468 | NaN
+    1              | 71021 | NaN
+    layers['mlp']['e2']:
+    classification | id    | mlp_e2_projection_layers
+    0              | 36468 | [29]
+    1              | 71021 | [21]
+    
     Caveat:
     - this function use `classify_generations(..., use_cache=False)` because this function calls `classify_sublayer_projection(...)` twice on the same source file but with different targets
     """

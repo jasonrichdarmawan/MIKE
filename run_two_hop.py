@@ -130,7 +130,7 @@ if __name__ == "__main__":
     fh_path = f"{SAVE_METRICS_DIR}/output_{datetime_str}.log"
     os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
     logger = setup_logger(log_file=fh_path)
-    print(f"Saving metrics to {fh_path}")
+    print(f"Saving output log to {fh_path}")
     
 # %%
 

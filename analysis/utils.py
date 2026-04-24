@@ -148,8 +148,16 @@ def _extract_answer_text_xml_tag(prediction: str, base_model: bool):
     return text.strip()
 
 def check_answer_in_pred(pred: str, answers: list[str]):
-    pred = pred.lower()
-    return any(a.lower() in pred for a in answers)
+    """
+    Caveat: HoppingTooLate implementation in [repository](https://github.com/edenbiran/HoppingTooLate/blob/6c4b43e084a71a83df0bf2cb3a0c0f1b5d4be420/src/utils.py#L108-L110) have a bug
+    For example,
+    `pred = "Germany.  Guste Köster is a German artist"`
+    `answers = ['United States of America', 'America', 'United States', 'US', 'the States', 'the U.S.', 'the United States', 'the United States of America', 'the US', 'the USA', 'U. S.', 'U. S. A.', 'U.S.', 'U.S.A.', 'US of A', 'USA', 'Merica', 'the U.S. of A', 'the U.S. of America', 'the U.S.A.', 'the US of A', 'the US of America', 'U.S. of America', 'US of America', 'America (United States)']`
+    The problem is one of the item in `answers` is "US". Consequently, the prediction is marked as correct although it is clearly wrong.
+    Since we are expecting `pred` to be entity, then there is no need to lower the case of `pred` and `answers`.
+    """
+    pred = pred
+    return any(a in pred for a in answers)
 
 def generate_and_test_answers(model, tokenizer, task: str, prompts: list[str], ids: list[int], answers: list[list[str]], check_answer_fn: callable, base_model=False, base_model_stop_strings=["\n\n", "Question:"]):
     tokenizer.padding_side = "left"
