@@ -118,21 +118,22 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
     EDITING_METHOD=no_edit
     EDITING_METHOD=AlphaEdit
     EDITING_METHOD=AlphaEdit_Circuit
+    EDITING_METHOD=Revised_AlphaEdit
 
-    MODEL_TYPE=qwen3-4b-instruct
     MODEL_TYPE=tiny-aya-global
+    MODEL_TYPE=qwen3-4b-instruct
     python run_two_hop.py \
-    --editing_method $EDITING_METHOD \
-    --model_type $MODEL_TYPE \
-    --dtype bfloat16 \
-    --sample_size 1000 \
-    --batch_size 32 \
-    --save_edited_model \
-    --eval_with_chat_template \
-    --do_evaluate \
-    --do_patchscopes \
-    --do_sublayer_projections \
-    --do_knockout_attention
+      --editing_method $EDITING_METHOD \
+      --model_type $MODEL_TYPE \
+      --dtype bfloat16 \
+      --sample_size 1000 \
+      --batch_size 32 \
+      --save_edited_model \
+      --eval_with_chat_template \
+      --do_evaluate \
+      --do_patchscopes \
+      --do_sublayer_projections \
+      --do_knockout_attention
     ```
 - E. Biran et al. [1]:
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
@@ -346,17 +347,17 @@ Just run the following commond:
 run.sh
 ```
 
-### MEMIT
+### Covariance
 
-MEMIT needs pre-computed covariance
+`ROME`, `R-ROME`, `MEMIT`, `IFMET`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit` needs a pre-computed covariance
 
 Note: [legacy-datasets/wikipedia](https://huggingface.co/datasets/legacy-datasets/wikipedia) have samples with very long text. Meanwhile, our GPUs are 2x 3090. Consequently, computing the activations even for 1 sample but with 11k tokens will resulted in OutOfMemory error. So, we use `--batch_tokens 4096` to truncate the 11k tokens to maximum of 4096 tokens.
 
 ```bash
 MODEL_NAME=Qwen/Qwen3-4B-Instruct-2507
 MODEL_NAME=CohereLabs/tiny-aya-global
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-  python -m EasyEdit.easyeditor.models.rome.layer_stats \
+
+python -m EasyEdit.easyeditor.models.rome.layer_stats \
   --model_name $MODEL_NAME \
   --apply_chat_template \
   --dataset wikipedia \
@@ -374,143 +375,83 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 
 no_edit
 ```bash
+EDITING_METHOD=no_edit
+
 MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
 MODEL_TYPE=CohereLabs/tiny-aya-global
 python test_cake.py \
-  --editing_method no_edit \
+  --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
   --sample_size 1000 \
+  --batch_size 32 \
   --generation_batch_size 128 \
   --glue_eval_steps 0 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
-ROME
+`ROME`, `R-ROME`, `MEMIT`, `IFMET`, `WISE`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit`
 ```bash
+EDITING_METHOD=ROME
+EDITING_METHOD=R-ROME
+EDITING_METHOD=MEMIT
+EDITING_METHOD=IFMET
+EDITING_METHOD=WISE
+EDITING_METHOD=AlphaEdit
+EDITING_METHOD=AlphaEdit_Circuit
+EDITING_METHOD=Revised_AlphaEdit
+
 MODEL_TYPE=qwen3-4b-instruct
 MODEL_TYPE=tiny-aya-global
 python test_cake.py \
-  --editing_method IFMET \
+  --editing_method $EDITING_METHOD \
   --model_type tiny-aya-global \
   --dtype bfloat16 \
   --eval_with_chat_template \
+  --sample_size 1000 \
   --batch_size 32 \
   --generation_batch_size 128 \
-  --sample_size 1000 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
 
-R-ROME
+`MeLLo` and `MeLLo_KV`
 ```bash
-MODEL_TYPE=qwen3-4b-instruct
-MODEL_TYPE=tiny-aya-global
-python test_cake.py \
-  --editing_method R-ROME \
-  --model_type $MODEL_TYPE \
-  --dtype bfloat16 \
-  --eval_with_chat_template \
-  --batch_size 32 \
-  --generation_batch_size 128 \
-  --sample_size 1000 \
-  --main_eval_steps 0 \
-  --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
-```
+EDITING_METHOD=MeLLo
+EDITING_METHOD=MeLLo_KV
 
-MeLLo
-```bash
-python test_cake.py \
-  --editing_method MeLLo \
-  --model_type Qwen/Qwen3-4B-Instruct-2507 \
-  --dtype bfloat16 \
-  --eval_with_chat_template \
-  --batch_size 2 \
-  --sample_size 4 \
-  --main_eval_steps 0 \
-  --data_name MQuAKE-CF-3k-v2-clke
-```
-
-MeLLo_KV
-```bash
 MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
 MODEL_TYPE=CohereLabs/tiny-aya-global
 python test_cake.py \
-  --editing_method MeLLo_KV \
+  --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
-  --generation_batch_size 16 \
   --sample_size 1000 \
+  --batch_size 32 \
+  --generation_batch_size 128 \
   --main_eval_steps 0 \
+  --glue_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
-WISE
+`CaKE`
 ```bash
-MODEL_TYPE=qwen3-4b-instruct
-MODEL_TYPE=tiny-aya-global
+EDITING_METHOD=CaKE
+
+MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+MODEL_TYPE=CohereLabs/tiny-aya-global
 python test_cake.py \
-  --editing_method WISE \
+  --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
   --sample_size 1000 \
-  --main_eval_steps 0 \
-  --data_name MQuAKE-CF-3k-v2-clke \
-  --load_edited_model \
-  --load_path checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/WISE/edit_num_1000_case_1001
-```
-
-CaKE
-```bash
-python test_cake.py \
-  --editing_method CaKE \
-  --model_type Qwen/Qwen3-4B-Instruct-2507 \
-  --dtype bfloat16 \
-  --eval_with_chat_template \
-  --batch_size 32 \
-  --sample_size 1000 \
-  --main_eval_steps 0 \
-  --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
-```
-
-AlphaEdit
-```bash
-MODEL_TYPE=tiny-aya-global
-python test_cake.py \
-  --editing_method AlphaEdit \
-  --model_type $MODEL_TYPE \
-  --dtype bfloat16 \
-  --eval_with_chat_template \
   --batch_size 32 \
   --generation_batch_size 128 \
-  --sample_size 1000 \
-  --main_eval_steps 0 \
-  --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
-```
-
-AlphaEdit_Circuit
-```bash
-MODEL_TYPE=qwen3-4b-instruct
-MODEL_TYPE=tiny-aya-global
-python test_cake.py \
-  --editing_method AlphaEdit_Circuit \
-  --model_type $MODEL_TYPE \
-  --dtype bfloat16 \
-  --eval_with_chat_template \
-  --batch_size 32 \
-  --generation_batch_size 64 \
-  --sample_size 1000 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model

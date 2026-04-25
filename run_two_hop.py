@@ -16,6 +16,7 @@ from datetime import datetime
 from EasyEdit.easyeditor import (
     AlphaEditHyperParams,
     AlphaEditCircuitHyperParams,
+    Revised_AlphaEditHyperParams,
 )
 
 from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
@@ -102,11 +103,13 @@ if __name__ == "__main__":
         pass
     elif args.editing_method == "AlphaEdit_Circuit":
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
+    elif args.editing_method == "Revised_AlphaEdit":
+        hparams = Revised_AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/Revised_AlphaEdit/{args.model_type}.yaml')
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
 
     apply_algo = None
-    if args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit"]:
+    if args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
         alg_name = hparams.alg_name
         apply_algo = ALG_DICT[alg_name]
 
@@ -231,7 +234,7 @@ if __name__ == "__main__":
         edit_cases = [edit_cases[i:i + args.batch_size] for i in range(0, len(edit_cases), args.batch_size)]
         if args.editing_method == "no_edit":
             pass
-        elif args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit"]:
+        elif args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
             for batch in tqdm(edit_cases, desc="Editing the model"):
                     model = edit(
                         model=model,
@@ -273,7 +276,7 @@ def do_evaluate(
     
     eval_cases = [cases[i:i + generation_batch_size] for i in range(0, len(cases), generation_batch_size)]
     for idx, batch in enumerate(tqdm(eval_cases, desc="Evaluating the model")):
-        if editing_method in ["no_edit", "AlphaEdit", "AlphaEdit_Circuit"]:
+        if editing_method in ["no_edit", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
             metrics = evaluate(
                 model=model,
                 tokenizer=tokenizer,

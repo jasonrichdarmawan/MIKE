@@ -42,7 +42,7 @@ def load_checkpoint(model_name, device_map, dtype, editing_method, load_path, **
     model = None
     tokenizer = None
     
-    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "IFMET", "CaKE"]:
         model = AutoModelForCausalLM.from_pretrained(load_path, device_map=device_map, dtype=getattr(torch, dtype))
         tokenizer = AutoTokenizer.from_pretrained(load_path)
     elif editing_method == "WISE":
@@ -60,7 +60,7 @@ def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num,
     checkpoint_path = os.path.join(checkpoint_root, checkpoint_name)
     os.makedirs(checkpoint_path, exist_ok=True)
 
-    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "IFMET", "CaKE"]:
         model.save_pretrained(
             checkpoint_path,
             safe_serialization=True,
@@ -188,12 +188,14 @@ if __name__ == "__main__":
         pass
     elif args.editing_method == "AlphaEdit_Circuit":
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
+    elif args.editing_method == "Revised_AlphaEdit":
+        hparams = Revised_AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/Revised_AlphaEdit/{args.model_type}.yaml')
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
     # In-Context Learning Editing Methods (e.g., MeLLo) do not require apply_algo
     apply_algo = None
-    if args.editing_method in ["LoRA", "ROME", "MEMIT", "R-ROME", "AlphaEdit", "WISE", "AlphaEdit_Circuit"]:
+    if args.editing_method in ["LoRA", "ROME", "MEMIT", "R-ROME", "AlphaEdit", "WISE", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
         apply_algo = ALG_DICT[hparams.alg_name]
     elif args.editing_method == "IFMET":
         apply_algo = ALG_DICT["MEMIT"]
@@ -327,7 +329,7 @@ def do_evaluation(
     """
     if editing_method in [
         "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE", "IFMET", "CaKE", 
-        "AlphaEdit_Circuit",
+        "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
         metrics = evaluate(
             model=model,
@@ -418,14 +420,14 @@ def do_edit(
         loc_index = 0
     
     indices = list(range(0, len(data), batch_size))
-    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "WISE", "IFMET", "CaKE"]:
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "WISE", "IFMET", "CaKE"]:
         all_metrics = {}
         
         for start_idx in tqdm(indices, desc="Editing the model"):
             end = min(start_idx + batch_size, len(data))
             items = data[start_idx:end]
             
-            if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
+            if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
                 model = edit(
                     model=model,
                     tokenizer=tokenizer,
@@ -507,7 +509,7 @@ if __name__ == "__main__":
             kwargs["languages"] = ["en", "de", "fr", "ja", "zh"]
             all_metrics = {language: [] for language in kwargs["languages"]}
         
-        if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
+        if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
             kwargs["hparams"] = hparams
             kwargs["apply_algo"] = apply_algo
         elif args.editing_method == "WISE":

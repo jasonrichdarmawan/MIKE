@@ -1090,7 +1090,7 @@ def edit(model, tokenizer, items, hparams, apply_algo):
                 copy=False,
                 return_orig_weights=False,
             )
-    else:
+    elif hparams.alg_name in ["LoRA", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
         model, _ = apply_algo(
             model,
             tokenizer,
@@ -1099,6 +1099,8 @@ def edit(model, tokenizer, items, hparams, apply_algo):
             copy=False,
             return_orig_weights=False,
         )
+    else:
+        raise ValueError(f"Unknown alg_name: {hparams.alg_name}")
     
     return model
 
@@ -1218,7 +1220,7 @@ def evaluate(
     
     if alg_name not in [
         "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE",
-        "IFMET", "CaKE", "AlphaEdit_Circuit",
+        "IFMET", "CaKE", "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
         raise ValueError(f"Unknown alg_name: {alg_name}")
     all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=kwargs["languages"])
