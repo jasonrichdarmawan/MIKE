@@ -273,8 +273,9 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
     labels = {
         "e1_e2_entity_layer": "1st Hop Resolved",
         "info_prop": "Info Propagation",
+        "e1_e3_entity_layer": "$e_3$ from $t_1$",
         "last_e3_entity_layer": "2nd Hop Resolved",
-        "attention_prediction_projection_layers": "Prediction from Attention",
+        "attention_prediction_projection_layers": "Prediction from Attn",
         "mlp_prediction_projection_layers": "Prediction from MLP",
     }
     combined = combined.replace(labels)

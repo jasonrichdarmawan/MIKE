@@ -121,7 +121,18 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 
     MODEL_TYPE=qwen3-4b-instruct
     MODEL_TYPE=tiny-aya-global
-    python run_two_hop.py --editing_method $EDITING_METHOD --model_type $MODEL_TYPE --dtype bfloat16 --sample_size 1000 --batch_size 32 --eval_with_chat_template --do_evaluate --do_sublayer_projections --do_knockout_attention
+    python run_two_hop.py \
+    --editing_method $EDITING_METHOD \
+    --model_type $MODEL_TYPE \
+    --dtype bfloat16 \
+    --sample_size 1000 \
+    --batch_size 32 \
+    --save_edited_model \
+    --eval_with_chat_template \
+    --do_evaluate \
+    --do_patchscopes \
+    --do_sublayer_projections \
+    --do_knockout_attention
     ```
 - E. Biran et al. [1]:
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
@@ -383,11 +394,12 @@ ROME
 MODEL_TYPE=qwen3-4b-instruct
 MODEL_TYPE=tiny-aya-global
 python test_cake.py \
-  --editing_method ROME \
+  --editing_method IFMET \
   --model_type tiny-aya-global \
   --dtype bfloat16 \
   --eval_with_chat_template \
   --batch_size 32 \
+  --generation_batch_size 128 \
   --sample_size 1000 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
