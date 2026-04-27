@@ -9,6 +9,9 @@
 
 ---
 
+## Pre-computed covariance, checkpoints, model-specific two hop CF benchmarks, logs
+
+You can download the pre-computed covariance [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/data/stats), checkpoints [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/checkpoints), model-specific two hop CF benchmarks [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/datasets), and the logs [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/output)
 
 ## 🌟Overview
 This work aims to improve the knowledge editing performance under the multi-hop reasoning settings.
@@ -352,6 +355,8 @@ run.sh
 `ROME`, `R-ROME`, `MEMIT`, `IFMET`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit` needs a pre-computed covariance
 
 Note: [legacy-datasets/wikipedia](https://huggingface.co/datasets/legacy-datasets/wikipedia) have samples with very long text. Meanwhile, our GPUs are 2x 3090. Consequently, computing the activations even for 1 sample but with 11k tokens will resulted in OutOfMemory error. So, we use `--batch_tokens 4096` to truncate the 11k tokens to maximum of 4096 tokens.
+
+Note 2: Pre-computing the covariance will take approximately 23 hours on 2x 3090. You can download [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/data/stats) to save time.
 
 ```bash
 MODEL_NAME=Qwen/Qwen3-4B-Instruct-2507

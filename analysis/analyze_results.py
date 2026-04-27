@@ -171,8 +171,8 @@ def get_stage_layers(df: pd.DataFrame):
             "info_prop", 
             "e1_e3_entity_layer",
             "last_e3_entity_layer", 
+            "attention_prediction_projection_layers",
             "mlp_prediction_projection_layers",
-            "attention_prediction_projection_layers"
         ],
         "proportion": [
             df["e1_e2_entity_layer"].count() / len(df),
