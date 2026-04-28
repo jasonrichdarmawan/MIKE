@@ -35,7 +35,7 @@ def plot_matrix(matrix: np.array, labels: pd.Index, x_label: str, y_label: str, 
     - Dark color represents low values (close to 0)
     - Light color represents high values (close to vmax)
     """
-    with plt.rc_context(rc={"font.size": 60}):
+    with plt.rc_context(rc={"font.size": 42}):
         fig, ax = plt.subplots()
         fig.set_size_inches(20, 20)
         if vmax is not None:
@@ -43,14 +43,24 @@ def plot_matrix(matrix: np.array, labels: pd.Index, x_label: str, y_label: str, 
         else:
             im = ax.imshow(matrix, origin='lower')
         divider = make_axes_locatable(ax)
+        
         cax = divider.append_axes('right', size='5%', pad=0.5)
-        fig.colorbar(im, cax=cax, orientation='vertical')
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-        ticks = np.arange(0, len(labels), 8)
-        ticks_labels = [labels[i] for i in ticks]
-        ax.set_xticks(ticks, labels=ticks_labels)
-        ax.set_yticks(ticks, labels=ticks_labels)
+        cbar = fig.colorbar(im, cax=cax, orientation='vertical')
+        cbar.set_label("Percentage of Cases", fontsize=30)
+        cbar.ax.tick_params(labelsize=26)
+        
+        ax.set_xlabel(x_label, fontsize=36, labelpad=18)
+        ax.set_ylabel(y_label, fontsize=36, labelpad=18)
+        
+        max_ticks = 12
+        label_count = len(labels)
+        step = max(1, int(np.ceil(label_count / max_ticks)))
+        ticks = np.unique(np.append(np.arange(0, label_count, step), label_count - 1)).astype(int)
+        tick_labels = [labels[i] for i in ticks]
+        ax.set_xticks(ticks, labels=tick_labels)
+        ax.set_yticks(ticks, labels=tick_labels)
+        ax.tick_params(axis='both', which='major', labelsize=28)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right', rotation_mode='anchor')
 
 
 def plot_layer_matrix(generations: pd.DataFrame, target_classification: str | bool, path: str):
@@ -59,32 +69,89 @@ def plot_layer_matrix(generations: pd.DataFrame, target_classification: str | bo
     - target_classification: "e2" / "e3"
     - if target_classification is True:
       - backpatching (i.e. activation patching)
-    - if target_classification is False:
+    - if target_classification is str:
       - entity_description
+    
+    generations.groupby(["source_layer", "target_layer"])["classification"].value_counts(normalize=False)[14]:
+    target_layer | classification
+    0            | other            2
+    ...          |
+    29           | e3               1
+                 | other            1
+    ...          |
+    generations.groupby(["source_layer", "target_layer"])["classification"].value_counts(normalize=True)[14]:
+    target_layer | classification
+    0            | other            1.0
+    ...          |
+    29           | e3               0.5
+                 | other            0.5
+    ...
     """
-    success_matrix = (generations.groupby(["source_layer", "target_layer"])["classification"].
-                      value_counts(normalize=True).
-                      unstack("classification").
-                      fillna(0)
-                      * 100)
+    success_matrix = (
+        generations \
+            .groupby(["source_layer", "target_layer"])["classification"]
+            .value_counts(normalize=True)
+            .unstack("classification")
+            .fillna(0)
+            * 100
+    )
+
+    if target_classification not in success_matrix.columns:
+        with sns.plotting_context("paper", font_scale=1.5):
+            fig, ax = plt.subplots()
+            ax.text(0.5, 0.5, f"No '{target_classification}' data", ha="center", va="center")
+            ax.set_axis_off()
+            save_plot(path, legend=False)
+        return
+
     matrix = success_matrix[target_classification].unstack("target_layer").fillna(0)
     plot_matrix(matrix.to_numpy(), matrix.columns, "Target Layer", "Source Layer")
     save_plot(path, legend=True)
 
 
 def get_entity_counts(df: pd.DataFrame):
+    """
+    Example:
+    df["e1_e2_entity_layer"]:
+    0 | NaN
+    1 | NaN
+    df["last_e2_entity_layer"]:
+    0 | NaN
+    1 | NaN
+    df["last_e2_entity_layer"].count() == 0
+    df["e1_e3_entity_layer"]:
+    0 | NaN
+    1 | NaN
+    df["last_e3_entity_layer"]:
+    0 | [14]
+    1 | [14]
+    df["last_e3_entity_layer"].count() == 2
+            e2  e3
+    e1      0.0 0.0
+    last    0.0 1.0
+    """
     return pd.DataFrame({
         "e2": {
             "e1": df["e1_e2_entity_layer"].count() / len(df),
             "last": df["last_e2_entity_layer"].count() / len(df),
         },
         "e3": {
+            "e1": df["e1_e3_entity_layer"].count() / len(df), # expected to be 0.0, if not, then it indicates that this is a shortcut knowledge, where the model can directly decode the third hop entity from the first hop entity without going through the second hop entity.
             "last": df["last_e3_entity_layer"].count() / len(df),
         }
     })
 
 
 def get_sublayer_counts(df: pd.DataFrame, target: str):
+    """
+    df["attention_prediction_projection_layers"]:
+    0 | [29,30]
+    1 | [31]
+    df["attention_prediction_projection_layers"].explode().mean() == 30.0
+    df["mlp_prediction_projection_layers"]:
+    0 | NaN
+    1 | NaN
+    """
     return pd.DataFrame({
         "proportion": {
             "attention": df[f"attention_{target}_projection_layers"].count() / len(df),
@@ -99,25 +166,51 @@ def get_sublayer_counts(df: pd.DataFrame, target: str):
 
 def get_stage_layers(df: pd.DataFrame):
     return pd.DataFrame({
-        "stage": ["e1_e2_entity_layer", "info_prop", "last_e3_entity_layer", "mlp_prediction_projection_layers"],
-        "proportion": [df["e1_e2_entity_layer"].count() / len(df),
-                       df["info_prop"].count() / len(df),
-                       df["last_e3_entity_layer"].count() / len(df),
-                       df["mlp_prediction_projection_layers"].count() / len(df)],
-        "layer": [df["e1_e2_entity_layer"].mean(), df["info_prop"].mean(), df["last_e3_entity_layer"].mean(),
-                  df["mlp_prediction_projection_layers"].mean()],
+        "stage": [
+            "e1_e2_entity_layer", 
+            "info_prop", 
+            "e1_e3_entity_layer",
+            "last_e3_entity_layer", 
+            "attention_prediction_projection_layers",
+            "mlp_prediction_projection_layers",
+        ],
+        "proportion": [
+            df["e1_e2_entity_layer"].count() / len(df),
+            df["info_prop"].count() / len(df),
+            df["e1_e3_entity_layer"].count() / len(df),
+            df["last_e3_entity_layer"].count() / len(df),
+            df["attention_prediction_projection_layers"].count() / len(df),
+            df["mlp_prediction_projection_layers"].count() / len(df),
+        ],
+        "layer": [
+            df["e1_e2_entity_layer"].mean(), 
+            df["info_prop"].mean(), 
+            df["e1_e3_entity_layer"].mean(),
+            df["last_e3_entity_layer"].mean(),
+            df["attention_prediction_projection_layers"].mean(),
+            df["mlp_prediction_projection_layers"].mean(),
+        ],
     })
 
 
 def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, path: str):
     """
+    Note:
+    - "..._entity_layer": generated by `generate_entity_description.py` entity description generation experiment
+    - "..._projection_layers": generated by `project_sublayer.py` projection experiment
+    - "..._attention_knockout_layers": generated by `knockout_attention.py` attention knockout experiment
+    
     Caveat:
     - col "{source}_{target}_entity_layer": Layer where the target hop entity is decoded
       - e.g "e1_e2_entity_layer": Layer where the second hop entity is decoded when the activation of the first hop entity is patched in to another prompt.
     - col "{source}_{target}_knockout_layers": Layers where the target hop entity is no longer decoded after knocking out attention from the source hop entity position to the target hop entity position
-      - e.g "last_e1_attention_knockout_layers": Layers where the first hop entity is no longer decoded after knocking out attention from the prompt's last token position to the first hop entity
+      - e.g "last_e1_attention_knockout_layers": \
+          Setting: Knockout attention from the prompt's last token position to the first hop entity position \
+          Meaning: Layers where the attention is knocked out and the generated tokens changed or become incorrect, indicating that the model can no longer decode the first hop entity from these layers after the knockout, thus these layers are critical for decoding the first hop entity.
     - col "{sublayer}_{target}_projection_layers": Layers where the target hop entity is decoded from the sublayer's projection
-      - e.g "attention_e2_projection_layers": Layers where the second hop entity is decoded from the attention sublayer's projection
+      - e.g "attention_e2_projection_layers": \
+          Setting: Project the attention sublayer output to the vocabulary space
+          Meaning: Layers where the second hop entity is decoded from the attention sublayer's projection
     - col "info_prop": Mean layer where information is propagated from the first hop entity to the second hop entity, calculated as the mean of
       - "last_e1_attention_knockout_layers"
       - "attention_e2_projection_layers"
@@ -126,27 +219,52 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
     correct_df = correct_df.copy()
     incorrect_df = incorrect_df.copy()
 
+    preprocess_cols = [
+        "e1_e2_entity_layer",
+        "last_e1_attention_knockout_layers",
+        "attention_e2_projection_layers",
+        "last_e2_entity_layer",
+        "e1_e3_entity_layer",
+        "last_e3_entity_layer",
+        "attention_prediction_projection_layers",
+        "mlp_prediction_projection_layers",
+    ]
+
     for df in [correct_df, incorrect_df]:
-        for col in ["e1_e2_entity_layer", "last_e1_attention_knockout_layers", "attention_e2_projection_layers",
-                    "last_e2_entity_layer", "last_e3_entity_layer", "mlp_prediction_projection_layers"]:
+        for col in preprocess_cols:
             df[col] = df[col].apply(lambda x: min(x) if type(x) is list and len(x) > 0 else np.nan)
 
-    correct_df["info_prop"] = correct_df.apply(lambda row: np.nanmean(
-        [row["last_e1_attention_knockout_layers"], row["attention_e2_projection_layers"], row["last_e2_entity_layer"]]),
-                                               axis=1)
-    correct_data = pd.melt(correct_df, value_vars=["e1_e2_entity_layer", "info_prop", "last_e3_entity_layer",
-                                                   "mlp_prediction_projection_layers"], value_name='value',
-                           var_name='stage')
+    info_prop_cols = [
+        "last_e1_attention_knockout_layers",
+        "attention_e2_projection_layers",
+        "last_e2_entity_layer",
+    ]
+    correct_df["info_prop"] = correct_df[info_prop_cols].mean(axis=1, skipna=True)
+    cols = [
+        "e1_e2_entity_layer",
+        "info_prop",
+        "e1_e3_entity_layer",
+        "last_e3_entity_layer",
+        "attention_prediction_projection_layers",
+        "mlp_prediction_projection_layers"
+    ]
+    correct_data = pd.melt(
+        correct_df, 
+        value_vars=cols,
+        value_name='value',
+        var_name='stage',
+    )
     correct_data["Two-Hop Query Answer"] = "Correct"
     print("Correct setting stages:")
     print(get_stage_layers(correct_df))
 
-    incorrect_df["info_prop"] = incorrect_df.apply(lambda row: np.nanmean(
-        [row["last_e1_attention_knockout_layers"], row["attention_e2_projection_layers"], row["last_e2_entity_layer"]]),
-                                                   axis=1)
-    incorrect_data = pd.melt(incorrect_df, value_vars=["e1_e2_entity_layer", "info_prop", "last_e3_entity_layer",
-                                                       "mlp_prediction_projection_layers"], value_name='value',
-                             var_name='stage')
+    incorrect_df["info_prop"] = incorrect_df[info_prop_cols].mean(axis=1, skipna=True)
+    incorrect_data = pd.melt(
+        incorrect_df, 
+        value_vars=cols,
+        value_name='value',
+        var_name='stage',
+    )
     incorrect_data["Two-Hop Query Answer"] = "Incorrect"
     print("Incorrect setting stages:")
     print(get_stage_layers(incorrect_df))
@@ -155,10 +273,13 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
     labels = {
         "e1_e2_entity_layer": "1st Hop Resolved",
         "info_prop": "Info Propagation",
+        "e1_e3_entity_layer": "$e_3$ from $t_1$",
         "last_e3_entity_layer": "2nd Hop Resolved",
-        "mlp_prediction_projection_layers": "Prediction Extracted"
+        "attention_prediction_projection_layers": "Prediction from Attn",
+        "mlp_prediction_projection_layers": "Prediction from MLP",
     }
     combined = combined.replace(labels)
+
     with sns.plotting_context("paper", font_scale=1.5):
         fig, ax = plt.subplots()
         hatches = ['//', '..']
@@ -186,27 +307,74 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
         save_plot(f"{path}/stages_boxplot.pdf", ylabel="Layer", legend=False)
 
 
-def plot_series(series: pd.Series, label: str, layers: int, dropna=True, ax=None, linestyle="-"):
+def plot_series(series: pd.Series, label: str, layers: int, dropna=True, ax=None, linestyle="-", x_offset: float = 0.0, marker: str | None = None):
     data = series.value_counts(normalize=True, dropna=dropna).sort_index().reindex(range(layers), fill_value=0) * 100
+    x = np.arange(layers, dtype=float) + x_offset
     if ax is not None:
-        return sns.lineplot(data, ax=ax, label=label, linestyle=linestyle)
-    return sns.lineplot(data=data, label=label, linestyle=linestyle)
+        return sns.lineplot(x=x, y=data.to_numpy(), ax=ax, label=label, linestyle=linestyle, marker=marker)
+    return sns.lineplot(x=x, y=data.to_numpy(), label=label, linestyle=linestyle, marker=marker)
 
 
 def plot_min_entity_description_layers(df: pd.DataFrame, path: str, layers: int):
+    """
+    Example:
+    df["e1_e2_entity_layer"]:
+    id      |   e1_e2_entity_layer
+    36468   |   NaN
+    71021   |   NaN
+    70093   |   [12, 13]
+    """
     with sns.plotting_context("paper", font_scale=1.5):
         fig, ax = plt.subplots()
-        plot_series(df["e1_e2_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
-                    "$e_2$ decoded from $t_1$",
-                    layers,
-                    dropna=False,
-                    ax=ax)
-        plot_series(df["last_e3_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
-                    "$e_3$ decoded from $t_2$",
-                    layers,
-                    dropna=False,
-                    ax=ax,
-                    linestyle="--")
+        offsets = {
+            "e1_e2": -0.18,
+            "last_e2": -0.06,
+            "e1_e3": 0.06,
+            "last_e3": 0.18,
+        }
+        plot_series(
+            series=df["e1_e2_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            label="$e_2$ decoded from $t_1$",
+            layers=layers,
+            dropna=False,
+            ax=ax,
+            linestyle="-",
+            x_offset=offsets["e1_e2"],
+            marker="o",
+        )
+        plot_series(
+            series=df["last_e2_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            label="$e_2$ decoded from $t_2$",
+            layers=layers,
+            dropna=False,
+            ax=ax,
+            linestyle=":",
+            x_offset=offsets["last_e2"],
+            marker="s",
+        )
+        plot_series(
+            series=df["e1_e3_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            label="$e_3$ decoded from $t_1$",
+            layers=layers,
+            dropna=False,
+            ax=ax,
+            linestyle="--",
+            x_offset=offsets["e1_e3"],
+            marker="^",
+        )
+        plot_series(
+            series=df["last_e3_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            label="$e_3$ decoded from $t_2$",
+            layers=layers,
+            dropna=False,
+            ax=ax,
+            linestyle="-.",
+            x_offset=offsets["last_e3"],
+            marker="D",
+        )
+        step = max(1, layers // 12)
+        ticks = np.unique(np.append(np.arange(0, layers, step), layers - 1)).astype(int)
+        ax.set_xticks(ticks)
         sns.move_legend(ax, loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=2)
         save_plot(path, xlabel="Layer", ylabel="Percentage of Cases", legend=False)
 
@@ -266,8 +434,10 @@ def main(args):
         "meta-llama/Llama-2-7b-hf": 32,
         "meta-llama/Llama-2-13b-hf": 40,
         "meta-llama/Meta-Llama-3-8B": 32,
-        "meta-llama/Meta-Llama-3-70B": 80
+        "meta-llama/Meta-Llama-3-70B": 80,
+        "Qwen/Qwen3-4B-Instruct-2507": 36,
     }
+    
     layers = {}
     for model in args.models:
         print(f"Processing {model} stages")

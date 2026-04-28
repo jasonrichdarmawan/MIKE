@@ -29,7 +29,7 @@ from EasyEdit.easyeditor.util.alg_dict import *
 import torch
 import os
 import logging
-from utils import StreamHandler, FileHandler, BufferingLoggerWriter
+from utils import setup_logger
 import sys
 from datetime import datetime
 
@@ -37,18 +37,21 @@ from glue_eval.glue_eval import GLUEEval
 
 # %%
 
-def load_checkpoint(model_name, device_map, dtype, editing_method, **kwargs):
+def load_checkpoint(model_name, device_map, dtype, editing_method, load_path, **kwargs):
     """
     Caveat: Only guarantee loaded checkpoint works for evaluation, not continuing editing.
     """
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, dtype=getattr(torch, dtype))
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = None
+    tokenizer = None
     
-    if editing_method == ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
-        pass
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "IFMET", "CaKE"]:
+        model = AutoModelForCausalLM.from_pretrained(load_path, device_map=device_map, dtype=getattr(torch, dtype))
+        tokenizer = AutoTokenizer.from_pretrained(load_path)
     elif editing_method == "WISE":
+        model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map, dtype=getattr(torch, dtype))
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         editor = WISE(model=model, config=kwargs["hparams"], device=model.device)
-        editor.load(load_path=kwargs["load_path"])
+        editor.load(load_path=load_path)
     else:
         raise NotImplementedError(f"Editing method {editing_method} not implemented for loading checkpoint.")
         
@@ -59,7 +62,7 @@ def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num,
     checkpoint_path = os.path.join(checkpoint_root, checkpoint_name)
     os.makedirs(checkpoint_path, exist_ok=True)
 
-    if editing_method == ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "IFMET", "CaKE"]:
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "IFMET", "CaKE"]:
         model.save_pretrained(
             checkpoint_path,
             safe_serialization=True,
@@ -125,28 +128,29 @@ def calculate_averages(data):
 # if __name__ == "__main__":
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = ["", 
-#         "--editing_method", "WISE",
+#         "--editing_method", "AlphaEdit_Circuit",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
-#         "--sequential_editing",
-#         "--model_type", "qwen3-4b-instruct",
+#         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "llama3-8b",
+#         # "--model_type", "qwen3-4b-instruct",
+#         "--model_type", "tiny-aya-global",
 #         "--dtype", "bfloat16",
 #         "--eval_with_chat_template",
 #         "--batch_size", "2",
-#         # "--generation_batch_size", "16",
+#         "--generation_batch_size", "16",
 #         "--sample_size", "4",
 #         "--data_name", "MQuAKE-CF-3k-v2-clke",
-#         "--glue_eval_steps", "2",
+#         "--glue_eval_steps", "0",
 #         "--glue_eval_size", "2",
+#         "--main_eval_steps", "0",
 #         # "--save_edited_model",
-#         "--load_edited_model",
-#         "--load_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential_s1000_b32/WISE/edit_num_1000_case_1001/wise.pt",
+#         # "--load_edited_model",
+#         # "--load_path", "./checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s4_b2/ROME/edit_num_0004_case_0004",
 #     ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--editing_method', required=True, type=str)
-    parser.add_argument('--sequential_editing', action='store_true')
     parser.add_argument('--data_name', default=None, type=str, choices=["MQuAKE-CF-3k-v2-clke"])
     parser.add_argument('--model_type', default=None,type=str)
     parser.add_argument('--dtype', default='float32', choices=['float32', 'bfloat16'])
@@ -156,7 +160,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample_size", default=2999, type=int)
     parser.add_argument("--glue_eval_steps", default=5, type=int)
     parser.add_argument("--glue_eval_size", default=100, type=int)
-    parser.add_argument('--print_eval_steps', default=2, type=int)
+    parser.add_argument('--main_eval_steps', default=0, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     parser.add_argument('--checkpoint_dir', default='./checkpoints', type=str)
     parser.add_argument('--save_edited_model', action='store_true')
@@ -165,7 +169,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     hparams = None
-    if args.editing_method in ['no_edit', "MeLLo"]: # In-Context Learning Editing Methods
+    if args.editing_method in ['no_edit', "MeLLo", "MeLLo_KV"]: # In-Context Learning Editing Methods
         pass
     elif args.editing_method == 'LoRA':
         hparams = LoRAHyperParams.from_hparams(f'./EasyEdit/hparams/LoRA/{args.model_type}.yaml')
@@ -186,12 +190,14 @@ if __name__ == "__main__":
         pass
     elif args.editing_method == "AlphaEdit_Circuit":
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
+    elif args.editing_method == "Revised_AlphaEdit":
+        hparams = Revised_AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/Revised_AlphaEdit/{args.model_type}.yaml')
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
     # In-Context Learning Editing Methods (e.g., MeLLo) do not require apply_algo
     apply_algo = None
-    if args.editing_method in ["LoRA", "ROME", "MEMIT", "R-ROME", "AlphaEdit", "WISE", "AlphaEdit_Circuit"]:
+    if args.editing_method in ["LoRA", "ROME", "MEMIT", "R-ROME", "AlphaEdit", "WISE", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
         apply_algo = ALG_DICT[hparams.alg_name]
     elif args.editing_method == "IFMET":
         apply_algo = ALG_DICT["MEMIT"]
@@ -201,38 +207,25 @@ if __name__ == "__main__":
         if hasattr(hparams, 'model_name') and hparams.model_name
         else args.model_type
     )
-    sequential_str = "sequential" if args.sequential_editing else "restore"
-    SAVE_METRICS_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+    sequential_str = f"sequential{args.main_eval_steps}"
+    
+    # add YYYYMMDD_HHMMSS
+    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    SAVE_METRICS_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}_{datetime_str}'
     os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
     
     if args.save_edited_model:
-        SAVE_CHECKPOINTS_DIR = f'{args.checkpoint_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}'
+        SAVE_CHECKPOINTS_DIR = f'{args.checkpoint_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}_{datetime_str}'
         os.makedirs(SAVE_CHECKPOINTS_DIR, exist_ok=True)
         
 # %%
 
 if __name__ == "__main__":
-    os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
-    
-    fmt = logging.Formatter('%(asctime)s %(name)s %(levelname)-9s %(message)s')
-    
-    sh = StreamHandler()
-    sh.setFormatter(fmt)
-    
     fh_str = "output.log" if not args.load_edited_model else f"output_loaded.log"
     fh_path = f"{SAVE_METRICS_DIR}/{fh_str}"
-    fh = FileHandler(fh_path, mode='w')
-    fh.setFormatter(fmt)
     
-    logger = logging.getLogger("CaKE_Test")
-    logger.propagate = False  # Prevent log messages from being propagated to the root logger
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(sh)
-    logger.addHandler(fh)
+    logger = setup_logger(log_file=fh_path)
     
-    # Redirect stdout to the logger
-    sys.stdout = BufferingLoggerWriter(logger, logging.INFO)
-    sys.stderr = BufferingLoggerWriter(logger, logging.WARNING)
     print(f"Saving output to {fh_path}")
     
 # %%
@@ -242,8 +235,14 @@ if __name__ == "__main__":
         kwargs = {}
         if args.editing_method == "WISE":
             kwargs["hparams"] = hparams
-            kwargs["load_path"] = args.load_path
-        model, tokenizer = load_checkpoint(model_name=model_name, device_map="cuda", dtype=args.dtype, editing_method=args.editing_method, **kwargs)
+        model, tokenizer = load_checkpoint(
+            model_name=model_name, 
+            device_map="cuda", 
+            dtype=args.dtype, 
+            editing_method=args.editing_method, 
+            load_path=args.load_path,
+            **kwargs
+        )
         print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_path}.")
     else:
         model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
@@ -263,7 +262,7 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    if args.editing_method == 'MeLLo':
+    if args.editing_method in ['MeLLo', 'MeLLo_KV']:
         contriever_model_name = "facebook/contriever-msmarco"
         contriever = AutoModel.from_pretrained(contriever_model_name, device_map="cuda")
         contriever_tokenizer = AutoTokenizer.from_pretrained(contriever_model_name)
@@ -316,6 +315,96 @@ def do_glue_eval(save_dir, edit_num, case_ids, number_of_tests):
     
     return output_filename
 
+def do_evaluation(
+    all_metrics,
+    model, 
+    tokenizer, 
+    items, 
+    eval_with_chat_template, 
+    generation_batch_size, 
+    editing_method,
+    load_edited_model,
+    **kwargs
+):
+    """
+    Evaluate and save
+    """
+    if editing_method in [
+        "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE", "IFMET", "CaKE", 
+        "AlphaEdit_Circuit", "Revised_AlphaEdit",
+    ]:
+        metrics = evaluate(
+            model=model,
+            tokenizer=tokenizer, 
+            items=items, 
+            alg_name=editing_method, 
+            eval_with_chat_template=eval_with_chat_template,
+            generation_batch_size=generation_batch_size,
+            **kwargs
+        )
+    elif editing_method in ["MeLLo", "MeLLo_KV"]:
+        # Chat models are fine-tuned on conversational data with explicit turn-taking.
+        # MeLLo was designed for text-davinci-003, which is not a chat model. So, the original code does not use multi turn.
+        # For fair comparison, When we evaluate MeLLo on a chat model, we evaluate by splitting the same prompt in multi turn.
+        # original MeLLo is evaluated with:
+        # use_kv_cache = False
+        # eval_with_chat_template = "few_shot_in_user_content"
+        use_kv_cache = False
+        mello_eval_with_chat_template = False
+        
+        if editing_method == "MeLLo":
+            if eval_with_chat_template:
+                mello_eval_with_chat_template = "few_shot_in_user_content"
+        elif editing_method == "MeLLo_KV":
+            use_kv_cache = True
+            if eval_with_chat_template:
+                mello_eval_with_chat_template = "few_shot_in_multi_turn"
+        else:
+            raise NotImplementedError
+        
+        if editing_method == "MeLLo":
+            kwargs["continuation"] = "in_user_content"
+        
+        metrics = evaluate_mello(
+            model=model,
+            tokenizer=tokenizer, 
+            contriever=contriever,
+            contriever_tokenizer=contriever_tokenizer,
+            task_prompt=task_prompt,
+            items=items,
+            embeddings=embeddings,
+            new_facts=new_facts,
+            eval_with_chat_template=mello_eval_with_chat_template,
+            generation_batch_size=generation_batch_size,
+            use_kv_cache=use_kv_cache,
+            **kwargs,
+        )
+    else:
+        raise NotImplementedError(f"Evaluation method for {editing_method} not implemented.")
+    
+    for key in metrics.keys():
+        if key not in all_metrics:
+            all_metrics[key] = []
+        all_metrics[key].extend(metrics[key])
+        
+        folder_path = f'{SAVE_METRICS_DIR}/{key}'
+        os.makedirs(folder_path, exist_ok=True)
+        
+        metrics_str = "metrics.json" if not load_edited_model else "metrics_loaded.json"
+        metrics_filepath = f'{folder_path}/{metrics_str}'
+        print(f"Saving metrics to {metrics_filepath}")
+        json.dump(all_metrics[key], open(metrics_filepath, 'w'), indent=4, ensure_ascii=False)
+        
+        res = calculate_averages(all_metrics[key])
+        print(f"Results {key}:\n{json.dumps(res, indent=4)}")
+        
+        res_str = "res.json" if not load_edited_model else "res_loaded.json"
+        res_filepath = f'{folder_path}/{res_str}'
+        print(f"Saving results to {res_filepath}")
+        json.dump(res, open(res_filepath, 'w'), indent=4)
+    
+    return metrics
+
 def do_edit(
     model,
     tokenizer,
@@ -333,12 +422,14 @@ def do_edit(
         loc_index = 0
     
     indices = list(range(0, len(data), batch_size))
-    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "WISE", "IFMET", "CaKE"]:
+    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "WISE", "IFMET", "CaKE"]:
+        all_metrics = {}
+        
         for start_idx in tqdm(indices, desc="Editing the model"):
             end = min(start_idx + batch_size, len(data))
             items = data[start_idx:end]
             
-            if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
+            if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
                 model = edit(
                     model=model,
                     tokenizer=tokenizer,
@@ -374,7 +465,7 @@ def do_edit(
             else:
                 raise NotImplementedError(f"Editing method {editing_method} not implemented in the main loop.")
             
-            if (start_idx / batch_size) % kwargs["glue_eval_steps"] == 0:
+            if kwargs["glue_eval_steps"] > 0 and (start_idx / batch_size) % kwargs["glue_eval_steps"] == 0:
                 fh = do_glue_eval(
                     save_dir=kwargs["glue_eval_save_dir"], 
                     edit_num=end, 
@@ -382,10 +473,24 @@ def do_edit(
                     number_of_tests=kwargs["glue_eval_size"]
                 )
                 print(f"Saved GLUE evaluation results to {fh} after editing up to case_id {items[-1]['case_id']}.")
+                
+            if kwargs["main_eval_steps"] > 0 and (start_idx / batch_size) % kwargs["main_eval_steps"] == 0:
+                metrics = do_evaluation(
+                    all_metrics=all_metrics,
+                    model=model,
+                    tokenizer=tokenizer,
+                    items=items,
+                    editing_method=editing_method,
+                    **kwargs
+                )
+                
+                for key in metrics.keys():
+                    print(f"Batch index={start_idx // batch_size}, key={key}:\n{json.dumps(metrics[key][0], indent=4, ensure_ascii=False)}")
     elif editing_method in ["no_edit"]:
-        fh = do_glue_eval(save_dir=kwargs["glue_eval_save_dir"], edit_num=0, case_ids=[], number_of_tests=kwargs["glue_eval_size"])
-        print(f"Saved GLUE evaluation results to {fh}.")
-    elif editing_method in ["MeLLo"]: # In-Context Learning Editing Method
+        if kwargs["glue_eval_size"] > 0:
+            fh = do_glue_eval(save_dir=kwargs["glue_eval_save_dir"], edit_num=0, case_ids=[], number_of_tests=kwargs["glue_eval_size"])
+            print(f"Saved GLUE evaluation results to {fh}.")
+    elif editing_method in ["MeLLo", "MeLLo_KV"]: # In-Context Learning Editing Method
         pass
     else:
         raise NotImplementedError(f"Editing method {editing_method} not implemented for editing loop.")
@@ -393,10 +498,20 @@ def do_edit(
 if __name__ == "__main__":    
     if not args.load_edited_model:
         kwargs = {}
+        
         kwargs["glue_eval_save_dir"] = SAVE_METRICS_DIR
         kwargs["glue_eval_steps"] = args.glue_eval_steps
         kwargs["glue_eval_size"] = args.glue_eval_size
-        if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit"]:
+        
+        kwargs["main_eval_steps"] = args.main_eval_steps
+        kwargs["eval_with_chat_template"] = args.eval_with_chat_template
+        kwargs["generation_batch_size"] = args.generation_batch_size
+        kwargs["load_edited_model"] = args.load_edited_model
+        if args.data_name == "MQuAKE-CF-3k-v2-clke":
+            kwargs["languages"] = ["en", "de", "fr", "ja", "zh"]
+            all_metrics = {language: [] for language in kwargs["languages"]}
+        
+        if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
             kwargs["hparams"] = hparams
             kwargs["apply_algo"] = apply_algo
         elif args.editing_method == "WISE":
@@ -406,6 +521,7 @@ if __name__ == "__main__":
             kwargs["hparams_shallow"] = hparams
             kwargs["hparams_deeper"] = hparams_deeper
             kwargs["apply_algo"] = apply_algo
+        
         do_edit(
             model=model,
             tokenizer=tokenizer,
@@ -435,75 +551,36 @@ if __name__ == "__main__":
         print(f"Saved checkpoint to {checkpoint_path}")
 
 # %%
-
-if __name__ == "__main__":
-    languages = None
-    if args.data_name == "MQuAKE-CF-3k-v2-clke":
-        languages = ["en", "de", "fr", "ja", "zh"]
     
-    all_metrics = {language: [] for language in languages}
-    indices = list(range(0, len(data), args.batch_size))
-    for start_idx in tqdm(indices, desc="Evaluating the edited model"):
-        end = min(start_idx + args.batch_size, len(data))
-        items = data[start_idx:end]
-
-        if args.editing_method in [
-            "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE", "IFMET", "CaKE", 
-            "AlphaEdit_Circuit",
-        ]:
-            metrics = evaluate(
+if __name__ == "__main__":
+    
+    if args.main_eval_steps == 0:
+        all_metrics = {}
+        
+        kwargs = {}
+        if args.data_name == "MQuAKE-CF-3k-v2-clke":
+            kwargs["languages"] = ["en", "de", "fr", "ja", "zh"]
+            all_metrics = {language: [] for language in kwargs["languages"]}
+        
+        indices = list(range(0, len(data), args.batch_size))
+        for start_idx in tqdm(indices, desc="Evaluating the edited model"):
+            end = min(start_idx + args.batch_size, len(data))
+            items = data[start_idx:end]
+    
+            metrics = do_evaluation(
+                all_metrics=all_metrics,
                 model=model,
-                tokenizer=tokenizer, 
-                items=items, 
-                alg_name=args.editing_method, 
+                tokenizer=tokenizer,
+                items=items,
                 eval_with_chat_template=args.eval_with_chat_template,
                 generation_batch_size=args.generation_batch_size,
-                languages=languages,
+                editing_method=args.editing_method,
+                load_edited_model=args.load_edited_model,
+                **kwargs
             )
-        elif args.editing_method == "MeLLo":
-            # Chat models are fine-tuned on conversational data with explicit turn-taking.
-            # MeLLo was designed for text-davinci-003, which is not a chat model. So, the original code does not use multi turn.
-            # For fair comparison, When we evaluate MeLLo on a chat model, we evaluate by splitting the same prompt in multi turn.
-            eval_with_chat_template = False
-            if args.eval_with_chat_template:
-                eval_with_chat_template = "few_shot_in_multi_turn"
-            metrics = evaluate_mello(
-                model=model,
-                tokenizer=tokenizer, 
-                contriever=contriever,
-                contriever_tokenizer=contriever_tokenizer,
-                task_prompt=task_prompt,
-                items=items,
-                embeddings=embeddings,
-                new_facts=new_facts,
-                eval_with_chat_template=eval_with_chat_template,
-                generation_batch_size=args.generation_batch_size,
-                languages=languages,
-                use_kv_cache=True,
-                continuation="in_assistant_content",
-            )
-        else:
-            raise NotImplementedError(f"Evaluation method for {args.editing_method} not implemented.")
-        
-        if (start_idx / args.batch_size) % args.print_eval_steps == 0:
-            for language in languages:
-                print(f"Batch index={start_idx // args.batch_size}, language={language}:\n{json.dumps(metrics[language], indent=4, ensure_ascii=False)}")
-        
-        for language in languages:
-            all_metrics[language].extend(metrics[language])
-    
-            res = calculate_averages(all_metrics[language])
-            print(f"Results {language}:\n{json.dumps(res, indent=4)}")
-        
-            folder_path = f'{SAVE_METRICS_DIR}/{language}'
-            os.makedirs(folder_path, exist_ok=True)
-            metrics_str = "metrics.json" if not args.load_edited_model else "metrics_loaded.json"
-            metrics_filepath = f'{folder_path}/{metrics_str}'
-            res_str = "res.json" if not args.load_edited_model else "res_loaded.json"
-            res_filepath = f'{folder_path}/{res_str}'
-            print(f"Saving metrics to {metrics_filepath}")
-            print(f"Saving results to {res_filepath}")
-            json.dump(all_metrics[language], open(metrics_filepath, 'w'), indent=4, ensure_ascii=False)
-            json.dump(res, open(res_filepath, 'w'), indent=4)
+            
+            if (start_idx / args.batch_size) % 2 == 0:
+                for key in metrics.keys():
+                    print(f"Batch index={start_idx // args.batch_size}, key={key}:\n{json.dumps(metrics[key][0], indent=4, ensure_ascii=False)}")
 
 # %%

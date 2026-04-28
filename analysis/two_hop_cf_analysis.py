@@ -9,7 +9,7 @@ import numpy as np
 
 from IPython.display import display
 
-from create_dataset import RELATION_AFTER_ENTITY_TEMPLATES
+from analysis.create_dataset import RELATION_AFTER_ENTITY_TEMPLATES
 
 # %%
 

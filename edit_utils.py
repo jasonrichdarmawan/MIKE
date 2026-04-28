@@ -199,7 +199,7 @@ Retrieved fact: The spouse of Joe Bill is Evan Austin.
 Retrieved fact does not contradict to generated answer, so the intermediate answer is: Jill Biden
 Final answer: Jill Biden"""},
     {"role": "user", "content": "Question: On which continent is the country of citizenship of the founder of the manufacturer of iPhone 5 situated?"},
-    {"role": "user", "content":
+    {"role": "assistant", "content":
 """Subquestion: Which company is iPhone 5 produced by?
 Generated answer: iPhone 5 is produced by Apple.
 Retrieved fact: The company that produced iPhone 5 is Iveco.
@@ -285,7 +285,7 @@ def call_model_batch(
             return_tensors="pt",
             padding=True,
             truncation=True,
-            add_special_tokens=not eval_with_chat_template,
+            add_special_tokens=eval_with_chat_template == False,
         ).to(model.device)
 
         with torch.no_grad():
@@ -361,7 +361,7 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_pro
         truncation=True,
         max_length=256,
         return_tensors="np",
-        add_special_tokens=not apply_chat_template,
+        add_special_tokens=apply_chat_template == False,
     )
     prompt_inputs = tokenizer(
         prompt_sequences,
@@ -369,7 +369,7 @@ def preprocess_function(examples, tokenizer, apply_chat_template=False, mask_pro
         truncation=True,
         max_length=256,
         return_tensors=None,
-        add_special_tokens=not apply_chat_template,
+        add_special_tokens=apply_chat_template == False,
     )
 
     labels = model_inputs["input_ids"].copy()
@@ -426,7 +426,7 @@ def check_answer_batch(
                 batch_prompts,
                 return_tensors="pt",
                 padding=True,
-                add_special_tokens=not eval_with_chat_template,
+                add_special_tokens=eval_with_chat_template == False,
             ).to(model.device)
 
             input_pad_length = tokens["input_ids"].shape[1]
@@ -475,7 +475,7 @@ def _format_mello_prompts(tokenizer, prompts, eval_with_chat_template):
             )
             for prompt in prompts
         ]
-    elif eval_with_chat_template is False:
+    elif eval_with_chat_template == False:
         return prompts
     else:
         raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
@@ -535,11 +535,11 @@ def _evaluate_mello_with_kv_cache(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
-    languages=["en", "de", "fr", "ja", "zh"],
+    **kwargs
 ):
     stop_strings = ["Retrieved fact:"]
     
-    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=kwargs["languages"])
     
     request_outputs = []
 
@@ -584,13 +584,16 @@ def _evaluate_mello_with_kv_cache(
             eval_with_chat_template=eval_with_chat_template
         )
         
+        if chunk_start == 0:
+            print(f"Formatted prompt for the batch idx=0:\n{formatted_prompts[0]}")
+        
         tokenizer.padding_side = "left"
         inputs = tokenizer(
             formatted_prompts,
             return_tensors="pt",
             padding=True,
             truncation=True,
-            add_special_tokens=not eval_with_chat_template,
+            add_special_tokens=eval_with_chat_template == False,
         ).to(model.device)
 
         with torch.no_grad():
@@ -679,7 +682,7 @@ def _evaluate_mello_with_kv_cache(
                 fact_texts,
                 return_tensors="pt",
                 padding=True,
-                add_special_tokens=False,
+                add_special_tokens=eval_with_chat_template == False,
             ).to(model.device)
 
             fact_input_ids = fact_tokens["input_ids"]
@@ -763,12 +766,12 @@ def _evaluate_mello_without_kv_cache(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
-    languages=["en", "de", "fr", "ja", "zh"],
     continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
+    **kwargs
 ):
     stop_strings = ["Retrieved fact:"]
     
-    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items, alg_name="MeLLo", languages=kwargs["languages"])
     
     request_outputs = []
     initial_prompts = []
@@ -780,7 +783,7 @@ def _evaluate_mello_without_kv_cache(
     for req in eval_requests:
         if eval_with_chat_template == "few_shot_in_multi_turn":
             init_prompt = f"Question: {req['question']}"
-        elif eval_with_chat_template == "few_shot_in_user_content":
+        elif eval_with_chat_template in [False, "few_shot_in_user_content"]:
             init_prompt = f"{task_prompt}\n\nQuestion: {req['question']}"
         else:
             raise ValueError(f"Invalid eval_with_chat_template value: {eval_with_chat_template}")
@@ -904,7 +907,7 @@ def _evaluate_mello_without_kv_cache(
 
     for req, output in zip(eval_requests, request_outputs):
         question, generated, result = output
-        item_post = all_metrics[req["languages"]][req['item_idx']]['post']
+        item_post = all_metrics[req["language"]][req['item_idx']]['post']
         prediction = {
             "prompt": question,
             "generated": generated,
@@ -932,9 +935,8 @@ def evaluate_mello(
     new_facts,
     eval_with_chat_template: Literal[False, "few_shot_in_multi_turn", "few_shot_in_user_content"] = False,
     generation_batch_size=8,
-    languages=["en", "de", "fr", "ja", "zh"],
     use_kv_cache=False,
-    continuation: Literal["in_user_content", "in_assistant_content"] = "in_user_content",
+    **kwargs,
 ):
     """
     continuation is only applicable when use_kv_cache=False
@@ -951,7 +953,7 @@ def evaluate_mello(
             new_facts=new_facts,
             eval_with_chat_template=eval_with_chat_template,
             generation_batch_size=generation_batch_size,
-            languages=languages,
+            **kwargs
         )
     
     return _evaluate_mello_without_kv_cache(
@@ -965,8 +967,7 @@ def evaluate_mello(
         new_facts=new_facts,
         eval_with_chat_template=eval_with_chat_template,
         generation_batch_size=generation_batch_size,
-        languages=languages,
-        continuation=continuation,
+        **kwargs
     )
 
 def _edit_cake_single(model, tokenizer, item):
@@ -1089,8 +1090,8 @@ def edit(model, tokenizer, items, hparams, apply_algo):
                 copy=False,
                 return_orig_weights=False,
             )
-    else:
-        model = apply_algo(
+    elif hparams.alg_name in ["LoRA", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
+        model, _ = apply_algo(
             model,
             tokenizer,
             requests,
@@ -1098,6 +1099,8 @@ def edit(model, tokenizer, items, hparams, apply_algo):
             copy=False,
             return_orig_weights=False,
         )
+    else:
+        raise ValueError(f"Unknown alg_name: {hparams.alg_name}")
     
     return model
 
@@ -1119,6 +1122,8 @@ def _prepare_mquake_clke(items, alg_name, languages):
     for item_idx, item in enumerate(tqdm(items, desc="Preparing eval requests")):
         requested_rewrite = []
         for i in item['requested_rewrite']:
+            if alg_name == "no_edit":
+                break
             z = (
                 i
                 if alg_name == "CaKE"
@@ -1193,7 +1198,15 @@ def _prepare_mquake_clke(items, alg_name, languages):
                 
     return all_metrics, eval_requests
 
-def evaluate(model, tokenizer, items, alg_name, eval_with_chat_template, generation_batch_size=8, languages=["en", "de", "fr", "ja", "zh"]):
+def evaluate(
+    model, 
+    tokenizer, 
+    items, 
+    alg_name, 
+    eval_with_chat_template, 
+    generation_batch_size=8, 
+    **kwargs,
+):
     """
     Caveat:
     - CaKE's implementation: metrics['accuracy'] only evaluate edit_item['questions'][0]
@@ -1207,10 +1220,10 @@ def evaluate(model, tokenizer, items, alg_name, eval_with_chat_template, generat
     
     if alg_name not in [
         "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE",
-        "IFMET", "CaKE", "AlphaEdit_Circuit",
+        "IFMET", "CaKE", "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
         raise ValueError(f"Unknown alg_name: {alg_name}")
-    all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=languages)
+    all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=kwargs["languages"])
 
     grouped_indices = {}
     for req_idx, req in enumerate(eval_requests):
@@ -1350,7 +1363,6 @@ def edit_wise(
             })
             loc_index += 1
         requests.extend(edit_item["requested_rewrite"])
-    hparams.batch_size = len(requests)
     tokenizer.padding_side = "left"
     for request in requests:
         _, _ = apply_algo(

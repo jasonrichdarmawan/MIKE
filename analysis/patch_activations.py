@@ -4,8 +4,8 @@ from pathlib import Path
 import pandas as pd
 
 from datasets import Dataset
-from patched_generation import get_hidden_states, generate_with_patching_all_layers
-from utils import get_layer_names, load_model, load_tokenizer, last_relation_word
+from analysis.patched_generation import get_hidden_states, generate_with_patching_all_layers
+from analysis.utils import get_layer_names, load_model, load_tokenizer, last_relation_word
 
 
 def activation_patching(entries, model, tokenizer, source: str, target: str, default_decoding: bool):

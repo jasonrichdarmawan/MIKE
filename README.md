@@ -9,6 +9,9 @@
 
 ---
 
+## Pre-computed covariance, checkpoints, model-specific two hop CF benchmarks, logs
+
+You can download the pre-computed covariance [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/data/stats), checkpoints [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/checkpoints), model-specific two hop CF benchmarks [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/datasets), and the logs [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/output)
 
 ## 🌟Overview
 This work aims to improve the knowledge editing performance under the multi-hop reasoning settings.
@@ -48,7 +51,7 @@ micromamba activate multihop
 
 pip install SPARQLWrapper==2.0.0
 
-micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.5.1 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
+micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.10.8 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
 
 pip install "numpy>=1.24,<2" scipy sentence-transformers==3.2.1
 
@@ -68,6 +71,23 @@ pip install zhipuai sniffio
 ## 📚Analyze
 Download the wikidata for analysis from [HoppingTooLate](https://github.com/edenbiran/HoppingTooLate/blob/main/datasets/two_hop.csv) into `datasets`.
 
+- Constructing counterfactual benchmark from Two Hop [1] dataset:
+  - Run `analysis/two_hop_cf_create.py` to create the counterfactual benchmark. It will generate `datasets/two_hop_cf_{swapping_strategy}.csv`.
+    `--swapping_strategy`: The swapping strategy to generate counterfactuals, either swapping `e2` values or swapping `e3` values.
+    ```bash
+    python -m analysis.two_hop_cf_create --input_path datasets/two_hop.csv --swapping_strategy e2
+    ```
+  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop_{swapping_strategy}.csv` dataset. It will generate `datasets/{model_name}/two_hop_cf_{swapping_strategy}.csv` file. Use it for the subsequent experiments.
+    ```bash
+    MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+    MODEL_TYPE=CohereLabs/tiny-aya-global
+    python -m analysis.evaluate_dataset $MODEL_TYPE --input-path datasets/two_hop_cf_e2.csv
+    ```
+  - Run `analysis/create_benchmark_cf.py` to create valid counterfactual benchmark. It will generate `datasets/{model_name}/two_hop_cf_benchmark_{swapping_strategy}.csv`
+    ```bash
+    python -m analysis.create_benchmark_cf --input_path datasets/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2.csv
+    ```
+
 - Constructing MQuAKE for multi-lingual knowledge editing benchmark:
   - Copy `datasets/MQuAKE-CF-3k-v2-cake.json` to `datasets/MQuAKE-CF-3k-v2-clke.json`
   - Run `analysis/llm_translate.py` to translate
@@ -82,12 +102,48 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
   python analysis/llm_translate.py --dataset_path $DATA_PATH --model $MODEL --endpoint $ENDPOINT --api_key $API_KEY --case_id ${=CASE_ID} --language ${=LANGUAGE}
   ```
 
+- Ours:
+  - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop_cf_e2.csv` dataset. It will generate `datasets/{model_name}/two_hop_cf_e2.csv` file. Use it for the subsequent experiments.
+    ```bash
+    MODEL_TYPE=CohereLabs/tiny-aya-global
+    MODEL_TYPE=Qwen/Qwen3-4B-Insturct-2507
+    python analysis/evaluate_dataset.py $MODEL_TYPE --input-path datasets/two_hop_cf_e2.csv
+    ```
+  - Run `analysis/create_benchmark_cf.py` to create the benchmark based on `datasets/{model_name}/two_hop_cf_e2.csv`. It will generate `datasets/{model_name}/two_hop_cf_benchmark_e2.csv`
+    ```bash
+    INPUT_PATH=datasets/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2.csv
+    python analysis/create_benchmark_cf.py --input_path $INPUT_PATH
+    ```
+  - Run `run_two_hop.py`. It will edit the model, evaluate the model, do sublayer projections, patchscopes, and attention knockout. Then, it will analyze and generate figures.
+
+    Note: set `MODEL_TYPE` to HuggingFace's model name when `EDITING_METHOD == "no_edit"`
+    ```bash
+    EDITING_METHOD=no_edit
+    EDITING_METHOD=AlphaEdit
+    EDITING_METHOD=AlphaEdit_Circuit
+    EDITING_METHOD=Revised_AlphaEdit
+
+    MODEL_TYPE=tiny-aya-global
+    MODEL_TYPE=qwen3-4b-instruct
+    python run_two_hop.py \
+      --editing_method $EDITING_METHOD \
+      --model_type $MODEL_TYPE \
+      --dtype bfloat16 \
+      --sample_size 1000 \
+      --batch_size 32 \
+      --save_edited_model \
+      --eval_with_chat_template \
+      --do_evaluate \
+      --do_patchscopes \
+      --do_sublayer_projections \
+      --do_knockout_attention
+    ```
 - E. Biran et al. [1]:
-  - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/composition_{correct/incorrect/inconsistent}/two_hop.csv` files. Use it to do back-patching experiments.
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop.csv` dataset. It will generate `datasets/{model_name}/two_hop.csv` file. Use it for the subsequent experiments.
     ```bash
-    python analysis/evaluate_dataset.py gpt2 --input_path datasets/two_hop.csv --output_path datasets/gpt2/two_hop.csv
+    python analysis/evaluate_dataset.py gpt2 --input-path datasets/two_hop.csv --output-path datasets/gpt2/two_hop.csv
     ```
+  - Run `analysis/create_subset.py` to create `correct`, `incorrect`, `inconsistent` subsets. It will generate `datasets/{model_name}/composition_{correct/incorrect/inconsistent}/two_hop.csv` files. Use it to do back-patching experiments.
   - Run `analysis/generate_entity_description.py` to do Patchscopes entity description experiments.
     <details>
       <summary>GPT2 example</summary>
@@ -294,16 +350,20 @@ Just run the following commond:
 run.sh
 ```
 
-### MEMIT
+### Covariance
 
-MEMIT needs pre-computed covariance
+`ROME`, `R-ROME`, `MEMIT`, `IFMET`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit` needs a pre-computed covariance
 
 Note: [legacy-datasets/wikipedia](https://huggingface.co/datasets/legacy-datasets/wikipedia) have samples with very long text. Meanwhile, our GPUs are 2x 3090. Consequently, computing the activations even for 1 sample but with 11k tokens will resulted in OutOfMemory error. So, we use `--batch_tokens 4096` to truncate the 11k tokens to maximum of 4096 tokens.
 
+Note 2: Pre-computing the covariance will take approximately 23 hours on 2x 3090. You can download [here](https://huggingface.co/datasets/clke-results/CaKE/tree/main/jason/data/stats) to save time.
+
 ```bash
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-  python -m EasyEdit.easyeditor.models.rome.layer_stats \
-  --model_name Qwen/Qwen3-4B-Instruct-2507 \
+MODEL_NAME=Qwen/Qwen3-4B-Instruct-2507
+MODEL_NAME=CohereLabs/tiny-aya-global
+
+python -m EasyEdit.easyeditor.models.rome.layer_stats \
+  --model_name $MODEL_NAME \
   --apply_chat_template \
   --dataset wikipedia \
   --layers 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35 \
@@ -311,77 +371,93 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --to_collect mom2 \
   --sample_size 100000 \
   --batch_size 1 \
+  --batch_tokens 4096 \
   --precision float32 \
   --stats_dir data/stats
 ```
 
 ### Others
 
-R-ROME
+no_edit
 ```bash
-python test_cake.py \
-  --editing_method R-ROME \
-  --sequential_editing \
-  --model_type qwen3-4b-instruct \
-  --dtype bfloat16 \
-  --eval_with_chat_template \
-  --batch_size 32 \
-  --sample_size 1000 \
-  --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
-```
+EDITING_METHOD=no_edit
 
-MeLLo
-```bash
+MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+MODEL_TYPE=CohereLabs/tiny-aya-global
 python test_cake.py \
-  --editing_method MeLLo \
-  --sequential_editing \
-  --model_type Qwen/Qwen3-4B-Instruct-2507 \
+  --editing_method $EDITING_METHOD \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
   --sample_size 1000 \
+  --batch_size 32 \
+  --generation_batch_size 128 \
+  --glue_eval_steps 0 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
-WISE
+`ROME`, `R-ROME`, `MEMIT`, `IFMET`, `WISE`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit`
 ```bash
+EDITING_METHOD=ROME
+EDITING_METHOD=R-ROME
+EDITING_METHOD=MEMIT
+EDITING_METHOD=IFMET
+EDITING_METHOD=WISE
+EDITING_METHOD=AlphaEdit
+EDITING_METHOD=AlphaEdit_Circuit
+EDITING_METHOD=Revised_AlphaEdit
+
+MODEL_TYPE=qwen3-4b-instruct
+MODEL_TYPE=tiny-aya-global
 python test_cake.py \
-  --editing_method WISE \
-  --sequential_editing \
-  --model_type qwen3-4b-instruct \
+  --editing_method $EDITING_METHOD \
+  --model_type tiny-aya-global \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
   --sample_size 1000 \
+  --batch_size 32 \
+  --generation_batch_size 128 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
 
-AlphaEdit_Circuit
+`MeLLo` and `MeLLo_KV`
 ```bash
+EDITING_METHOD=MeLLo
+EDITING_METHOD=MeLLo_KV
+
+MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+MODEL_TYPE=CohereLabs/tiny-aya-global
 python test_cake.py \
-  --editing_method AlphaEdit_Circuit \
-  --sequential_editing \
-  --model_type qwen3-4b-instruct \
+  --editing_method $EDITING_METHOD \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
   --sample_size 1000 \
-  --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
+  --batch_size 32 \
+  --generation_batch_size 128 \
+  --main_eval_steps 0 \
+  --glue_eval_steps 0 \
+  --data_name MQuAKE-CF-3k-v2-clke
 ```
 
-CaKE
+`CaKE`
 ```bash
+EDITING_METHOD=CaKE
+
+MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+MODEL_TYPE=CohereLabs/tiny-aya-global
 python test_cake.py \
-  --editing_method CaKE \
-  --sequential_editing \
-  --model_type Qwen/Qwen3-4B-Instruct-2507 \
+  --editing_method $EDITING_METHOD \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
-  --batch_size 32 \
   --sample_size 1000 \
+  --batch_size 32 \
+  --generation_batch_size 128 \
+  --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edited_model
 ```
