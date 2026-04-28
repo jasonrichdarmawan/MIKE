@@ -50,29 +50,32 @@ def create_subset_cf(df: pd.DataFrame, swapping_strategy: str):
     # 1) drop edit rows that are not valid for editing
     edit_ids = list(df[df['row_role'] == "edit"].index)
     
-    remove_ids: list[int] = []
+    keep_ids: list[int] = []
     
     for edit_id in edit_ids:
         row_i = df.loc[edit_id]
         
-        if row_i["swapped_with"] is None:
+        if pd.isna(row_i["swapped_with"]):
             logging.debug(f"Warning: edit row {edit_id} has no swapped_with")
-            break
+            continue
+        
+        row_j = df.loc[row_i["swapped_with"]]
+        if row_j["entity_shortcut_correct"] == True or row_j["relation_shortcut_correct"] == True:
+            continue
         
         if swapping_strategy == "e2":
-            row_j = df.loc[row_i["swapped_with"]]
-            # if the swapped_with row can't answer the second hop, then the edit row is not valid for editing
-            if row_j["second_hop_correct"] == True:
+            # If the swapped_with row can't answer the second hop, then the edit row is not valid for editing.
+            if row_j["second_hop_correct"] == False:
                 continue
         
         elif swapping_strategy == "e3":
-            # if the row can't answer the first hop, then the edit row is not valid for editing
-            if row_i["first_hop_correct"] == True:
+            # If the row can't answer the first hop, then the edit row is not valid for editing.
+            if row_i["first_hop_correct"] == False:
                 continue
         
-        remove_ids.append(edit_id)
+        keep_ids.append(edit_id)
     
-    df = df.drop(index=remove_ids)
+    df = df.loc[keep_ids].copy()
 
     # 2) drop propagated_eval rows that are not valid for evaluation
     edit_ids = list(df[df['row_role'] == "edit"].index)

@@ -119,6 +119,24 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
     Note: set `MODEL_TYPE` to HuggingFace's model name when `EDITING_METHOD == "no_edit"`
     ```bash
     EDITING_METHOD=no_edit
+    
+    MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
+    MODEL_TYPE=CohereLabs/tiny-aya-global
+
+    python run_two_hop.py \
+      --editing_method $EDITING_METHOD \
+      --model_type $MODEL_TYPE \
+      --dtype bfloat16 \
+      --sample_size 1000 \
+      --batch_size 32 \
+      --eval_with_chat_template \
+      --do_evaluate \
+      --do_patchscopes \
+      --do_sublayer_projections \
+      --do_knockout_attention
+    ```
+
+    ```bash
     EDITING_METHOD=AlphaEdit
     EDITING_METHOD=AlphaEdit_Circuit
     EDITING_METHOD=Revised_AlphaEdit
