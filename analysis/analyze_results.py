@@ -29,6 +29,15 @@ def save_plot(path: str, title=None, xlabel: str=None, ylabel: str=None, legend=
     plt.close()
 
 
+def save_csv(df: pd.DataFrame, path: str):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    out = df.copy()
+    numeric_cols = out.select_dtypes(include=["number"]).columns
+    if len(numeric_cols) > 0:
+        out[numeric_cols] = out[numeric_cols].round(2)
+    out.to_csv(path, index=False)
+
+
 def plot_matrix(matrix: np.array, labels: pd.Index, x_label: str, y_label: str, vmax=None):
     """
     Caveat:
@@ -97,6 +106,10 @@ def plot_layer_matrix(generations: pd.DataFrame, target_classification: str | bo
     )
 
     if target_classification not in success_matrix.columns:
+        save_csv(
+            pd.DataFrame(columns=["source_layer", "target_layer", "percent"]),
+            path.replace(".pdf", ".csv"),
+        )
         with sns.plotting_context("paper", font_scale=1.5):
             fig, ax = plt.subplots()
             ax.text(0.5, 0.5, f"No '{target_classification}' data", ha="center", va="center")
@@ -105,6 +118,13 @@ def plot_layer_matrix(generations: pd.DataFrame, target_classification: str | bo
         return
 
     matrix = success_matrix[target_classification].unstack("target_layer").fillna(0)
+    matrix_long = (
+        matrix
+        .stack()
+        .reset_index()
+        .rename(columns={0: "percent"})
+    )
+    save_csv(matrix_long, path.replace(".pdf", ".csv"))
     plot_matrix(matrix.to_numpy(), matrix.columns, "Target Layer", "Source Layer")
     save_plot(path, legend=True)
 
@@ -279,6 +299,7 @@ def plot_stage_boxplots(correct_df: pd.DataFrame, incorrect_df: pd.DataFrame, pa
         "mlp_prediction_projection_layers": "Prediction from MLP",
     }
     combined = combined.replace(labels)
+    save_csv(combined, f"{path}/stages_boxplot.csv")
 
     with sns.plotting_context("paper", font_scale=1.5):
         fig, ax = plt.subplots()
@@ -315,6 +336,15 @@ def plot_series(series: pd.Series, label: str, layers: int, dropna=True, ax=None
     return sns.lineplot(x=x, y=data.to_numpy(), label=label, linestyle=linestyle, marker=marker)
 
 
+def build_series_data(series: pd.Series, label: str, layers: int, dropna=True):
+    data = series.value_counts(normalize=True, dropna=dropna).sort_index().reindex(range(layers), fill_value=0) * 100
+    return pd.DataFrame({
+        "layer": np.arange(layers, dtype=int),
+        "percent": data.to_numpy(),
+        "series": label,
+    })
+
+
 def plot_min_entity_description_layers(df: pd.DataFrame, path: str, layers: int):
     """
     Example:
@@ -332,8 +362,12 @@ def plot_min_entity_description_layers(df: pd.DataFrame, path: str, layers: int)
             "e1_e3": 0.06,
             "last_e3": 0.18,
         }
+        series_data = []
+
+        e1_e2 = df["e1_e2_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan)
+        series_data.append(build_series_data(e1_e2, "$e_2$ decoded from $t_1$", layers, dropna=False))
         plot_series(
-            series=df["e1_e2_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            series=e1_e2,
             label="$e_2$ decoded from $t_1$",
             layers=layers,
             dropna=False,
@@ -342,8 +376,11 @@ def plot_min_entity_description_layers(df: pd.DataFrame, path: str, layers: int)
             x_offset=offsets["e1_e2"],
             marker="o",
         )
+
+        last_e2 = df["last_e2_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan)
+        series_data.append(build_series_data(last_e2, "$e_2$ decoded from $t_2$", layers, dropna=False))
         plot_series(
-            series=df["last_e2_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            series=last_e2,
             label="$e_2$ decoded from $t_2$",
             layers=layers,
             dropna=False,
@@ -352,8 +389,11 @@ def plot_min_entity_description_layers(df: pd.DataFrame, path: str, layers: int)
             x_offset=offsets["last_e2"],
             marker="s",
         )
+
+        e1_e3 = df["e1_e3_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan)
+        series_data.append(build_series_data(e1_e3, "$e_3$ decoded from $t_1$", layers, dropna=False))
         plot_series(
-            series=df["e1_e3_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            series=e1_e3,
             label="$e_3$ decoded from $t_1$",
             layers=layers,
             dropna=False,
@@ -362,8 +402,11 @@ def plot_min_entity_description_layers(df: pd.DataFrame, path: str, layers: int)
             x_offset=offsets["e1_e3"],
             marker="^",
         )
+
+        last_e3 = df["last_e3_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan)
+        series_data.append(build_series_data(last_e3, "$e_3$ decoded from $t_2$", layers, dropna=False))
         plot_series(
-            series=df["last_e3_entity_layer"].apply(lambda x: min(x) if type(x) is list else np.nan),
+            series=last_e3,
             label="$e_3$ decoded from $t_2$",
             layers=layers,
             dropna=False,
@@ -376,6 +419,7 @@ def plot_min_entity_description_layers(df: pd.DataFrame, path: str, layers: int)
         ticks = np.unique(np.append(np.arange(0, layers, step), layers - 1)).astype(int)
         ax.set_xticks(ticks)
         sns.move_legend(ax, loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=2)
+        save_csv(pd.concat(series_data, ignore_index=True), path.replace(".pdf", ".csv"))
         save_plot(path, xlabel="Layer", ylabel="Percentage of Cases", legend=False)
 
 
