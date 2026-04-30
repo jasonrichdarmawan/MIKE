@@ -59,8 +59,24 @@ def create_subset_cf(df: pd.DataFrame, swapping_strategy: str):
             logging.debug(f"Warning: edit row {edit_id} has no swapped_with")
             continue
         
+        # Note: If this is not removed, it will bias the analysis.
+        # For example,
+        # we edit [e1, r1] to output [e2_new], which will affect [e1, r1, e2_new, r2, e3_new].
+        # In this case, if e3_new == e3:
+        # [r2, e1] is an entity shortcut for e3, then the analysis will be biased if we keep this edit row.
+        # [r2, r1] is a relation shortcut for e3, then the analysis will be biased if we keep this edit row.
+        if pd.isna(row_i["e3_new"]) and (row_i["entity_shortcut_correct"] == True or row_i["relation_shortcut_correct"] == True):
+            continue
+        
         row_j = df.loc[row_i["swapped_with"]]
-        if row_j["entity_shortcut_correct"] == True or row_j["relation_shortcut_correct"] == True:
+        
+        # Note: If this is not removed, it will bias the analysis.
+        # For example,
+        # we edit [e1, r1] to output [e2_new], which will affect [e1, r1, e2_new, r2, e3_new].
+        # In this case, if e3_new != e3:
+        # [r2, e1] is an entity shortcut for e3_new, then the analysis will be biased if we keep this.
+        # [r2, r1] is a relation shortcut for e3_new, then the analysis will be biased if we keep this edit row.
+        if pd.notna(row_i["e3_new"]) and (row_j["entity_shortcut_correct"] == True or row_j["relation_shortcut_correct"] == True):
             continue
         
         if swapping_strategy == "e2":
