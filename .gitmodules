@@ -1,3 +1,4 @@
 [submodule "EasyEdit"]
 	path = EasyEdit
-	url = https://github.com/kimthangk/EasyEdit
+	url = https://github.com/jasonrichdarmawan/EasyEdit
+	branch = kim-branch
