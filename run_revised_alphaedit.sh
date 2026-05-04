@@ -20,8 +20,15 @@ run_step() {
     fi
 }
 
-cd /lambda/nfs/kim/CaKE
-source /lambda/nfs/kim/CaKE/venv/bin/activate
+# Override WORKDIR and VENV via env vars to run on RunPod / other machines.
+# Examples:
+#   bash run_revised_alphaedit.sh                                # lambda defaults
+#   WORKDIR=/workspace/CaKE bash run_revised_alphaedit.sh        # RunPod, no venv
+#   WORKDIR=/workspace/CaKE VENV=/workspace/venv bash run_revised_alphaedit.sh
+WORKDIR="${WORKDIR:-/lambda/nfs/kim/CaKE}"
+VENV="${VENV:-${WORKDIR}/venv}"
+cd "$WORKDIR"
+[ -d "$VENV/bin" ] && source "$VENV/bin/activate"
 mkdir -p logs
 exec > >(tee logs/run_revised_alphaedit.log) 2>&1
 
