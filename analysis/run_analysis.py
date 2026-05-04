@@ -8,11 +8,12 @@ must be restored between runs).
 Usage:
     python analysis/run_analysis.py \\
         --model meta-llama/Meta-Llama-3-8B \\
-        --methods preedit alphaedit ifmet \\
+        --methods preedit alphaedit ifmet eap_alphaedit revised_alphaedit \\
         [--input      datasets/two_hop.csv] \\
         [--data-dir   datasets/meta-llama/Meta-Llama-3-8B] \\
         [--hparams-alphaedit  EasyEdit/hparams/AlphaEdit/llama3-8b.yaml] \\
         [--hparams-eap-alphaedit EasyEdit/hparams/AlphaEdit_Circuit/llama3-8b.yaml] \\
+        [--hparams-revised-alphaedit EasyEdit/hparams/Revised_AlphaEdit/llama3-8b.yaml] \\
         [--hparams-ifmet-shallow EasyEdit/hparams/IFMET/llama3-8b-shallow.yaml] \\
         [--hparams-ifmet-deep   EasyEdit/hparams/IFMET/llama3-8b-deep.yaml] \\
         [--skip-patchscopes] [--max-examples N] [--batch-size 128] [--device 0]
@@ -494,6 +495,166 @@ def run_alphaedit(args):
           f"still_incorrect:{out_dir}/still_incorrect")
 
 
+def run_revised_alphaedit(args):
+    data_dir      = Path(args.data_dir)
+    incorrect_dir = data_dir / "composition_incorrect"
+    out_dir       = data_dir / "composition_incorrect_revised_alphaedit"
+    device        = f"cuda:{args.device}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Loading model {args.model} ...")
+    model     = load_model(args.model, attn_implementation="eager")
+    model.eval()
+    tokenizer = load_tokenizer(args.model)
+
+    from EasyEdit.easyeditor import Revised_AlphaEditHyperParams
+    from EasyEdit.easyeditor.util import nethook
+    from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
+    import sys; ae_main = sys.modules["EasyEdit.easyeditor.models.revised_alphaedit.Revised_AlphaEdit_main"]
+
+    hparams    = Revised_AlphaEditHyperParams.from_hparams(args.hparams_revised_alphaedit)
+    apply_algo = ALG_DICT["Revised_AlphaEdit"]
+
+    dataset = pd.read_csv(str(incorrect_dir / "two_hop.csv"), index_col=0)
+    dataset = filter_multi_target(dataset, log_path=incorrect_dir / "filtered_multi_target.csv")
+    if args.max_examples:
+        dataset = dataset.head(args.max_examples)
+    dataset["e2_answers"] = dataset.apply(lambda r: get_answers(r, "e2")["e2_answers"], axis=1)
+    dataset["e3_answers"] = dataset.apply(lambda r: get_answers(r, "e3")["e3_answers"], axis=1)
+
+    weight_names = [
+        f"{hparams.rewrite_module_tmp.format(layer)}.weight"
+        for layer in hparams.layers
+    ]
+
+    orig_weights = {k: nethook.get_parameter(model, k).detach().clone().cpu()
+                    for k in weight_names}
+
+    n_batches     = (len(dataset) + args.batch_size - 1) // args.batch_size
+    all_evaluated     = []
+    all_sublayer_attn = []
+    all_sublayer_mlp  = []
+    all_knockout      = []
+    all_patch         = {source: [] for source in ["e1", "last"]}
+    all_neuron_results = []
+    na_info = na_config = None
+
+    for b, start_idx in enumerate(range(0, len(dataset), args.batch_size)):
+        batch_df = dataset.iloc[start_idx:start_idx + args.batch_size].copy()
+        print(f"\n--- Revised_AlphaEdit Batch {b+1}/{n_batches} ({len(batch_df)} examples) ---")
+
+        # Editing expects right padding for proper token lookup
+        tokenizer.padding_side = "right"
+
+        # Reset cache_c so each batch gets a fresh null-space accumulation.
+        ae_main.cache_c_new = False
+
+        batch_requests = []
+        for _, row in batch_df.iterrows():
+            batch_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
+            batch_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+        hparams.batch_size = len(batch_requests)
+        apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
+        print(f"  Batch edited ({len(batch_requests)} requests).")
+
+        # Evaluate + Analyze use left padding (analysis indexes [-1] for last real token)
+        tokenizer.padding_side = "left"
+        print(f"  [Phase: Eval] Batch {b+1}/{n_batches}")
+        fn_kwargs = {"model": model, "tokenizer": tokenizer}
+        hf_b = Dataset.from_pandas(batch_df, preserve_index=False)
+        hf_b = hf_b.map(eval_first_hop,         batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_second_hop,        batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_composition,       batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_entity_shortcut,   batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        hf_b = hf_b.map(eval_relation_shortcut, batched=True, batch_size=args.batch_size, fn_kwargs=fn_kwargs)
+        all_evaluated.append(hf_b.to_pandas().drop(["e2_answers", "e3_answers"], axis=1).reset_index(drop=True))
+
+        if not args.skip_analysis:
+            hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+            print(f"  [Phase: Sublayer-Attn] Batch {b+1}/{n_batches}")
+            all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
+                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Sublayer-MLP] Batch {b+1}/{n_batches}")
+            all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
+                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+            print(f"  [Phase: Knockout] Batch {b+1}/{n_batches}")
+            all_knockout.append(hf_analysis.map(
+                generate_answer_with_attention_knockout,
+                fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
+                           "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
+                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
+            if not args.skip_patchscopes:
+                print(f"  [Phase: PatchScopes] Batch {b+1}/{n_batches}")
+                batch_ps = batch_df.copy()
+                batch_ps["target_prompt"] = TARGET_PROMPT
+                hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
+                for source in ["e1", "last"]:
+                    all_patch[source].append(hf_ps.map(
+                        generate_entity_description_with_patching,
+                        fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
+                        batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+            if not args.skip_neuron_attribution:
+                if na_info is None:
+                    na_info, na_config = setup_attribution(model)
+                else:
+                    patch_model.patch(model)
+                print(f"  [Phase: Neuron Attribution] Batch {b+1}/{n_batches}")
+                batch_na = process_examples(
+                    model, na_info, tokenizer, batch_df, args.na_prompts, na_config)
+                all_neuron_results.extend(batch_na)
+                patch_model.unpatch()
+                na_info.pop("fc2_stack", None)
+                na_info.pop("o_proj_stack", None)
+
+        tokenizer.padding_side = "right"
+        print(f"  [Phase: Restore] Batch {b+1}/{n_batches}")
+        with torch.no_grad():
+            for k, v in orig_weights.items():
+                nethook.get_parameter(model, k)[...] = v.to(device)
+        torch.cuda.empty_cache()
+        print(f"  Weights restored to original.")
+
+    evaluated_path = out_dir / "evaluated_two_hop.csv"
+    evaluated = pd.concat(all_evaluated).reset_index(drop=True)
+    evaluated.to_csv(evaluated_path)
+    print(f"Saved {evaluated_path}")
+
+    subsets = split_subsets(evaluated)
+    for name, df in subsets.items():
+        (out_dir / name).mkdir(parents=True, exist_ok=True)
+        df.to_csv(out_dir / name / "two_hop.csv")
+        print(f"Saved {out_dir / name / 'two_hop.csv'}")
+
+    if not args.skip_analysis:
+        analysis_subsets = subsets
+        save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
+                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
+        save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
+                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
+        save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
+                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+        if not args.skip_patchscopes:
+            for source in ["e1", "last"]:
+                if all_patch[source]:
+                    save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
+                                   "entity_description", f"{source}_entity_description_s0.csv",
+                                   ["id", "source_layer", "target_layer"])
+        if not args.skip_neuron_attribution and all_neuron_results:
+            for name, subset_df in analysis_subsets.items():
+                subset_ids = set(subset_df["id"])
+                subset_results = [r for r in all_neuron_results if r["id"] in subset_ids]
+                if subset_results:
+                    aggregate_and_save(subset_results, out_dir / name,
+                                       args.na_prompts, na_config["layer_num"])
+
+    print(f"\nDone. Run: python analysis/analyze_tables.py --subsets "
+          f"pre-edit:{data_dir}/composition_incorrect "
+          f"now_correct:{out_dir}/now_correct "
+          f"still_incorrect:{out_dir}/still_incorrect")
+
+
 def run_eap_alphaedit(args):
     """AlphaEdit_Circuit: per-request EAP circuit discovery + AlphaEdit editing."""
     data_dir      = Path(args.data_dir)
@@ -854,6 +1015,8 @@ def main(args):
             run_ifmet(args)
         elif method == "eap_alphaedit":
             run_eap_alphaedit(args)
+        elif method == "revised_alphaedit":
+            run_revised_alphaedit(args)
         else:
             print(f"[SKIP] Unknown method: {method}")
 
@@ -865,8 +1028,8 @@ if __name__ == "__main__":
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model",    default="meta-llama/Meta-Llama-3-8B")
     parser.add_argument("--methods",  nargs="+", default=["preedit", "alphaedit", "ifmet"],
-                        choices=["preedit", "alphaedit", "ifmet", "eap_alphaedit"],
-                        help="Which methods to run (default: all three)")
+                        choices=["preedit", "alphaedit", "ifmet", "eap_alphaedit", "revised_alphaedit"],
+                        help="Which methods to run (default: preedit + alphaedit + ifmet)")
     parser.add_argument("--input",    default="datasets/two_hop.csv",
                         help="Raw two_hop.csv for pre-edit evaluation")
     parser.add_argument("--data-dir", default="datasets/meta-llama/Meta-Llama-3-8B",
@@ -878,6 +1041,9 @@ if __name__ == "__main__":
     parser.add_argument("--hparams-eap-alphaedit",
                         default="EasyEdit/hparams/AlphaEdit_Circuit/llama3-8b.yaml",
                         help="AlphaEdit_Circuit hparams (EAP-guided layer selection)")
+    parser.add_argument("--hparams-revised-alphaedit",
+                        default="EasyEdit/hparams/Revised_AlphaEdit/llama3-8b.yaml",
+                        help="Revised_AlphaEdit hparams")
 
     # IFMET hparams
     parser.add_argument("--hparams-ifmet-shallow",
