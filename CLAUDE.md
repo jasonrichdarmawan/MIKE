@@ -64,7 +64,7 @@ Cached to `data/stats/`. AlphaEdit needs layers 4-8 only; AlphaEdit_Circuit need
 
 Top-level driver: `python analysis/run_analysis.py --methods <method> ...` runs edit + eval + (optionally) analysis + restore for one or more methods. Methods: `preedit`, `alphaedit`, `ifmet`, `eap_alphaedit`, `revised_alphaedit`.
 
-Skip flags: `--skip-analysis` (no analyses), `--skip-patchscopes`, `--skip-neuron-attribution`, `--neuron-only` (currently honoured by `run_revised_alphaedit` only — runs edit + eval + neuron attribution only, skipping sublayer projection / knockout / PatchScopes; ~2.5h vs ~3.5h).
+Skip flags: `--skip-analysis` (no analyses), `--skip-patchscopes`, `--skip-neuron-attribution`, `--neuron-only` (honoured by `run_revised_alphaedit` and `run_eap_alphaedit` — runs edit + eval + neuron attribution only, skipping sublayer projection / knockout / PatchScopes; ~2.5h vs ~3.5h).
 
 `run_analysis.sh` runs all four post-edit methods (AlphaEdit → IFMET → EAP-AlphaEdit → Revised_AlphaEdit) sequentially. `run_revised_alphaedit.sh` runs only Revised_AlphaEdit. Both scripts honour `WORKDIR` and `VENV` env vars (defaults to lambda paths).
 

@@ -748,31 +748,32 @@ def run_eap_alphaedit(args):
 
         # Analyze
         if not args.skip_analysis:
-            hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
-            print(f"  [Phase: Sublayer-Attn] Batch {b+1}/{n_batches}")
-            all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
-                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
-            print(f"  [Phase: Sublayer-MLP] Batch {b+1}/{n_batches}")
-            all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
-                project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
-            print(f"  [Phase: Knockout] Batch {b+1}/{n_batches}")
-            all_knockout.append(hf_analysis.map(
-                generate_answer_with_attention_knockout,
-                fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
-                           "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
-                batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
-            if not args.skip_patchscopes:
-                print(f"  [Phase: PatchScopes] Batch {b+1}/{n_batches}")
-                batch_ps = batch_df.copy()
-                batch_ps["target_prompt"] = TARGET_PROMPT
-                hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
-                for source in ["e1", "last"]:
-                    all_patch[source].append(hf_ps.map(
-                        generate_entity_description_with_patching,
-                        fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
-                        batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
+            if not args.neuron_only:
+                hf_analysis = Dataset.from_pandas(batch_df, preserve_index=False)
+                print(f"  [Phase: Sublayer-Attn] Batch {b+1}/{n_batches}")
+                all_sublayer_attn.append(to_sublayer_df(hf_analysis.map(
+                    project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "attention"},
+                    batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+                print(f"  [Phase: Sublayer-MLP] Batch {b+1}/{n_batches}")
+                all_sublayer_mlp.append(to_sublayer_df(hf_analysis.map(
+                    project_attention, fn_kwargs={"model": model, "tokenizer": tokenizer, "target": "mlp"},
+                    batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names)))
+                print(f"  [Phase: Knockout] Batch {b+1}/{n_batches}")
+                all_knockout.append(hf_analysis.map(
+                    generate_answer_with_attention_knockout,
+                    fn_kwargs={"model": model, "tokenizer": tokenizer, "default_decoding": False,
+                               "knockout_source": "last", "knockout_target": "e1", "k": 3, "prompt": "composition"},
+                    batched=True, batch_size=args.batch_size, remove_columns=hf_analysis.column_names).to_pandas())
+                if not args.skip_patchscopes:
+                    print(f"  [Phase: PatchScopes] Batch {b+1}/{n_batches}")
+                    batch_ps = batch_df.copy()
+                    batch_ps["target_prompt"] = TARGET_PROMPT
+                    hf_ps = Dataset.from_pandas(batch_ps, preserve_index=False)
+                    for source in ["e1", "last"]:
+                        all_patch[source].append(hf_ps.map(
+                            generate_entity_description_with_patching,
+                            fn_kwargs={"model": model, "tokenizer": tokenizer, "source": source, "do_sample": False},
+                            batched=True, batch_size=args.batch_size, remove_columns=hf_ps.column_names).to_pandas())
             if not args.skip_neuron_attribution:
                 if na_info is None:
                     na_info, na_config = setup_attribution(model)
@@ -809,18 +810,19 @@ def run_eap_alphaedit(args):
 
     if not args.skip_analysis:
         analysis_subsets = subsets
-        save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
-                       "sublayer_projection", "attention_projections.csv", ["id", "layer"])
-        save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
-                       "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
-        save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
-                       "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
-        if not args.skip_patchscopes:
-            for source in ["e1", "last"]:
-                if all_patch[source]:
-                    save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
-                                   "entity_description", f"{source}_entity_description_s0.csv",
-                                   ["id", "source_layer", "target_layer"])
+        if not args.neuron_only:
+            save_by_subset(pd.concat(all_sublayer_attn), analysis_subsets, out_dir,
+                           "sublayer_projection", "attention_projections.csv", ["id", "layer"])
+            save_by_subset(pd.concat(all_sublayer_mlp), analysis_subsets, out_dir,
+                           "sublayer_projection", "mlp_projections.csv", ["id", "layer"])
+            save_by_subset(pd.concat(all_knockout), analysis_subsets, out_dir,
+                           "attention_knockout", "last_e1_attention_knockout_k3_composition.csv", ["id", "layer"])
+            if not args.skip_patchscopes:
+                for source in ["e1", "last"]:
+                    if all_patch[source]:
+                        save_by_subset(pd.concat(all_patch[source]), analysis_subsets, out_dir,
+                                       "entity_description", f"{source}_entity_description_s0.csv",
+                                       ["id", "source_layer", "target_layer"])
         if not args.skip_neuron_attribution and all_neuron_results:
             for name, subset_df in analysis_subsets.items():
                 subset_ids = set(subset_df["id"])
@@ -1063,8 +1065,8 @@ if __name__ == "__main__":
                         help="Skip neuron attribution analysis")
     parser.add_argument("--neuron-only", action="store_true",
                         help="Run only edit + eval + neuron attribution. Skips sublayer projection, "
-                             "attention knockout, and PatchScopes. Currently honoured by "
-                             "run_revised_alphaedit only.")
+                             "attention knockout, and PatchScopes. Honoured by run_revised_alphaedit "
+                             "and run_eap_alphaedit.")
     parser.add_argument("--na-prompts", nargs="+",
                         default=["two-hop", "first-hop", "second-hop"],
                         choices=["two-hop", "first-hop", "second-hop"],
