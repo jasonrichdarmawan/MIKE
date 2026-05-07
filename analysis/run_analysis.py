@@ -33,6 +33,21 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+
+# torch 2.0.1 lacks BFloat16 support for triu/tril CUDA kernels, but transformers'
+# Llama causal mask prep calls torch.triu on a BF16 tensor. Cast around it.
+_orig_triu = torch.triu
+_orig_tril = torch.tril
+def _triu_bf16_safe(input, diagonal=0, *, out=None):
+    if input.dtype == torch.bfloat16 and input.is_cuda:
+        return _orig_triu(input.float(), diagonal=diagonal).to(torch.bfloat16)
+    return _orig_triu(input, diagonal=diagonal, out=out)
+def _tril_bf16_safe(input, diagonal=0, *, out=None):
+    if input.dtype == torch.bfloat16 and input.is_cuda:
+        return _orig_tril(input.float(), diagonal=diagonal).to(torch.bfloat16)
+    return _orig_tril(input, diagonal=diagonal, out=out)
+torch.triu = _triu_bf16_safe
+torch.tril = _tril_bf16_safe
 from datasets import Dataset
 from tqdm import tqdm
 
@@ -551,8 +566,18 @@ def run_revised_alphaedit(args):
 
         batch_requests = []
         for _, row in batch_df.iterrows():
-            batch_requests.append({"prompt": row["r1_template"], "subject": row["e1_label"], "target_new": row["e2_label"]})
-            batch_requests.append({"prompt": row["r2_template"], "subject": row["e2_label"], "target_new": row["e3_label"]})
+            batch_requests.append({
+                "prompt": row["r1_template"],
+                "subject": row["e1_label"],
+                "target_new": row["e2_label"],
+                "target_true": row.get("e2_label_original", row["e2_label"]),
+            })
+            batch_requests.append({
+                "prompt": row["r2_template"],
+                "subject": row["e2_label"],
+                "target_new": row["e3_label"],
+                "target_true": row.get("e3_label_original", row["e3_label"]),
+            })
         hparams.batch_size = len(batch_requests)
         apply_algo(model, tokenizer, batch_requests, hparams, copy=False, return_orig_weights=False)
         print(f"  Batch edited ({len(batch_requests)} requests).")
