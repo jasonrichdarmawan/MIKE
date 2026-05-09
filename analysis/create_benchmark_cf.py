@@ -50,29 +50,48 @@ def create_subset_cf(df: pd.DataFrame, swapping_strategy: str):
     # 1) drop edit rows that are not valid for editing
     edit_ids = list(df[df['row_role'] == "edit"].index)
     
-    remove_ids: list[int] = []
+    keep_ids: list[int] = []
     
     for edit_id in edit_ids:
         row_i = df.loc[edit_id]
         
-        if row_i["swapped_with"] is None:
+        if pd.isna(row_i["swapped_with"]):
             logging.debug(f"Warning: edit row {edit_id} has no swapped_with")
-            break
+            continue
+        
+        # Note: If this is not removed, it will bias the analysis.
+        # For example,
+        # we edit [e1, r1] to output [e2_new], which will affect [e1, r1, e2_new, r2, e3_new].
+        # In this case, if e3_new == e3:
+        # [r2, e1] is an entity shortcut for e3, then the analysis will be biased if we keep this edit row.
+        # [r2, r1] is a relation shortcut for e3, then the analysis will be biased if we keep this edit row.
+        if pd.isna(row_i["e3_new"]) and (row_i["entity_shortcut_correct"] == True or row_i["relation_shortcut_correct"] == True):
+            continue
+        
+        row_j = df.loc[row_i["swapped_with"]]
+        
+        # Note: If this is not removed, it will bias the analysis.
+        # For example,
+        # we edit [e1, r1] to output [e2_new], which will affect [e1, r1, e2_new, r2, e3_new].
+        # In this case, if e3_new != e3:
+        # [r2, e1] is an entity shortcut for e3_new, then the analysis will be biased if we keep this.
+        # [r2, r1] is a relation shortcut for e3_new, then the analysis will be biased if we keep this edit row.
+        if pd.notna(row_i["e3_new"]) and (row_j["entity_shortcut_correct"] == True or row_j["relation_shortcut_correct"] == True):
+            continue
         
         if swapping_strategy == "e2":
-            row_j = df.loc[row_i["swapped_with"]]
-            # if the swapped_with row can't answer the second hop, then the edit row is not valid for editing
-            if row_j["second_hop_correct"] == True:
+            # If the swapped_with row can't answer the second hop, then the edit row is not valid for editing.
+            if row_j["second_hop_correct"] == False:
                 continue
         
         elif swapping_strategy == "e3":
-            # if the row can't answer the first hop, then the edit row is not valid for editing
-            if row_i["first_hop_correct"] == True:
+            # If the row can't answer the first hop, then the edit row is not valid for editing.
+            if row_i["first_hop_correct"] == False:
                 continue
         
-        remove_ids.append(edit_id)
+        keep_ids.append(edit_id)
     
-    df = df.drop(index=remove_ids)
+    df = df.loc[keep_ids].copy()
 
     # 2) drop propagated_eval rows that are not valid for evaluation
     edit_ids = list(df[df['row_role'] == "edit"].index)
