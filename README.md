@@ -407,6 +407,7 @@ python test_cake.py \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --eval_with_chat_template \
+  --load_model \
   --sample_size 1000 \
   --batch_size 32 \
   --generation_batch_size 128 \
@@ -432,6 +433,7 @@ python test_cake.py \
   --editing_method $EDITING_METHOD \
   --model_type tiny-aya-global \
   --dtype bfloat16 \
+  --load_model \
   --eval_with_chat_template \
   --sample_size 1000 \
   --batch_size 32 \
@@ -452,6 +454,7 @@ python test_cake.py \
   --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
+  --load_model \
   --eval_with_chat_template \
   --sample_size 1000 \
   --batch_size 32 \
@@ -471,6 +474,7 @@ python test_cake.py \
   --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
+  --load_model \
   --eval_with_chat_template \
   --sample_size 1000 \
   --batch_size 32 \

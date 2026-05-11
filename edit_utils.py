@@ -16,16 +16,24 @@ def _extract_answer_text(prediction):
     text = m.group(1) if m else prediction
     return text.strip()
 
-def check_answer_in_pred(pred, answers, extract_answer: Literal[False, "answer_tags"] = False):
+def _extract_final_answer(prediction):
+    """Extract final answer from 'Final answer: ' prefix, or return empty string if not found."""
+    prefix = "Final answer: "
+    idx = prediction.rfind(prefix)
+    if idx != -1:
+        return prediction[idx + len(prefix):].strip()
+    return ""
+
+def check_answer_in_pred(pred, answers, extract_answer: Literal[False, "answer_tags", "final_answer"] = False):
     if extract_answer == "answer_tags":
-        pred = _extract_answer_text(pred).lower()
-    else:
-        pred = pred.lower()
+        pred = _extract_answer_text(pred)
+    elif extract_answer == "final_answer":
+        pred = _extract_final_answer(pred)
     for a in answers:
-        a = a.strip().lower()
+        a = a.strip()
         if not a:
             continue
-        if a in pred or pred.startswith(a) or pred == a:
+        if a in pred:
             return True
     return False
 
@@ -444,7 +452,11 @@ def check_answer_batch(
                     (
                         prompt_text,
                         generated_text,
-                        check_answer_in_pred(generated_text, expected_answers),
+                        check_answer_in_pred(
+                            pred=generated_text,
+                            answers=expected_answers,
+                            extract_answer="answer_tags" if eval_with_chat_template else False,
+                        ),
                     )
                 )
 
@@ -635,7 +647,11 @@ def _evaluate_mello_with_kv_cache(
                     local_outputs[local_idx] = (
                         req['question'],
                         histories[local_idx],
-                        check_answer_in_pred(answer, req['answers']),
+                        check_answer_in_pred(
+                            pred=answer, 
+                            answers=req['answers'],
+                            extract_answer=False,
+                        ),
                     )
                     continue
 
@@ -848,7 +864,11 @@ def _evaluate_mello_without_kv_cache(
                 request_outputs[req_idx] = (
                     req['question'],
                     generated,
-                    check_answer_in_pred(answer, req['answers']),
+                    check_answer_in_pred(
+                        pred=answer, 
+                        answers=req['answers'],
+                        extract_answer=False,
+                    ),
                 )
                 done[req_idx] = True
                 continue
@@ -1268,6 +1288,59 @@ def evaluate(
             item_post["accuracy_predictions"].append(prediction)
         else:
             raise ValueError(f"Unknown request group: {req['group']}")
+
+    return all_metrics
+
+def reevaluate_metrics_from_predictions(
+    items,
+    all_metrics,
+    languages,
+    extract_answer: Literal[False, "answer_tags", "final_answer"] = False,
+):
+    """
+    Recompute metrics using stored predictions without model generation.
+    """
+    for item_idx, item in enumerate(items):
+        for language in languages:
+            metrics = all_metrics[language][item_idx]
+            post = metrics["post"]
+
+            hop_wise_predictions = post["hop_wise_predictions"]
+            hop_wise = post["hop_wise"]
+
+            language_str = "" if language == "en" else f"_{language}"
+            single_hops = item[f"new_single_hops{language_str}"]
+            for hop_idx, single_hop in enumerate(single_hops):
+                answers = [single_hop["answer"]] + single_hop["answer_alias"]
+                for form_idx in range(2): # 0: cloze, 1: question
+                    pred = None
+                    if hop_idx < len(hop_wise_predictions) and form_idx < len(hop_wise_predictions[hop_idx]):
+                        pred = hop_wise_predictions[hop_idx][form_idx]
+                    if pred is None:
+                        raise ValueError(f"Missing prediction for item_idx={item_idx}, language={language}, hop_idx={hop_idx}, form_idx={form_idx}")
+                    generated = pred["generated"]
+                    if hop_idx < len(hop_wise) and form_idx < len(hop_wise[hop_idx]):
+                        hop_wise[hop_idx][form_idx] = check_answer_in_pred(
+                            pred=generated,
+                            answers=answers,
+                            extract_answer=extract_answer,
+                        )
+
+            answer_aliases = item[f"new_answer_alias{language_str}"]
+            answers = [item[f"new_answer{language_str}"]] + answer_aliases
+            accuracy_predictions = post["accuracy_predictions"]
+            post["accuracy"] = []
+            for pred in accuracy_predictions:
+                if pred is None:
+                    raise ValueError(f"Missing accuracy prediction for item_idx={item_idx}, language={language}")
+                generated = pred["generated"]
+                post["accuracy"].append(
+                    check_answer_in_pred(
+                        pred=generated,
+                        answers=answers,
+                        extract_answer=extract_answer,
+                    )
+                )
 
     return all_metrics
 

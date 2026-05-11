@@ -21,7 +21,7 @@ from EasyEdit.easyeditor import (
 
 from EasyEdit.easyeditor.util.alg_dict import ALG_DICT
 
-from edit_utils import edit, evaluate
+from edit_utils import edit, evaluate, reevaluate_metrics_from_predictions
 from test_cake import calculate_averages, save_checkpoint, load_checkpoint
 from utils import setup_logger
 
@@ -51,24 +51,23 @@ from analysis.analyze_results import (
 #     sys.argv = [
 #         "run_two_hop.py",
 #         "--editing_method", "AlphaEdit",
-#         # "--model_type", "qwen3-4b-instruct",
-#         "--model_type", "tiny-aya-global",
+#         "--model_type", "qwen3-4b-instruct",
+#         # "--model_type", "tiny-aya-global",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         "--dtype", "bfloat16",
-#         "--sample_size", "4",
-#         "--batch_size", "2",
+#         "--sample_size", "1000",
+#         "--batch_size", "32",
 #         # "--save_edited_model",
 #         # "--load_edited_model",
-#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s16_s2/AlphaEdit_20260421-160250/edit_num_0014_case_0779",
-#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260421-160120/edit_num_0739_case_80844",
-#         # "--load_eval_path", "output/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/no_edit_20260421-224559",
-#         # "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/no_edit_20260421-225846",
-#         "--eval_with_chat_template",
-#         "--do_evaluate",
-#         # "--do_sublayer_projections",
-#         # "--do_patchscopes",
-#         # "--do_knockout_attention",
+#         "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208/edit_num_0350_case_79415",
+#         "--load_eval_path", "output/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208",
+#         # "--do_edit",
+#         # "--eval_with_chat_template",
+#         # "--do_evaluate",
+#         "--do_sublayer_projections",
+#         "--do_patchscopes",
+#         "--do_knockout_attention",
 #     ]
 
 if __name__ == "__main__":
@@ -86,6 +85,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_edited_model", action="store_true")
     parser.add_argument("--load_model_path", default=None, type=str, help="Path to load the edited model checkpoint. Required if --load_edited_model is set.")
     parser.add_argument("--load_eval_path", default=None, type=str, help="Path to load evaluation results. Required if --load_edited_model is set.")
+    parser.add_argument("--do_edit", action="store_true")
     parser.add_argument("--eval_with_chat_template", action="store_true")
     parser.add_argument("--do_evaluate", action="store_true", help="Whether to do evaluation. By default, if --load_edited_model is set and existing metrics are found, evaluation will be skipped and existing metrics will be loaded.")
     parser.add_argument("--do_sublayer_projections", action="store_true", help="Whether to do sublayer projection. By default, if existing projection results are found, they will be loaded instead of re-running the projection.")
@@ -228,7 +228,7 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    if not (args.load_edited_model and args.load_model_path):
+    if args.do_edit and not (args.load_edited_model and args.load_model_path):
         edit_cases = [item for item in cases if item["row_role"] == "edit"]
         # split edit_cases into list of lists, each of length args.batch_size (except possibly the last one)
         edit_cases = [edit_cases[i:i + args.batch_size] for i in range(0, len(edit_cases), args.batch_size)]
@@ -325,6 +325,30 @@ if __name__ == "__main__":
             with open(metrics_path, "r", encoding="utf-8") as f:
                 all_metrics[language] = json.load(f)
             print(f"Loaded existing metrics from {metrics_path}")
+            
+        extract_answer = "answer_tags" if args.eval_with_chat_template else False
+        
+        all_metrics = reevaluate_metrics_from_predictions(
+            items=cases,
+            all_metrics=all_metrics,
+            languages=kwargs["languages"],
+            extract_answer=extract_answer,
+        )
+        
+        for key in all_metrics.keys():
+            metrics_str = "metrics.json"
+            metrics_filepath = f'{args.load_eval_path}/{key}/{metrics_str}'
+            print(f"Saving reevaluated metrics to {metrics_filepath}")
+            json.dump(all_metrics[key], open(metrics_filepath, 'w'), indent=4, ensure_ascii=False)
+            
+            res = calculate_averages(all_metrics[key])
+            print(f"Results {key}:\n{json.dumps(res, indent=4)}")
+            
+            folder_path = f'{args.load_eval_path}/{key}'
+            res_str = "res.json"
+            res_filepath = f'{folder_path}/{res_str}'
+            print(f"Saving reevaluated results to {res_filepath}")
+            json.dump(res, open(res_filepath, 'w'), indent=4)
     else:
         all_metrics = do_evaluate(
             model=model,
@@ -736,11 +760,12 @@ def do_analyze_results(
         print(f"Entity description layer matrix plots saved to {path}")
 
 if __name__ == "__main__":
-    n_layers = None
-    if model_name in ["Qwen/Qwen3-4B-Instruct-2507", "CohereLabs/tiny-aya-global"]:
-        n_layers = model.config.num_hidden_layers
-    else:
-        raise ValueError(f"Unsupported model for layer number: {model_name}")
+    n_layers = 36
+    # n_layers = None
+    # if model_name in ["Qwen/Qwen3-4B-Instruct-2507", "CohereLabs/tiny-aya-global"]:
+    #     n_layers = model.config.num_hidden_layers
+    # else:
+    #     raise ValueError(f"Unsupported model for layer number: {model_name}")
     do_analyze_results(
         save_metrics_dir=SAVE_METRICS_DIR,
         n_layers=n_layers,

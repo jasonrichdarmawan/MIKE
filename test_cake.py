@@ -22,11 +22,11 @@ from edit_utils import (
     edit_ifmet,
     edit_cake,
     evaluate,
+    reevaluate_metrics_from_predictions,
 )
 from EasyEdit.easyeditor.util.alg_dict import *
 import torch
 import os
-import logging
 from utils import setup_logger
 import sys
 from datetime import datetime
@@ -124,9 +124,9 @@ def calculate_averages(data):
 # %%
 
 # if __name__ == "__main__":
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 #     sys.argv = ["", 
-#         "--editing_method", "AlphaEdit_Circuit",
+#         "--editing_method", "Revised_AlphaEdit",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "llama3-8b",
@@ -134,16 +134,21 @@ def calculate_averages(data):
 #         "--model_type", "tiny-aya-global",
 #         "--dtype", "bfloat16",
 #         "--eval_with_chat_template",
-#         "--batch_size", "2",
-#         "--generation_batch_size", "16",
-#         "--sample_size", "4",
+#         "--batch_size", "32",
+#         "--generation_batch_size", "128",
+#         "--sample_size", "1000",
 #         "--data_name", "MQuAKE-CF-3k-v2-clke",
-#         "--glue_eval_steps", "0",
-#         "--glue_eval_size", "2",
+        
+#         # "--do_edit",
+#         # "--glue_eval_steps", "0",
+#         # "--glue_eval_size", "2",
 #         "--main_eval_steps", "0",
+        
 #         # "--save_edited_model",
+#         # "--load_model",
 #         # "--load_edited_model",
-#         # "--load_path", "./checkpoints/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s4_b2/ROME/edit_num_0004_case_0004",
+#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010805",
+#         "--load_eval_path", "output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010715",
 #     ]
 
 if __name__ == "__main__":
@@ -156,14 +161,17 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument('--generation_batch_size', default=16, type=int)
     parser.add_argument("--sample_size", default=2999, type=int)
+    parser.add_argument('--do_edit', action='store_true')
     parser.add_argument("--glue_eval_steps", default=5, type=int)
     parser.add_argument("--glue_eval_size", default=100, type=int)
-    parser.add_argument('--main_eval_steps', default=0, type=int)
+    parser.add_argument('--main_eval_steps', default=None, type=int)
     parser.add_argument('--metrics_save_dir', default='./output', type=str)
     parser.add_argument('--checkpoint_dir', default='./checkpoints', type=str)
     parser.add_argument('--save_edited_model', action='store_true')
+    parser.add_argument('--load_model', action='store_true')
     parser.add_argument('--load_edited_model', action='store_true')
-    parser.add_argument('--load_path', default=None, type=str)
+    parser.add_argument('--load_model_path', default=None, type=str)
+    parser.add_argument('--load_eval_path', default=None, type=str)
     args = parser.parse_args()
 
     hparams = None
@@ -208,8 +216,14 @@ if __name__ == "__main__":
     sequential_str = f"sequential{args.main_eval_steps}"
     
     # add YYYYMMDD_HHMMSS
-    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    SAVE_METRICS_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}_{datetime_str}'
+    if args.load_edited_model and args.load_model_path:
+        datetime_str = args.load_model_path.split('/')[-2].split('_')[-1]
+    else:
+        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if args.load_eval_path:
+        SAVE_METRICS_DIR = args.load_eval_path
+    else:
+        SAVE_METRICS_DIR = f'{args.metrics_save_dir}/{model_name}/{args.data_name}/{sequential_str}_s{args.sample_size}_b{args.batch_size}/{args.editing_method}_{datetime_str}'
     os.makedirs(SAVE_METRICS_DIR, exist_ok=True)
     
     if args.save_edited_model:
@@ -219,12 +233,12 @@ if __name__ == "__main__":
 # %%
 
 if __name__ == "__main__":
-    fh_str = "output.log" if not args.load_edited_model else f"output_loaded.log"
-    fh_path = f"{SAVE_METRICS_DIR}/{fh_str}"
+    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fh_path = f"{SAVE_METRICS_DIR}/output_{datetime_str}.log"
     
     logger = setup_logger(log_file=fh_path)
     
-    print(f"Saving output to {fh_path}")
+    print(f"Saving output to ./{fh_path}")
     
 # %%
 
@@ -238,16 +252,16 @@ if __name__ == "__main__":
             device_map="cuda", 
             dtype=args.dtype, 
             editing_method=args.editing_method, 
-            load_path=args.load_path,
+            load_path=args.load_model_path,
             **kwargs
         )
-        print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_path}.")
-    else:
+        print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_model_path}.")
+    elif args.load_model:
         model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
 
 # %%
 
@@ -388,7 +402,7 @@ def do_evaluation(
         folder_path = f'{SAVE_METRICS_DIR}/{key}'
         os.makedirs(folder_path, exist_ok=True)
         
-        metrics_str = "metrics.json" if not load_edited_model else "metrics_loaded.json"
+        metrics_str = "metrics.json"
         metrics_filepath = f'{folder_path}/{metrics_str}'
         print(f"Saving metrics to {metrics_filepath}")
         json.dump(all_metrics[key], open(metrics_filepath, 'w'), indent=4, ensure_ascii=False)
@@ -396,7 +410,7 @@ def do_evaluation(
         res = calculate_averages(all_metrics[key])
         print(f"Results {key}:\n{json.dumps(res, indent=4)}")
         
-        res_str = "res.json" if not load_edited_model else "res_loaded.json"
+        res_str = "res.json"
         res_filepath = f'{folder_path}/{res_str}'
         print(f"Saving results to {res_filepath}")
         json.dump(res, open(res_filepath, 'w'), indent=4)
@@ -494,7 +508,7 @@ def do_edit(
         raise NotImplementedError(f"Editing method {editing_method} not implemented for editing loop.")
 
 if __name__ == "__main__":    
-    if not args.load_edited_model:
+    if not args.load_edited_model and args.do_edit:
         kwargs = {}
         
         kwargs["glue_eval_save_dir"] = SAVE_METRICS_DIR
@@ -532,7 +546,7 @@ if __name__ == "__main__":
 # %%
         
 if __name__ == "__main__":
-    if args.save_edited_model and not args.load_edited_model:
+    if args.save_edited_model and not args.load_edited_model and args.do_edit:
         kwargs = {}
         if args.editing_method == "WISE":
             kwargs["hparams"] = hparams
@@ -551,14 +565,46 @@ if __name__ == "__main__":
 # %%
     
 if __name__ == "__main__":
+    all_metrics = {}
     
-    if args.main_eval_steps == 0:
-        all_metrics = {}
+    kwargs = {}
+    if args.data_name == "MQuAKE-CF-3k-v2-clke":
+        kwargs["languages"] = ["en", "de", "fr", "ja", "zh"]
+        all_metrics = {language: [] for language in kwargs["languages"]}
+    
+    if args.load_eval_path:
+        for key in all_metrics.keys():
+            metrics_filepath = f'{args.load_eval_path}/{key}/metrics.json'
+            with open(metrics_filepath, 'r') as f:
+                all_metrics[key] = json.load(f)
+                
+        extract_answer = "answer_tags" if args.eval_with_chat_template else False
+        if args.editing_method in ["MeLLo", "MeLLo_KV"]:
+            extract_answer = "final_answer"
         
-        kwargs = {}
-        if args.data_name == "MQuAKE-CF-3k-v2-clke":
-            kwargs["languages"] = ["en", "de", "fr", "ja", "zh"]
-            all_metrics = {language: [] for language in kwargs["languages"]}
+        all_metrics = reevaluate_metrics_from_predictions(
+            items=data,
+            all_metrics=all_metrics,
+            languages=kwargs["languages"],
+            extract_answer=extract_answer,
+        )
+        
+        for key in all_metrics.keys():
+            metrics_str = "metrics.json"
+            metrics_filepath = f'{args.load_eval_path}/{key}/{metrics_str}'
+            print(f"Saving reevaluated metrics to {metrics_filepath}")
+            json.dump(all_metrics[key], open(metrics_filepath, 'w'), indent=4, ensure_ascii=False)
+            
+            res = calculate_averages(all_metrics[key])
+            print(f"Results {key}:\n{json.dumps(res, indent=4)}")
+            
+            folder_path = f'{args.load_eval_path}/{key}'
+            res_str = "res.json"
+            res_filepath = f'{folder_path}/{res_str}'
+            print(f"Saving reevaluated results to {res_filepath}")
+            json.dump(res, open(res_filepath, 'w'), indent=4)
+                    
+    elif args.main_eval_steps == 0:
         
         indices = list(range(0, len(data), args.batch_size))
         for start_idx in tqdm(indices, desc="Evaluating the edited model"):
@@ -580,5 +626,5 @@ if __name__ == "__main__":
             if (start_idx / args.batch_size) % 2 == 0:
                 for key in metrics.keys():
                     print(f"Batch index={start_idx // args.batch_size}, key={key}:\n{json.dumps(metrics[key][0], indent=4, ensure_ascii=False)}")
-
+        
 # %%
