@@ -50,9 +50,9 @@ from analysis.analyze_results import (
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = [
 #         "run_two_hop.py",
-#         "--editing_method", "AlphaEdit",
-#         "--model_type", "qwen3-4b-instruct",
-#         # "--model_type", "tiny-aya-global",
+#         "--editing_method", "Revised_AlphaEdit",
+#         # "--model_type", "qwen3-4b-instruct",
+#         "--model_type", "tiny-aya-global",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         "--dtype", "bfloat16",
@@ -60,14 +60,14 @@ from analysis.analyze_results import (
 #         "--batch_size", "32",
 #         # "--save_edited_model",
 #         # "--load_edited_model",
-#         "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208/edit_num_0350_case_79415",
-#         "--load_eval_path", "output/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208",
+#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208/edit_num_0350_case_79415",
+#         "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/Revised_AlphaEdit_20260430-145114",
 #         # "--do_edit",
 #         # "--eval_with_chat_template",
 #         # "--do_evaluate",
-#         "--do_sublayer_projections",
-#         "--do_patchscopes",
-#         "--do_knockout_attention",
+#         # "--do_sublayer_projections",
+#         # "--do_patchscopes",
+#         # "--do_knockout_attention",
 #     ]
 
 if __name__ == "__main__":
@@ -760,12 +760,11 @@ def do_analyze_results(
         print(f"Entity description layer matrix plots saved to {path}")
 
 if __name__ == "__main__":
-    n_layers = 36
-    # n_layers = None
-    # if model_name in ["Qwen/Qwen3-4B-Instruct-2507", "CohereLabs/tiny-aya-global"]:
-    #     n_layers = model.config.num_hidden_layers
-    # else:
-    #     raise ValueError(f"Unsupported model for layer number: {model_name}")
+    n_layers = None
+    if model_name in ["Qwen/Qwen3-4B-Instruct-2507", "CohereLabs/tiny-aya-global"]:
+        n_layers = model.config.num_hidden_layers
+    else:
+        raise ValueError(f"Unsupported model for layer number: {model_name}")
     do_analyze_results(
         save_metrics_dir=SAVE_METRICS_DIR,
         n_layers=n_layers,
