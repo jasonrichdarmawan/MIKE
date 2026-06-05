@@ -1,4 +1,4 @@
-<h3 align="center"> CaKE: Circuit-aware Editing Enables Generalizable Knowledge  Learners </h3>
+<h3 align="center"> MIKE: A Mechanistic Interpretability Knowledge Editing Method for Large Language Models </h3>
 
 ## Table of Contents
 - 🌟[Overview](#overview)
