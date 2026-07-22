@@ -51,9 +51,11 @@ micromamba activate multihop
 
 pip install SPARQLWrapper==2.0.0
 
-micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.10.8 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
+micromamba install einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 higher==0.2.1 importlib-metadata==6.3.0 matplotlib==3.10.8 nltk==3.6.5 omegaconf==2.1.1 pandas==1.4.0 pyyaml==6.0 scikit-learn==1.0.2 tokenizers==0.19.1
 
 pip install "numpy>=1.24,<2" scipy sentence-transformers==3.2.1
+
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 
 pip install transformers==4.57.6
 
@@ -65,7 +67,7 @@ micromamba install beartype jaxtyping pytest
 
 pip install zhipuai sniffio
 
-pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+micromamba install datasets==3.3.1
 ```
 
 ## 📚Analyze
@@ -412,7 +414,7 @@ python -m EasyEdit.easyeditor.models.rome.layer_stats \
   --batch_tokens 4096 \
   --precision float32 \
   --stats_dir data/stats \
-  --max_memory 0:13GiB,1:19GiB \
+  --max_memory 0:11GiB,1:11GiB \
   --fake_samples 100 \
   --fake_sequence_length 4096
 ```

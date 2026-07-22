@@ -1,3 +1,3 @@
 [submodule "EasyEdit"]
 	path = EasyEdit
-	url = https://github.com/jasonrichdarmawan/EasyEdit
+	url = git@github.com:jasonrichdarmawan/EasyEdit.git
