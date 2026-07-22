@@ -394,6 +394,29 @@ python -m EasyEdit.easyeditor.models.rome.layer_stats \
   --stats_dir data/stats
 ```
 
+Note 3: If your setup have limited VRAM, test whether the GPU can fit. If you use multi-GPU, adjust the `--max_memory` flag to fit model weights, activations and covariance into the VRAM. Then, remove the `--fake_samples` and `--fake_sequence_length` after test.
+
+```bash
+MODEL_NAME=Qwen/Qwen2.5-7B
+MODEL_NAME=CohereLabs/aya-expanse-8b
+
+python -m EasyEdit.easyeditor.models.rome.layer_stats \
+  --model_name $MODEL_NAME \
+  --apply_chat_template \
+  --dataset wikipedia \
+  --layers 4,5,6,7,8 \
+  --layer_tmp model.layers.{layer_num}.mlp.down_proj \
+  --to_collect mom2 \
+  --sample_size 100000 \
+  --batch_size 1 \
+  --batch_tokens 4096 \
+  --precision float32 \
+  --stats_dir data/stats \
+  --max_memory 0:13GiB,1:19GiB \
+  --fake_samples 100 \
+  --fake_sequence_length 4096
+```
+
 ### Others
 
 no_edit
