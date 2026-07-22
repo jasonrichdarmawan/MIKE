@@ -55,8 +55,6 @@ micromamba install datasets==3.3.1 einops==0.4.0 gpustat==1.1 hydra-core==1.1.1 
 
 pip install "numpy>=1.24,<2" scipy sentence-transformers==3.2.1
 
-pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-
 pip install transformers==4.57.6
 
 micromamba install tqdm==4.62.3 openai==2.24.0 peft==0.7.1 timm==0.9.7 iopath==0.1.10 sentencepiece seaborn
@@ -66,6 +64,8 @@ pip install opencv-python==4.8.0.76 fairscale==0.4.13
 micromamba install beartype jaxtyping pytest
 
 pip install zhipuai sniffio
+
+pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 ```
 
 ## 📚Analyze
