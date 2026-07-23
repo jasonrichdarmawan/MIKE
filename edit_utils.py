@@ -1267,7 +1267,8 @@ def evaluate(
         "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "WISE",
         "CaKE",
-        "AlphaEdit_Circuit", "Revised_AlphaEdit",
+        "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+        "Revised_AlphaEdit",
     ]:
         raise ValueError(f"Unknown alg_name: {alg_name}")
     all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=kwargs["languages"])

@@ -470,10 +470,11 @@ python test_cake.py \
 
 Note: save statistics
 ```bash
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=1
 
 EDITING_METHOD=AlphaEdit
 EDITING_METHOD=AlphaEdit_Circuit
+EDITING_METHOD="AlphaEdit_Circuit-no_layer"
 EDITING_METHOD=Revised_AlphaEdit
 EDITING_METHOD="AlphaEdit_1-rank"
 EDITING_METHOD="AlphaEdit_1-rank_compute-matched"

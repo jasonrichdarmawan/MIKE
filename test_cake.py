@@ -42,7 +42,17 @@ def load_checkpoint(model_name, device_map, dtype, editing_method, load_path, **
     model = None
     tokenizer = None
     
-    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "IFMET", "CaKE"]:
+    if editing_method in [
+        "LoRA", 
+        "ROME", 
+        "R-ROME", 
+        "MEMIT", 
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
+        "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+        "Revised_AlphaEdit",
+        "IFMET", 
+        "CaKE"
+    ]:
         model = AutoModelForCausalLM.from_pretrained(load_path, device_map=device_map, dtype=getattr(torch, dtype))
         tokenizer = AutoTokenizer.from_pretrained(load_path)
     elif editing_method == "WISE":
@@ -66,7 +76,8 @@ def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num,
         "MEMIT", 
         "IFMET", 
         "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
-        "AlphaEdit_Circuit", "Revised_AlphaEdit", 
+        "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+        "Revised_AlphaEdit", 
         "CaKE",
     ]:
         model.save_pretrained(
@@ -143,9 +154,9 @@ def assign_edit_ids(data):
 # %%
 
 # if __name__ == "__main__":
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 #     sys.argv = ["", 
-#         "--editing_method", "AlphaEdit_Circuit",
+#         "--editing_method", "AlphaEdit_Circuit-no_layer",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "llama3-8b",
@@ -153,9 +164,9 @@ def assign_edit_ids(data):
 #         "--model_type", "tiny-aya-global",
 #         "--dtype", "bfloat16",
 #         "--eval_with_chat_template",
-#         "--batch_size", "32",
+#         "--batch_size", "4",
 #         "--generation_batch_size", "128",
-#         "--sample_size", "10", # uncomment this for run testing
+#         "--sample_size", "2", # uncomment this for run testing
 #         "--data_name", "MQuAKE-CF-3k-v2-clke",
         
 #         "--do_edit",
@@ -224,8 +235,10 @@ if __name__ == "__main__":
         hparams_deeper = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/IFMET/{args.model_type}-deeper.yaml')
     elif args.editing_method == 'CaKE': # Use PEFT
         pass
-    elif args.editing_method == "AlphaEdit_Circuit":
+    elif args.editing_method in ["AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer"]:
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
+        if args.editing_method == "AlphaEdit_Circuit-no_layer":
+            hparams.no_target_recompute = True
     elif args.editing_method == "Revised_AlphaEdit":
         hparams = Revised_AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/Revised_AlphaEdit/{args.model_type}.yaml')
     else:
@@ -238,7 +251,8 @@ if __name__ == "__main__":
         "ROME", "MEMIT", "R-ROME", 
         "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "WISE", 
-        "AlphaEdit_Circuit", "Revised_AlphaEdit",
+        "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+        "Revised_AlphaEdit",
     ]:
         apply_algo = ALG_DICT[hparams.alg_name]
     elif args.editing_method == "IFMET":
@@ -387,7 +401,8 @@ def do_evaluation(
         "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "WISE", 
         "CaKE", 
-        "AlphaEdit_Circuit", "Revised_AlphaEdit",
+        "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+        "Revised_AlphaEdit",
     ]:
         metrics = evaluate(
             model=model,
@@ -487,7 +502,8 @@ def do_edit(
         "MEMIT", 
         "IFMET", 
         "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
-        "AlphaEdit_Circuit", "Revised_AlphaEdit", 
+        "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+        "Revised_AlphaEdit", 
         "WISE", 
         "CaKE"
     ]:
@@ -502,15 +518,17 @@ def do_edit(
                 "ROME", "R-ROME", 
                 "MEMIT", 
                 "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
-                "AlphaEdit_Circuit", "Revised_AlphaEdit",
+                "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+                "Revised_AlphaEdit",
             ]:
-                collect_statistics = (
-                    kwargs.get("save_edit_statistics", False)
-                    and editing_method in ["AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched", "AlphaEdit_Circuit", "Revised_AlphaEdit"]
-                )
-                edit_item_groups = [[item] for item in items] if editing_method in ["AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"] else [items]
                 batch_statistics = []
 
+                collect_statistics = (
+                    kwargs.get("save_edit_statistics", False)
+                    and kwargs.get("hparams").alg_name in ["AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]
+                )
+
+                edit_item_groups = [[item] for item in items] if editing_method in ["AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"] else [items]
                 for edit_items in edit_item_groups:
                     edit_result = edit(
                         model=model,
@@ -621,7 +639,8 @@ if __name__ == "__main__":
             "MEMIT",
             "AlphaEdit",
             "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
-            "AlphaEdit_Circuit", "Revised_AlphaEdit"
+            "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+            "Revised_AlphaEdit"
         ]:
             kwargs["hparams"] = hparams
             kwargs["apply_algo"] = apply_algo

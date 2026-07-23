@@ -44,31 +44,32 @@ from analysis.analyze_results import (
 
 # %%
 
-# if __name__ == "__main__":
-#     import os
-#     import sys
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-#     sys.argv = [
-#         "run_two_hop.py",
-#         "--editing_method", "Revised_AlphaEdit",
-#         # "--model_type", "qwen3-4b-instruct",
-#         "--model_type", "tiny-aya-global",
-#         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
-#         # "--model_type", "CohereLabs/tiny-aya-global",
-#         "--dtype", "bfloat16",
-#         "--sample_size", "1000",
-#         "--batch_size", "32",
-#         # "--save_edited_model",
-#         # "--load_edited_model",
-#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208/edit_num_0350_case_79415",
-#         "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/Revised_AlphaEdit_20260430-145114",
-#         # "--do_edit",
-#         # "--eval_with_chat_template",
-#         # "--do_evaluate",
-#         # "--do_sublayer_projections",
-#         # "--do_patchscopes",
-#         # "--do_knockout_attention",
-#     ]
+if __name__ == "__main__":
+    import os
+    import sys
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    sys.argv = [
+        "run_two_hop.py",
+        "--editing_method", "Revised_AlphaEdit",
+        "--model_type", "qwen3-4b-instruct",
+        # "--model_type", "tiny-aya-global",
+        # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+        # "--model_type", "CohereLabs/tiny-aya-global",
+        "--dtype", "bfloat16",
+        "--sample_size", "4",
+        "--batch_size", "2",
+        # "--save_edited_model",
+        # "--load_edited_model",
+        # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208/edit_num_0350_case_79415",
+        # "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/Revised_AlphaEdit_20260430-145114",
+        "--do_edit",
+        "--save_edit_statistics",
+        "--eval_with_chat_template",
+        "--do_evaluate",
+        "--do_sublayer_projections",
+        "--do_patchscopes",
+        "--do_knockout_attention",
+    ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evalaute in order: edit rows are edited, propagated rows are evaluated.")
@@ -92,16 +93,23 @@ if __name__ == "__main__":
     parser.add_argument("--do_patchscopes", action="store_true", help="Whether to do patchscope computation even if results already exist.")
     parser.add_argument("--do_knockout_attention", action="store_true", help="Whether to do attention knockout even if results already exist.")
     parser.add_argument("--generation_batch_size", default=128, type=int)
+    parser.add_argument(
+        "--save_edit_statistics",
+        action="store_true",
+        help="Save target-loss, delta-norm, and update statistics as JSON.",
+    )
     args = parser.parse_args()
 
     hparams = None
     if args.editing_method == "no_edit":
         pass
-    elif args.editing_method == "AlphaEdit":
+    elif args.editing_method in ["AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"]:
         hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
+        if args.editing_method == "AlphaEdit_1-rank_compute-matched":
+            hparams.v_num_grad_steps = 125
     elif args.editing_method == 'CaKE': # Use PEFT
         pass
-    elif args.editing_method == "AlphaEdit_Circuit":
+    elif args.editing_method in ["AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer"]:
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
     elif args.editing_method == "Revised_AlphaEdit":
         hparams = Revised_AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/Revised_AlphaEdit/{args.model_type}.yaml')
@@ -109,7 +117,11 @@ if __name__ == "__main__":
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
 
     apply_algo = None
-    if args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
+    if args.editing_method in [
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched", 
+        "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+        "Revised_AlphaEdit",
+    ]:
         alg_name = hparams.alg_name
         apply_algo = ALG_DICT[alg_name]
 
@@ -136,6 +148,16 @@ if __name__ == "__main__":
     print(f"Saving output log to {fh_path}")
     
 # %%
+
+def assign_edit_ids(data):
+    edit_id = 1
+    for case in data:
+        if case["row_role"] == "edit":
+            for rewrite in case["requested_rewrite"]:
+                rewrite["case_id"] = case["case_id"]
+                rewrite["edit_id"] = edit_id
+                edit_id += 1
+    return data
 
 def _prepare_cases_for_editing(file_path: Path):
     """
@@ -169,6 +191,7 @@ def _prepare_cases_for_editing(file_path: Path):
 
     # create json file
     cases = [convert_row_to_case(row) for _, row in subset_df_out.iterrows()]
+    cases = assign_edit_ids(cases)
 
     output_json_path = benchmark_csv_path.with_name(f"{benchmark_csv_path.stem}-clke.json")
 
@@ -192,7 +215,7 @@ if __name__ == "__main__":
     )
     stats_str = " | ".join([f"{k}: {v}" for k, v in stats.items()])
     print(f"Benchmark preparation completed | {stats_str}")
-        
+
 # %%
 
 if __name__ == "__main__":
@@ -229,20 +252,54 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     if args.do_edit and not (args.load_edited_model and args.load_model_path):
+        edit_statistics = []
+
         edit_cases = [item for item in cases if item["row_role"] == "edit"]
         # split edit_cases into list of lists, each of length args.batch_size (except possibly the last one)
         edit_cases = [edit_cases[i:i + args.batch_size] for i in range(0, len(edit_cases), args.batch_size)]
         if args.editing_method == "no_edit":
             pass
-        elif args.editing_method in ["AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
+        elif args.editing_method in [
+            "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
+            "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+            "Revised_AlphaEdit",
+        ]:
+            collect_statistics = (
+                args.save_edit_statistics
+                and hparams.alg_name in [
+                    "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"
+                ]
+            )
             for batch in tqdm(edit_cases, desc="Editing the model"):
-                    model = edit(
+                batch_statistics = []
+
+                edit_item_groups = [[item] for item in batch] if args.editing_method in ["AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"] else [batch]
+                for edit_items in edit_item_groups:
+                    edit_result = edit(
                         model=model,
                         tokenizer=tokenizer,
-                        items=batch,
+                        items=edit_items,
                         hparams=hparams,
                         apply_algo=apply_algo,
+                        return_statistics=collect_statistics,
                     )
+                    if collect_statistics:
+                        model, request_statistics = edit_result
+                        batch_statistics.extend(request_statistics)
+                    else:
+                        model = edit_result
+                
+                if collect_statistics:
+                    for statistic in batch_statistics:
+                        statistic["edit_batch_start"] = batch[0]["case_id"]
+                        statistic["edit_batch_end"] = batch[-1]["case_id"]
+                        statistic["editing_method"] = args.editing_method
+                    edit_statistics.extend(batch_statistics)
+                    statistics_path = os.path.join(
+                        SAVE_METRICS_DIR, f"edit_statistics.json"
+                    )
+                    with open(statistics_path, "w", encoding="utf-8") as f:
+                        json.dump(edit_statistics, f, ensure_ascii=False, indent=2)
         else:
             raise ValueError(f"Unsupported editing method in edit loop: {args.editing_method}")
         
