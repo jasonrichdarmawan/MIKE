@@ -470,12 +470,13 @@ python test_cake.py \
 
 Note: save statistics
 ```bash
-CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=3
 
 EDITING_METHOD=AlphaEdit
 EDITING_METHOD=AlphaEdit_Circuit
 EDITING_METHOD=Revised_AlphaEdit
 EDITING_METHOD="AlphaEdit_1-rank"
+EDITING_METHOD="AlphaEdit_1-rank_compute-matched"
 
 MODEL_TYPE=qwen3-4b-instruct
 MODEL_TYPE=tiny-aya-global

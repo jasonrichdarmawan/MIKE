@@ -1113,10 +1113,10 @@ def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
     elif hparams.alg_name in [
         "LoRA", 
         "MEMIT", 
-        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
-        requests_groups = [[request] for request in requests] if hparams.alg_name == "AlphaEdit_1-rank" else [requests]
+        requests_groups = [[request] for request in requests] if hparams.alg_name in ["AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"] else [requests]
         statistics = []
         for edit_requests in requests_groups:
             result = apply_algo(
@@ -1130,7 +1130,7 @@ def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
             )
             if (kwargs.get("return_statistics")
                 and hparams.alg_name in [
-                    "AlphaEdit", "AlphaEdit_1-rank",
+                    "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
                     "AlphaEdit_Circuit", "Revised_AlphaEdit"
                 ]):
                 model, _, temp_statistics = result
@@ -1264,7 +1264,7 @@ def evaluate(
         "ROME", "R-ROME",
         "MEMIT",
         "IFMET",
-        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "WISE",
         "CaKE",
         "AlphaEdit_Circuit", "Revised_AlphaEdit",

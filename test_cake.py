@@ -65,7 +65,7 @@ def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num,
         "ROME", "R-ROME", 
         "MEMIT", 
         "IFMET", 
-        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "AlphaEdit_Circuit", "Revised_AlphaEdit", 
         "CaKE",
     ]:
@@ -210,8 +210,13 @@ if __name__ == "__main__":
         hparams = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/MEMIT/{args.model_type}.yaml')
     elif args.editing_method == "R-ROME":
         hparams = R_ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/R-ROME/{args.model_type}.yaml')
-    elif args.editing_method in ["AlphaEdit", "AlphaEdit_1-rank"]:
+    elif args.editing_method in ["AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"]:
         hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
+
+        # Reviewer requested to do ablation study between AlphaEdit_1-rank_computed-matched and Revised_AlphaEdit
+        # as Revised_AlphaEdit theoretically can do more than 25 optimization steps
+        if args.editing_method == "AlphaEdit_1-rank_compute-matched":
+            hparams.v_num_grad_steps = 125
     elif args.editing_method == "WISE":
         hparams = WISEHyperParams.from_hparams(f'./EasyEdit/hparams/WISE/{args.model_type}.yaml')
     elif args.editing_method == "IFMET":
@@ -231,7 +236,7 @@ if __name__ == "__main__":
     if args.editing_method in [
         "LoRA", 
         "ROME", "MEMIT", "R-ROME", 
-        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "WISE", 
         "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
@@ -379,7 +384,7 @@ def do_evaluation(
         "ROME", "R-ROME", 
         "MEMIT", 
         "IFMET", 
-        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "WISE", 
         "CaKE", 
         "AlphaEdit_Circuit", "Revised_AlphaEdit",
@@ -481,7 +486,7 @@ def do_edit(
         "R-ROME", 
         "MEMIT", 
         "IFMET", 
-        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "AlphaEdit_Circuit", "Revised_AlphaEdit", 
         "WISE", 
         "CaKE"
@@ -496,14 +501,14 @@ def do_edit(
                 "LoRA", 
                 "ROME", "R-ROME", 
                 "MEMIT", 
-                "AlphaEdit", "AlphaEdit_1-rank",
+                "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
                 "AlphaEdit_Circuit", "Revised_AlphaEdit",
             ]:
                 collect_statistics = (
                     kwargs.get("save_edit_statistics", False)
-                    and editing_method in ["AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_Circuit", "Revised_AlphaEdit"]
+                    and editing_method in ["AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched", "AlphaEdit_Circuit", "Revised_AlphaEdit"]
                 )
-                edit_item_groups = [[item] for item in items] if editing_method == "AlphaEdit_1-rank" else [items]
+                edit_item_groups = [[item] for item in items] if editing_method in ["AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"] else [items]
                 batch_statistics = []
 
                 for edit_items in edit_item_groups:
@@ -615,7 +620,7 @@ if __name__ == "__main__":
             "ROME", "R-ROME",
             "MEMIT",
             "AlphaEdit",
-            "AlphaEdit_1-rank",
+            "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
             "AlphaEdit_Circuit", "Revised_AlphaEdit"
         ]:
             kwargs["hparams"] = hparams
