@@ -1088,7 +1088,7 @@ def edit_cake(model, tokenizer, items):
     return model
 
 
-def edit(model, tokenizer, items, hparams, apply_algo):
+def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
     requests = []
     for item in items:
         requested_rewrite = item['requested_rewrite']
@@ -1110,18 +1110,38 @@ def edit(model, tokenizer, items, hparams, apply_algo):
                 copy=False,
                 return_orig_weights=False,
             )
-    elif hparams.alg_name in ["LoRA", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
-        model, _ = apply_algo(
-            model,
-            tokenizer,
-            requests,
-            hparams,
-            copy=False,
-            return_orig_weights=False,
-        )
+    elif hparams.alg_name in [
+        "LoRA", 
+        "MEMIT", 
+        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit_Circuit", "Revised_AlphaEdit",
+    ]:
+        requests_groups = [[request] for request in requests] if hparams.alg_name == "AlphaEdit_1-rank" else [requests]
+        statistics = []
+        for edit_requests in requests_groups:
+            result = apply_algo(
+                model,
+                tokenizer,
+                edit_requests,
+                hparams,
+                copy=False,
+                return_orig_weights=False,
+                **kwargs,
+            )
+            if (kwargs.get("return_statistics")
+                and hparams.alg_name in [
+                    "AlphaEdit", "AlphaEdit_1-rank",
+                    "AlphaEdit_Circuit", "Revised_AlphaEdit"
+                ]):
+                model, _, temp_statistics = result
+                statistics.extend(temp_statistics)
+            else:
+                model, _ = result
     else:
         raise ValueError(f"Unknown alg_name: {hparams.alg_name}")
     
+    if kwargs.get("return_statistics"):
+        return model, statistics
     return model
 
 def _prepare_mquake_clke(items, alg_name, languages):
@@ -1239,8 +1259,15 @@ def evaluate(
     """
     
     if alg_name not in [
-        "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE",
-        "IFMET", "CaKE", "AlphaEdit_Circuit", "Revised_AlphaEdit",
+        "no_edit",
+        "LoRA",
+        "ROME", "R-ROME",
+        "MEMIT",
+        "IFMET",
+        "AlphaEdit", "AlphaEdit_1-rank",
+        "WISE",
+        "CaKE",
+        "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
         raise ValueError(f"Unknown alg_name: {alg_name}")
     all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=kwargs["languages"])

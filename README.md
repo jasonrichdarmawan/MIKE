@@ -396,7 +396,7 @@ python -m EasyEdit.easyeditor.models.rome.layer_stats \
   --stats_dir data/stats
 ```
 
-Note 3: If your setup have limited VRAM, test whether the GPU can fit. If you use multi-GPU, adjust the `--max_memory` flag to fit model weights, activations and covariance into the VRAM. Then, remove the `--fake_samples` and `--fake_sequence_length` after test.
+Note 3: If your setup have limited VRAM, test whether the GPU can fit. If you use multi-GPU, adjust the `--max_memory` flag to fit model weights, activations and covariance into the VRAM. Then, remove the `--fake_samples` and `--fake_sequence_length` after test. It's better to offload some parameters to the disk than receiving Out-of-Memory (OOM) error.
 
 ```bash
 MODEL_NAME=Qwen/Qwen2.5-7B
@@ -441,30 +441,57 @@ python test_cake.py \
   --data_name MQuAKE-CF-3k-v2-clke
 ```
 
-`ROME`, `R-ROME`, `MEMIT`, `IFMET`, `WISE`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit`
+`ROME`, `R-ROME`, `MEMIT`, `IFMET`, `WISE`
 ```bash
 EDITING_METHOD=ROME
 EDITING_METHOD=R-ROME
 EDITING_METHOD=MEMIT
 EDITING_METHOD=IFMET
 EDITING_METHOD=WISE
-EDITING_METHOD=AlphaEdit
-EDITING_METHOD=AlphaEdit_Circuit
-EDITING_METHOD=Revised_AlphaEdit
 
 MODEL_TYPE=qwen3-4b-instruct
 MODEL_TYPE=tiny-aya-global
 python test_cake.py \
   --editing_method $EDITING_METHOD \
-  --model_type tiny-aya-global \
+  --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --load_model \
+  --do_edit \
   --eval_with_chat_template \
   --sample_size 1000 \
   --batch_size 32 \
   --generation_batch_size 128 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edited_model
+```
+
+`AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit`, `AlphaEdit 1-rank`
+
+Note: save statistics
+```bash
+CUDA_VISIBLE_DEVICES=0
+
+EDITING_METHOD=AlphaEdit
+EDITING_METHOD=AlphaEdit_Circuit
+EDITING_METHOD=Revised_AlphaEdit
+EDITING_METHOD="AlphaEdit_1-rank"
+
+MODEL_TYPE=qwen3-4b-instruct
+MODEL_TYPE=tiny-aya-global
+python test_cake.py \
+  --editing_method $EDITING_METHOD \
+  --model_type $MODEL_TYPE \
+  --dtype bfloat16 \
+  --load_model \
+  --do_edit \
+  --eval_with_chat_template \
+  --sample_size 1000 \
+  --batch_size 32 \
+  --generation_batch_size 128 \
+  --main_eval_steps 0 \
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --save_edit_statistics \
   --save_edited_model
 ```
 
@@ -500,6 +527,7 @@ python test_cake.py \
   --model_type $MODEL_TYPE \
   --dtype bfloat16 \
   --load_model \
+  --do_edit \
   --eval_with_chat_template \
   --sample_size 1000 \
   --batch_size 32 \

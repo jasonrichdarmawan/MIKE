@@ -60,7 +60,15 @@ def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num,
     checkpoint_path = os.path.join(checkpoint_root, checkpoint_name)
     os.makedirs(checkpoint_path, exist_ok=True)
 
-    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "IFMET", "CaKE"]:
+    if editing_method in [
+        "LoRA", 
+        "ROME", "R-ROME", 
+        "MEMIT", 
+        "IFMET", 
+        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit_Circuit", "Revised_AlphaEdit", 
+        "CaKE",
+    ]:
         model.save_pretrained(
             checkpoint_path,
             safe_serialization=True,
@@ -121,12 +129,23 @@ def calculate_averages(data):
         "accuracy_averages": f"{accuracy_avg:.3f}"
     }
 
+
+def assign_edit_ids(data):
+    edit_id = 1
+    for case in data:
+        for rewrite in case["requested_rewrite"]:
+            rewrite["case_id"] = case["case_id"]
+            rewrite["edit_id"] = edit_id
+            edit_id += 1
+
+    return data
+
 # %%
 
 # if __name__ == "__main__":
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = ["", 
-#         "--editing_method", "Revised_AlphaEdit",
+#         "--editing_method", "AlphaEdit_Circuit",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "llama3-8b",
@@ -136,19 +155,20 @@ def calculate_averages(data):
 #         "--eval_with_chat_template",
 #         "--batch_size", "32",
 #         "--generation_batch_size", "128",
-#         "--sample_size", "1000",
+#         "--sample_size", "10", # uncomment this for run testing
 #         "--data_name", "MQuAKE-CF-3k-v2-clke",
         
-#         # "--do_edit",
+#         "--do_edit",
 #         # "--glue_eval_steps", "0",
-#         # "--glue_eval_size", "2",
+#         "--glue_eval_size", "2", # uncomment this for run testing
 #         "--main_eval_steps", "0",
         
+#         "--save_edit_statistics",
 #         # "--save_edited_model",
-#         # "--load_model",
+#         "--load_model",
 #         # "--load_edited_model",
 #         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010805",
-#         "--load_eval_path", "output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010715",
+#         # "--load_eval_path", "output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010715",
 #     ]
 
 if __name__ == "__main__":
@@ -172,6 +192,11 @@ if __name__ == "__main__":
     parser.add_argument('--load_edited_model', action='store_true')
     parser.add_argument('--load_model_path', default=None, type=str)
     parser.add_argument('--load_eval_path', default=None, type=str)
+    parser.add_argument(
+        '--save_edit_statistics',
+        action='store_true',
+        help='Save AlphaEdit-family target-loss, delta-norm, and update statistics as JSON.',
+    )
     args = parser.parse_args()
 
     hparams = None
@@ -185,7 +210,7 @@ if __name__ == "__main__":
         hparams = MEMITHyperParams.from_hparams(f'./EasyEdit/hparams/MEMIT/{args.model_type}.yaml')
     elif args.editing_method == "R-ROME":
         hparams = R_ROMEHyperParams.from_hparams(f'./EasyEdit/hparams/R-ROME/{args.model_type}.yaml')
-    elif args.editing_method == "AlphaEdit":
+    elif args.editing_method in ["AlphaEdit", "AlphaEdit_1-rank"]:
         hparams = AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit/{args.model_type}.yaml')
     elif args.editing_method == "WISE":
         hparams = WISEHyperParams.from_hparams(f'./EasyEdit/hparams/WISE/{args.model_type}.yaml')
@@ -203,7 +228,13 @@ if __name__ == "__main__":
     
     # In-Context Learning Editing Methods (e.g., MeLLo) do not require apply_algo
     apply_algo = None
-    if args.editing_method in ["LoRA", "ROME", "MEMIT", "R-ROME", "AlphaEdit", "WISE", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
+    if args.editing_method in [
+        "LoRA", 
+        "ROME", "MEMIT", "R-ROME", 
+        "AlphaEdit", "AlphaEdit_1-rank",
+        "WISE", 
+        "AlphaEdit_Circuit", "Revised_AlphaEdit",
+    ]:
         apply_algo = ALG_DICT[hparams.alg_name]
     elif args.editing_method == "IFMET":
         apply_algo = ALG_DICT["MEMIT"]
@@ -270,6 +301,7 @@ if __name__ == "__main__":
     if args.sample_size > len(data):
         raise ValueError(f"Sample size {args.sample_size} exceeds dataset size {len(data)}.")
     data = data[:args.sample_size]
+    data = assign_edit_ids(data)
     
 # %%
 
@@ -342,7 +374,14 @@ def do_evaluation(
     Evaluate and save
     """
     if editing_method in [
-        "no_edit", "LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "WISE", "IFMET", "CaKE", 
+        "no_edit", 
+        "LoRA", 
+        "ROME", "R-ROME", 
+        "MEMIT", 
+        "IFMET", 
+        "AlphaEdit", "AlphaEdit_1-rank",
+        "WISE", 
+        "CaKE", 
         "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
         metrics = evaluate(
@@ -432,23 +471,69 @@ def do_edit(
         loc_data = json.load(open('./datasets/ZsRE/zsre_mend_train.json','r'))
         loc_data = loc_data[:7000]
         loc_index = 0
+
+    edit_statistics = []
     
     indices = list(range(0, len(data), batch_size))
-    if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit", "WISE", "IFMET", "CaKE"]:
+    if editing_method in [
+        "LoRA", 
+        "ROME", 
+        "R-ROME", 
+        "MEMIT", 
+        "IFMET", 
+        "AlphaEdit", "AlphaEdit_1-rank",
+        "AlphaEdit_Circuit", "Revised_AlphaEdit", 
+        "WISE", 
+        "CaKE"
+    ]:
         all_metrics = {}
         
         for start_idx in tqdm(indices, desc="Editing the model"):
             end = min(start_idx + batch_size, len(data))
             items = data[start_idx:end]
             
-            if editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
-                model = edit(
-                    model=model,
-                    tokenizer=tokenizer,
-                    items=items,
-                    hparams=kwargs["hparams"],
-                    apply_algo=kwargs["apply_algo"],
+            if editing_method in [
+                "LoRA", 
+                "ROME", "R-ROME", 
+                "MEMIT", 
+                "AlphaEdit", "AlphaEdit_1-rank",
+                "AlphaEdit_Circuit", "Revised_AlphaEdit",
+            ]:
+                collect_statistics = (
+                    kwargs.get("save_edit_statistics", False)
+                    and editing_method in ["AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_Circuit", "Revised_AlphaEdit"]
                 )
+                edit_item_groups = [[item] for item in items] if editing_method == "AlphaEdit_1-rank" else [items]
+                batch_statistics = []
+
+                for edit_items in edit_item_groups:
+                    edit_result = edit(
+                        model=model,
+                        tokenizer=tokenizer,
+                        items=edit_items,
+                        hparams=kwargs["hparams"],
+                        apply_algo=kwargs["apply_algo"],
+                        return_statistics=collect_statistics,
+                    )
+                    if collect_statistics:
+                        model, request_statistics = edit_result
+                        batch_statistics.extend(request_statistics)
+                    else:
+                        model = edit_result
+
+                if collect_statistics:
+                    for statistic in batch_statistics:
+                        statistic["edit_batch_start"] = start_idx
+                        statistic["edit_batch_end"] = end
+                        statistic["editing_method"] = editing_method
+                    edit_statistics.extend(batch_statistics)
+                    statistics_path = os.path.join(
+                        kwargs["statistics_save_dir"],
+                        "edit_statistics.json",
+                    )
+                    with open(statistics_path, "w") as f:
+                        json.dump(edit_statistics, f, indent=2)
+                    print(f"Saved edit statistics to {statistics_path}")
             elif editing_method == "WISE":
                 loc_index = edit_wise(
                     model=model,
@@ -519,11 +604,20 @@ if __name__ == "__main__":
         kwargs["eval_with_chat_template"] = args.eval_with_chat_template
         kwargs["generation_batch_size"] = args.generation_batch_size
         kwargs["load_edited_model"] = args.load_edited_model
+        kwargs["save_edit_statistics"] = args.save_edit_statistics
+        kwargs["statistics_save_dir"] = SAVE_METRICS_DIR
         if args.data_name == "MQuAKE-CF-3k-v2-clke":
             kwargs["languages"] = ["en", "de", "fr", "ja", "zh"]
             all_metrics = {language: [] for language in kwargs["languages"]}
         
-        if args.editing_method in ["LoRA", "ROME", "R-ROME", "MEMIT", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
+        if args.editing_method in [
+            "LoRA",
+            "ROME", "R-ROME",
+            "MEMIT",
+            "AlphaEdit",
+            "AlphaEdit_1-rank",
+            "AlphaEdit_Circuit", "Revised_AlphaEdit"
+        ]:
             kwargs["hparams"] = hparams
             kwargs["apply_algo"] = apply_algo
         elif args.editing_method == "WISE":
