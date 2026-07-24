@@ -6,7 +6,10 @@ from pathlib import Path
 import pandas as pd
 
 from datasets import Dataset
-from analysis.utils import load_model, load_tokenizer, _format_prompt, generate_and_test_answers, get_answers, _extract_answer_text_xml_tag, check_answer_in_pred
+from analysis.utils import _format_prompt, generate_and_test_answers, get_answers, _extract_answer_text_xml_tag, check_answer_in_pred
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from tqdm.auto import tqdm
 
@@ -120,9 +123,15 @@ def main(args):
     dataset = dataset.map(get_answers, fn_kwargs={"key": "e2"})
     dataset = dataset.map(get_answers, fn_kwargs={"key": "e3"})
 
-    model = load_model(args.model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name,
+        device_map="cuda",
+        dtype=getattr(torch, args.dtype),
+    )
     model.eval()
-    tokenizer = load_tokenizer(args.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
     # Evaluate in Python to avoid pickling the model/tokenizer for Dataset.map
@@ -177,6 +186,7 @@ def parse_args():
     CHAT_MODELS = [
         "Qwen/Qwen2.5-7B-Instruct", "meta-llama/Meta-Llama-3-8B-Instruct",
         "Qwen/Qwen3.5-4B", "Qwen/Qwen3-4B-Instruct-2507", "CohereLabs/tiny-aya-global",
+        "CohereLabs/aya-expanse-8b",
     ]
     
     MODELS = BASE_MODELS + CHAT_MODELS
@@ -186,6 +196,7 @@ def parse_args():
     parser.add_argument("--input-path")
     parser.add_argument("--output-path")
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--dtype", default="bfloat16", type=str, choices=["float16", "bfloat16", "float32"])
     args = parser.parse_args()
     
     args.base_model = True if args.model_name in BASE_MODELS else False

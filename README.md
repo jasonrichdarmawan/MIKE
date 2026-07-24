@@ -107,9 +107,15 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 - Ours:
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop_cf_e2.csv` dataset. It will generate `datasets/{model_name}/two_hop_cf_e2.csv` file. Use it for the subsequent experiments.
     ```bash
+    export CUDA_VISIBLE_DEVICES=1
+
     MODEL_TYPE=CohereLabs/tiny-aya-global
     MODEL_TYPE=Qwen/Qwen3-4B-Insturct-2507
-    python analysis/evaluate_dataset.py $MODEL_TYPE --input-path datasets/two_hop_cf_e2.csv
+
+    MODEL_TYPE=Qwen/Qwen2.5-7B-Instruct
+    MODEL_TYPE=CohereLabs/aya-expanse-8b
+
+    python -m analysis.evaluate_dataset $MODEL_TYPE --input-path datasets/two_hop_cf_e2.csv
     ```
   - Run `analysis/create_benchmark_cf.py` to create the benchmark based on `datasets/{model_name}/two_hop_cf_e2.csv`. It will generate `datasets/{model_name}/two_hop_cf_benchmark_e2.csv`
     ```bash
@@ -120,10 +126,15 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 
     Note: set `MODEL_TYPE` to HuggingFace's model name when `EDITING_METHOD == "no_edit"`
     ```bash
+    export CUDA_VISIBLE_DEVICES=0
+
     EDITING_METHOD=no_edit
     
     MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
     MODEL_TYPE=CohereLabs/tiny-aya-global
+    
+    MODEL_TYPE=Qwen/Qwen2.5-7B-Instruct
+    MODEL_TYPE=CohereLabs/aya-expanse-8b
 
     python run_two_hop.py \
       --editing_method $EDITING_METHOD \
@@ -139,12 +150,17 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
     ```
 
     ```bash
+    export CUDA_VISIBLE_DEVICES=0
+
     EDITING_METHOD=AlphaEdit
+    EDITING_METHOD="AlphaEdit_1-rank"
+    EDITING_METHOD="AlphaEdit_1-rank_compute-matched"
     EDITING_METHOD=AlphaEdit_Circuit
     EDITING_METHOD=Revised_AlphaEdit
 
-    MODEL_TYPE=tiny-aya-global
     MODEL_TYPE=qwen3-4b-instruct
+    MODEL_TYPE=tiny-aya-global
+
     python run_two_hop.py \
       --editing_method $EDITING_METHOD \
       --model_type $MODEL_TYPE \
@@ -152,6 +168,28 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
       --sample_size 1000 \
       --batch_size 32 \
       --save_edited_model \
+      --do_edit \
+      --save_edit_statistics \
+      --eval_with_chat_template \
+      --do_evaluate \
+      --do_patchscopes \
+      --do_sublayer_projections \
+      --do_knockout_attention
+    ```
+
+    ```bash
+    LOAD_MODEL_PATH=checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_1-rank_20260724-000058/edit_num_0350_case_79415
+    LOAD_MODEL_PATH=checkpoints/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_1-rank_20260724-000254/edit_num_0246_case_80844
+    LOAD_MODEL_PATH=checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_1-rank_compute-matched_20260724-000600/edit_num_0350_case_79415
+
+    python run_two_hop.py \
+      --editing_method $EDITING_METHOD \
+      --model_type $MODEL_TYPE \
+      --dtype bfloat16 \
+      --sample_size 1000 \
+      --batch_size 32 \
+      --load_edited_model \
+      --load_model_path $LOAD_MODEL_PATH \
       --eval_with_chat_template \
       --do_evaluate \
       --do_patchscopes \
@@ -399,7 +437,9 @@ python -m EasyEdit.easyeditor.models.rome.layer_stats \
 Note 3: If your setup have limited VRAM, test whether the GPU can fit. If you use multi-GPU, adjust the `--max_memory` flag to fit model weights, activations and covariance into the VRAM. Then, remove the `--fake_samples` and `--fake_sequence_length` after test. It's better to offload some parameters to the disk than receiving Out-of-Memory (OOM) error.
 
 ```bash
-MODEL_NAME=Qwen/Qwen2.5-7B
+export CUDA_VISIBLE_DEVICES=1,4
+
+MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
 MODEL_NAME=CohereLabs/aya-expanse-8b
 
 python -m EasyEdit.easyeditor.models.rome.layer_stats \
@@ -470,7 +510,7 @@ python test_cake.py \
 
 Note: save statistics
 ```bash
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 
 EDITING_METHOD=AlphaEdit
 EDITING_METHOD=AlphaEdit_Circuit

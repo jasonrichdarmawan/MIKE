@@ -44,32 +44,32 @@ from analysis.analyze_results import (
 
 # %%
 
-if __name__ == "__main__":
-    import os
-    import sys
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-    sys.argv = [
-        "run_two_hop.py",
-        "--editing_method", "Revised_AlphaEdit",
-        "--model_type", "qwen3-4b-instruct",
-        # "--model_type", "tiny-aya-global",
-        # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
-        # "--model_type", "CohereLabs/tiny-aya-global",
-        "--dtype", "bfloat16",
-        "--sample_size", "4",
-        "--batch_size", "2",
-        # "--save_edited_model",
-        # "--load_edited_model",
-        # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208/edit_num_0350_case_79415",
-        # "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/Revised_AlphaEdit_20260430-145114",
-        "--do_edit",
-        "--save_edit_statistics",
-        "--eval_with_chat_template",
-        "--do_evaluate",
-        "--do_sublayer_projections",
-        "--do_patchscopes",
-        "--do_knockout_attention",
-    ]
+# if __name__ == "__main__":
+#     import os
+#     import sys
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#     sys.argv = [
+#         "run_two_hop.py",
+#         "--editing_method", "Revised_AlphaEdit",
+#         "--model_type", "qwen3-4b-instruct",
+#         # "--model_type", "tiny-aya-global",
+#         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
+#         # "--model_type", "CohereLabs/tiny-aya-global",
+#         "--dtype", "bfloat16",
+#         "--sample_size", "4",
+#         "--batch_size", "2",
+#         # "--save_edited_model",
+#         # "--load_edited_model",
+#         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_20260430-143208/edit_num_0350_case_79415",
+#         # "--load_eval_path", "output/CohereLabs/tiny-aya-global/two_hop_cf_e2/sequential_s1000_s32/Revised_AlphaEdit_20260430-145114",
+#         "--do_edit",
+#         "--save_edit_statistics",
+#         "--eval_with_chat_template",
+#         "--do_evaluate",
+#         "--do_sublayer_projections",
+#         "--do_patchscopes",
+#         "--do_knockout_attention",
+#     ]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evalaute in order: edit rows are edited, propagated rows are evaluated.")
@@ -333,7 +333,12 @@ def do_evaluate(
     
     eval_cases = [cases[i:i + generation_batch_size] for i in range(0, len(cases), generation_batch_size)]
     for idx, batch in enumerate(tqdm(eval_cases, desc="Evaluating the model")):
-        if editing_method in ["no_edit", "AlphaEdit", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
+        if editing_method in [
+            "no_edit", 
+            "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
+            "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
+            "Revised_AlphaEdit",
+        ]:
             metrics = evaluate(
                 model=model,
                 tokenizer=tokenizer,
