@@ -4,7 +4,8 @@ import pandas as pd
 import torch
 from torch import Tensor
 from transformers import AutoTokenizer, AutoModelForCausalLM, GPT2LMHeadModel, \
-    LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM
+    LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM, \
+    CohereForCausalLM \
 
 from jaxtyping import Float
 
@@ -31,7 +32,7 @@ def load_model(model_name, device="cuda"):
 def get_layer_names(model):
     if type(model) is GPT2LMHeadModel:
         return [f"transformer.h.{i}" for i in range(model.config.num_hidden_layers)]
-    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM]:
+    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM, CohereForCausalLM]:
         return [f"model.layers.{i}" for i in range(model.config.num_hidden_layers)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -40,7 +41,7 @@ def get_layer_names(model):
 def get_attention_layers_names(model):
     if type(model) is GPT2LMHeadModel:
         return [f"transformer.h.{i}.attn" for i in range(model.config.num_hidden_layers)]
-    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM]:
+    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM, CohereForCausalLM]:
         return [f"model.layers.{i}.self_attn" for i in range(model.config.num_hidden_layers)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -49,7 +50,7 @@ def get_attention_layers_names(model):
 def get_mlp_layers_names(model):
     if type(model) is GPT2LMHeadModel:
         return [f"transformer.h.{i}.mlp" for i in range(model.config.num_hidden_layers)]
-    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM]:
+    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM, CohereForCausalLM]:
         return [f"model.layers.{i}.mlp" for i in range(model.config.num_hidden_layers)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -63,7 +64,7 @@ def get_attention_modules(model, layer: int, k=0):
     top = min(layer + k + 1, model.config.num_hidden_layers)
     if type(model) is GPT2LMHeadModel:
         return [model.transformer.h[l].attn for l in range(bot, top)]
-    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM]:
+    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM, CohereForCausalLM]:
         return [model.model.layers[l].self_attn for l in range(bot, top)]
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -72,7 +73,7 @@ def get_attention_modules(model, layer: int, k=0):
 def get_norm_module(model):
     if type(model) is GPT2LMHeadModel:
         return model.transformer.ln_f
-    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM]:
+    elif type(model) in [LlamaForCausalLM, GemmaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM, CohereForCausalLM]:
         return model.model.norm
     else:
         raise ValueError(f"Model type {type(model)} not supported")
@@ -86,7 +87,7 @@ def get_prepend_space(model):
             return True
         elif "Llama-2" in model.config._name_or_path:
             return False
-    elif type(model) in [Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM]:
+    elif type(model) in [Qwen2ForCausalLM, Qwen3ForCausalLM, Cohere2ForCausalLM, CohereForCausalLM]:
         return True
     elif type(model) is GemmaForCausalLM:
         return True
