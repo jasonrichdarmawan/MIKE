@@ -823,7 +823,12 @@ def do_analyze_results(
 
 if __name__ == "__main__":
     n_layers = None
-    if model_name in ["Qwen/Qwen3-4B-Instruct-2507", "CohereLabs/tiny-aya-global"]:
+    if model_name in [
+        "Qwen/Qwen3-4B-Instruct-2507",
+        "CohereLabs/tiny-aya-global",
+        "Qwen/Qwen2.5-7B-Instruct",
+        "CohereLabs/aya-expanse-8b",
+    ]:
         n_layers = model.config.num_hidden_layers
     else:
         raise ValueError(f"Unsupported model for layer number: {model_name}")
