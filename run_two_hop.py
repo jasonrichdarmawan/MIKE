@@ -98,6 +98,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Save target-loss, delta-norm, and update statistics as JSON.",
     )
+    parser.add_argument(
+        "--max_memory",
+        type=lambda value: {
+            int(device): memory
+            for device, memory in (item.split(":", 1) for item in value.split(","))
+        },
+        help='Comma-separated GPU memory limits, e.g. "0:14GiB,1:18GiB".',
+    )
     args = parser.parse_args()
 
     hparams = None
@@ -231,7 +239,8 @@ if __name__ == "__main__":
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map="cuda",
+            device_map="auto",
+            max_memory=args.max_memory if args.max_memory else None,
             dtype=getattr(torch, args.dtype),
         )
         tokenizer = AutoTokenizer.from_pretrained(model_name)

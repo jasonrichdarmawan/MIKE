@@ -149,6 +149,8 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
       --do_knockout_attention
     ```
 
+    Note: `aya-expanse-8b` and `qwen2.5-7b-instruct` need more than 24 GB VRAM to work. There rest of the model can run under 24 GB VRAM.
+
     ```bash
     export CUDA_VISIBLE_DEVICES=0
 
@@ -160,6 +162,9 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 
     MODEL_TYPE=qwen3-4b-instruct
     MODEL_TYPE=tiny-aya-global
+
+    MODEL_TYPE=qwen2.5-7b-instruct
+    MODEL_TYPE=aya-expanse-8b
 
     python run_two_hop.py \
       --editing_method $EDITING_METHOD \
@@ -174,8 +179,11 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
       --do_evaluate \
       --do_patchscopes \
       --do_sublayer_projections \
-      --do_knockout_attention
+      --do_knockout_attention \
+      --max_memory 0:8GiB,1:8GiB
     ```
+
+    In case experiment fail but checkpoint was saved, then you can continue the experiment from the checkpoint instead of losing progress.
 
     ```bash
     LOAD_MODEL_PATH=checkpoints/Qwen/Qwen3-4B-Instruct-2507/two_hop_cf_e2/sequential_s1000_s32/AlphaEdit_1-rank_20260724-000058/edit_num_0350_case_79415
