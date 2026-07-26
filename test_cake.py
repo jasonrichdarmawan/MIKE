@@ -77,7 +77,7 @@ def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num,
         "IFMET", 
         "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
-        "Revised_AlphaEdit", 
+        "Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute",
         "CaKE",
     ]:
         model.save_pretrained(
@@ -208,6 +208,14 @@ if __name__ == "__main__":
         action='store_true',
         help='Save AlphaEdit-family target-loss, delta-norm, and update statistics as JSON.',
     )
+    parser.add_argument(
+        "--max_memory",
+        type=lambda value: {
+            int(device): memory
+            for device, memory in (item.split(":", 1) for item in value.split(","))
+        },
+        help='Comma-separated GPU memory limits, e.g. "0:14GiB,1:18GiB".',
+    )
     args = parser.parse_args()
 
     hparams = None
@@ -307,7 +315,12 @@ if __name__ == "__main__":
         )
         print(f"Loaded edited model by {args.editing_method} from checkpoint {args.load_model_path}.")
     elif args.load_model:
-        model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cuda", dtype=getattr(torch, args.dtype))
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name, 
+            device_map="auto",
+            max_memory=args.max_memory if args.max_memory else None,
+            dtype=getattr(torch, args.dtype)
+        )
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     
         if tokenizer.pad_token is None:

@@ -42,4 +42,6 @@ MODEL_NAME_TO_MAXIMUM_CONTEXT_LENGTH_MAP = {
     "gpt2-medium": 1024,
     "qwen3-4b-instruct-2507": 4096,
     "tiny-aya-global": 4096,
+    "qwen2.5-7b-instruct": 4096,
+    "aya-expanse-8b": 4096,
 }

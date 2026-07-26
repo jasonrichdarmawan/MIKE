@@ -133,7 +133,7 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
     MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
     MODEL_TYPE=CohereLabs/tiny-aya-global
     
-    MODEL_TYPE=Qwen/Qwen2.5-7B-Instruct
+    MODEL_TYPE=Qwen/Qwen2.5-7B-Instruct 
     MODEL_TYPE=CohereLabs/aya-expanse-8b
 
     python run_two_hop.py \
@@ -149,16 +149,18 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
       --do_knockout_attention
     ```
 
-    Note: `aya-expanse-8b` and `qwen2.5-7b-instruct` need more than 24 GB VRAM to work. There rest of the model can run under 24 GB VRAM.
+    Note: `aya-expanse-8b` and `qwen2.5-7b-instruct` need more than 24 GB VRAM to work. There rest of the model can run under 24 GB VRAM. Remove `--max_memory` if you don't evaluate these two models.
 
     ```bash
-    export CUDA_VISIBLE_DEVICES=0
+    export CUDA_VISIBLE_DEVICES=0,1
 
     EDITING_METHOD=AlphaEdit
     EDITING_METHOD="AlphaEdit_1-rank"
     EDITING_METHOD="AlphaEdit_1-rank_compute-matched"
     EDITING_METHOD=AlphaEdit_Circuit
+    EDITING_METHOD="AlphaEdit_Circuit-no_layer"
     EDITING_METHOD=Revised_AlphaEdit
+    EDITING_METHOD="Revised_AlphaEdit-lower_compute"
 
     MODEL_TYPE=qwen3-4b-instruct
     MODEL_TYPE=tiny-aya-global
@@ -471,10 +473,16 @@ python -m EasyEdit.easyeditor.models.rome.layer_stats \
 
 no_edit
 ```bash
+export CUDA_VISIBLE_DEVICES=4
+
 EDITING_METHOD=no_edit
 
 MODEL_TYPE=Qwen/Qwen3-4B-Instruct-2507
 MODEL_TYPE=CohereLabs/tiny-aya-global
+
+MODEL_TYPE=Qwen/Qwen2.5-7B-Instruct
+MODEL_TYPE=CohereLabs/aya-expanse-8b
+
 python test_cake.py \
   --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
@@ -486,7 +494,8 @@ python test_cake.py \
   --generation_batch_size 128 \
   --glue_eval_steps 0 \
   --main_eval_steps 0 \
-  --data_name MQuAKE-CF-3k-v2-clke
+  --data_name MQuAKE-CF-3k-v2-clke \
+  --max_memory 0:8GiB,1:8GiB
 ```
 
 `ROME`, `R-ROME`, `MEMIT`, `IFMET`, `WISE`
@@ -518,17 +527,21 @@ python test_cake.py \
 
 Note: save statistics
 ```bash
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1,2
 
 EDITING_METHOD=AlphaEdit
+EDITING_METHOD="AlphaEdit_1-rank"
+EDITING_METHOD="AlphaEdit_1-rank_compute-matched"
 EDITING_METHOD=AlphaEdit_Circuit
 EDITING_METHOD="AlphaEdit_Circuit-no_layer"
 EDITING_METHOD=Revised_AlphaEdit
-EDITING_METHOD="AlphaEdit_1-rank"
-EDITING_METHOD="AlphaEdit_1-rank_compute-matched"
 
 MODEL_TYPE=qwen3-4b-instruct
 MODEL_TYPE=tiny-aya-global
+
+MODEL_TYPE=qwen2.5-7b-instruct
+MODEL_TYPE=aya-expanse-8b
+
 python test_cake.py \
   --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
@@ -542,7 +555,8 @@ python test_cake.py \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
   --save_edit_statistics \
-  --save_edited_model
+  --save_edited_model \
+  --max_memory 0:6GiB,1:10GiB
 ```
 
 `MeLLo` and `MeLLo_KV`

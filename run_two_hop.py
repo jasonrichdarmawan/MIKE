@@ -119,8 +119,12 @@ if __name__ == "__main__":
         pass
     elif args.editing_method in ["AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer"]:
         hparams = AlphaEditCircuitHyperParams.from_hparams(f'./EasyEdit/hparams/AlphaEdit_Circuit/{args.model_type}.yaml')
-    elif args.editing_method == "Revised_AlphaEdit":
+        if args.editing_method == "AlphaEdit_Circuit-no_layer":
+            hparams.no_target_recompute = True
+    elif args.editing_method in ["Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute"]:
         hparams = Revised_AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/Revised_AlphaEdit/{args.model_type}.yaml')
+        if args.editing_method == "Revised_AlphaEdit-lower_compute":
+            hparams.v_num_grad_steps = 5
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
 
@@ -128,7 +132,7 @@ if __name__ == "__main__":
     if args.editing_method in [
         "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched", 
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
-        "Revised_AlphaEdit",
+        "Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute",
     ]:
         alg_name = hparams.alg_name
         apply_algo = ALG_DICT[alg_name]
@@ -271,7 +275,7 @@ if __name__ == "__main__":
         elif args.editing_method in [
             "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
             "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
-            "Revised_AlphaEdit",
+            "Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute",
         ]:
             collect_statistics = (
                 args.save_edit_statistics
@@ -346,7 +350,7 @@ def do_evaluate(
             "no_edit", 
             "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
             "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
-            "Revised_AlphaEdit",
+            "Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute",
         ]:
             metrics = evaluate(
                 model=model,

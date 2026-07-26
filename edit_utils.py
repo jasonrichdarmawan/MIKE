@@ -1113,7 +1113,7 @@ def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
     elif hparams.alg_name in [
         "LoRA", 
         "MEMIT", 
-        "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
+        "AlphaEdit",
         "AlphaEdit_Circuit", "Revised_AlphaEdit",
     ]:
         requests_groups = [[request] for request in requests] if hparams.alg_name in ["AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"] else [requests]
@@ -1130,8 +1130,8 @@ def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
             )
             if (kwargs.get("return_statistics")
                 and hparams.alg_name in [
-                    "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
-                    "AlphaEdit_Circuit", "Revised_AlphaEdit"
+                    "AlphaEdit",
+                    "AlphaEdit_Circuit", "Revised_AlphaEdit",
                 ]):
                 model, _, temp_statistics = result
                 statistics.extend(temp_statistics)
@@ -1268,7 +1268,7 @@ def evaluate(
         "WISE",
         "CaKE",
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
-        "Revised_AlphaEdit",
+        "Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute",
     ]:
         raise ValueError(f"Unknown alg_name: {alg_name}")
     all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=kwargs["languages"])
