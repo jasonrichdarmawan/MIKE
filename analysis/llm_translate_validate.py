@@ -75,6 +75,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument(
+        "--write-batch-size",
+        type=int,
+        default=25,
+        help=(
+            "Write the full dataset after this many successful audit jobs "
+            "(default: 25). Smaller values improve crash resumability; 1 "
+            "restores writing after every job."
+        ),
+    )
+    parser.add_argument(
         "--overwrite", action="store_true",
         help="Re-audit completed case-language pairs instead of skipping them.",
     )
@@ -321,6 +331,8 @@ def main() -> None:
     args = parse_args()
     if args.max_workers <= 0:
         raise ValueError("--max-workers must be positive.")
+    if args.write_batch_size <= 0:
+        raise ValueError("--write-batch-size must be positive.")
     with args.dataset_path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, list):
@@ -362,6 +374,7 @@ def main() -> None:
             totals = AuditResult()
             completed_jobs = 0
             failed_jobs = 0
+            unsaved_successes = 0
             for future in as_completed(futures):
                 case, language, units_to_audit = futures[future]
                 try:
@@ -375,7 +388,10 @@ def main() -> None:
                     failed_jobs += 1
                 else:
                     save_judgments(case, language, units_to_audit, audit_result.judgments, args.model)
-                    atomic_write_json(args.dataset_path, data)
+                    unsaved_successes += 1
+                    if unsaved_successes >= args.write_batch_size:
+                        atomic_write_json(args.dataset_path, data)
+                        unsaved_successes = 0
                 if audit_result is not None:
                     totals.api_calls += audit_result.api_calls
                     totals.prompt_tokens += audit_result.prompt_tokens
@@ -392,6 +408,8 @@ def main() -> None:
                         "avg_prompt_tok/call": f"{totals.prompt_tokens / totals.api_calls:.0f}",
                         "avg_completion_tok/call": f"{totals.completion_tokens / totals.api_calls:.0f}",
                     })
+            if unsaved_successes:
+                atomic_write_json(args.dataset_path, data)
 
 
 if __name__ == "__main__":
