@@ -11,6 +11,7 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,9 +19,34 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 from tqdm import tqdm
 
+import logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+
 
 TARGET_LANGUAGES = {"zh": "Chinese", "de": "German", "fr": "French", "ja": "Japanese"}
 VALID_LABELS = {"accepted", "minor_issue", "major_issue"}
+
+
+@dataclass
+class AuditResult:
+    """Outcome and observed API usage for one case-language audit job."""
+
+    judgments: Optional[Dict[str, Dict[str, str]]] = None
+    api_calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    def record_response_usage(self, response: Any) -> None:
+        """Add usage reported by one OpenAI-compatible response, if available."""
+        usage = getattr(response, "usage", None)
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        self.prompt_tokens += prompt_tokens
+        self.completion_tokens += completion_tokens
+        self.total_tokens += total_tokens or prompt_tokens + completion_tokens
 
 
 def parse_args() -> argparse.Namespace:
@@ -183,20 +209,49 @@ Units:
 
 
 def normalize_response(payload: Optional[Dict[str, Any]], expected_ids: set[str]) -> Optional[Dict[str, Dict[str, str]]]:
-    if not payload or not isinstance(payload.get("judgments"), list):
+    if response_validation_error(payload, expected_ids) is not None:
         return None
+
     normalized: Dict[str, Dict[str, str]] = {}
     for item in payload["judgments"]:
-        if not isinstance(item, dict):
-            return None
         unit_id, label = item.get("id"), item.get("label")
-        if unit_id not in expected_ids or label not in VALID_LABELS or unit_id in normalized:
-            return None
         normalized[unit_id] = {"label": label, "reason": str(item.get("reason", ""))}
-    return normalized if set(normalized) == expected_ids else None
+    return normalized
 
 
-def request_audit(endpoint: str, api_key: str, model: str, language: str, units: List[Dict[str, Any]], max_retries: int, temperature: float) -> Optional[Dict[str, Dict[str, str]]]:
+def response_validation_error(payload: Optional[Dict[str, Any]], expected_ids: set[str]) -> Optional[str]:
+    """Explain why a model completion cannot be saved as audit judgments."""
+    if not payload:
+        return "no JSON object was found in the completion"
+    judgments = payload.get("judgments")
+    if not isinstance(judgments, list):
+        return "JSON object has no 'judgments' list"
+
+    received_ids: List[str] = []
+    for index, item in enumerate(judgments):
+        if not isinstance(item, dict):
+            return f"judgment at index {index} is not a JSON object"
+        unit_id, label = item.get("id"), item.get("label")
+        if not isinstance(unit_id, str):
+            return f"judgment at index {index} has no string 'id'"
+        if label not in VALID_LABELS:
+            return f"judgment '{unit_id}' has invalid label {label!r}"
+        received_ids.append(unit_id)
+
+    duplicate_ids = sorted({unit_id for unit_id in received_ids if received_ids.count(unit_id) > 1})
+    if duplicate_ids:
+        return f"duplicate judgment ID(s): {duplicate_ids[:5]!r}"
+    received_id_set = set(received_ids)
+    unexpected_ids = sorted(received_id_set - expected_ids)
+    if unexpected_ids:
+        return f"unexpected judgment ID(s): {unexpected_ids[:5]!r}"
+    missing_ids = sorted(expected_ids - received_id_set)
+    if missing_ids:
+        return f"missing {len(missing_ids)} expected judgment ID(s), e.g. {missing_ids[:5]!r}"
+    return None
+
+
+def request_audit(endpoint: str, api_key: str, model: str, language: str, units: List[Dict[str, Any]], max_retries: int, temperature: float) -> AuditResult:
     """Submit one audit request.
 
     Each worker creates its own client to avoid assuming that a third-party
@@ -206,22 +261,33 @@ def request_audit(endpoint: str, api_key: str, model: str, language: str, units:
     client = OpenAI(base_url=endpoint, api_key=api_key)
     prompt = audit_prompt(TARGET_LANGUAGES[language], units)
     expected_ids = {unit["id"] for unit in units}
+    audit_result = AuditResult()
     for attempt in range(1, max_retries + 1):
         try:
+            audit_result.api_calls += 1
             response = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
             )
-            result = normalize_response(parse_model_json(response.choices[0].message.content), expected_ids)
+            audit_result.record_response_usage(response)
+            content = response.choices[0].message.content or ""
+            payload = parse_model_json(content)
+            result = normalize_response(payload, expected_ids)
             if result is not None:
-                return result
-            tqdm.write(f"Invalid audit response ({attempt}/{max_retries}) for {language}.")
+                audit_result.judgments = result
+                return audit_result
+            diagnostic = response_validation_error(payload, expected_ids)
+            preview = content.replace("\n", " ")[:800]
+            tqdm.write(
+                f"Invalid audit response ({attempt}/{max_retries}) for {language}: "
+                f"{diagnostic}. Completion preview: {preview!r}"
+            )
         except Exception as error:
             tqdm.write(f"API error ({attempt}/{max_retries}) for {language}: {error}")
         if attempt < max_retries:
             time.sleep(2 ** attempt)
-    return None
+    return audit_result
 
 
 def save_judgments(case: Dict[str, Any], language: str, units: List[Dict[str, Any]], judgments: Dict[str, Dict[str, str]], model: str) -> None:
@@ -293,20 +359,39 @@ def main() -> None:
             for case, language, units_to_audit in jobs
         }
         with tqdm(total=len(futures), desc="Auditing translations", unit="case-language") as progress:
+            totals = AuditResult()
+            completed_jobs = 0
+            failed_jobs = 0
             for future in as_completed(futures):
                 case, language, units_to_audit = futures[future]
                 try:
-                    judgments = future.result()
+                    audit_result = future.result()
                 except Exception as error:
                     tqdm.write(f"Unexpected worker failure for case_id={case['case_id']} "
                                f"language={language}: {error}")
-                    judgments = None
-                if judgments is None:
+                    audit_result = None
+                if audit_result is None or audit_result.judgments is None:
                     tqdm.write(f"No judgments saved for case_id={case['case_id']} language={language}; rerun to retry.")
+                    failed_jobs += 1
                 else:
-                    save_judgments(case, language, units_to_audit, judgments, args.model)
+                    save_judgments(case, language, units_to_audit, audit_result.judgments, args.model)
                     atomic_write_json(args.dataset_path, data)
+                if audit_result is not None:
+                    totals.api_calls += audit_result.api_calls
+                    totals.prompt_tokens += audit_result.prompt_tokens
+                    totals.completion_tokens += audit_result.completion_tokens
+                    totals.total_tokens += audit_result.total_tokens
+                completed_jobs += 1
                 progress.update(1)
+                if totals.api_calls:
+                    progress.set_postfix({
+                        "api_calls": totals.api_calls,
+                        "failed_jobs": failed_jobs,
+                        "avg_calls/job": f"{totals.api_calls / completed_jobs:.2f}",
+                        "avg_total_tok/call": f"{totals.total_tokens / totals.api_calls:.0f}",
+                        "avg_prompt_tok/call": f"{totals.prompt_tokens / totals.api_calls:.0f}",
+                        "avg_completion_tok/call": f"{totals.completion_tokens / totals.api_calls:.0f}",
+                    })
 
 
 if __name__ == "__main__":

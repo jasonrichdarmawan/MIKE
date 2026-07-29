@@ -10,3 +10,4 @@ datasets/two_hop.csv
 datasets/*/
 output
 checkpoints/
+*.tmp

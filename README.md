@@ -106,13 +106,13 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
   - Run `analysis/llm_translate_validate.py` to validate translation
   ```bash
   DATASET_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
-  MODEL="Kimi-K2.6"
+  MODEL="DeepSeek-V4-Pro"
   ENDPOINT=<YOUR_ENDPOINT>
   API_KEY=<YOUR_API_KEY>
   : 'CASE_ID=<START> <STOP>"'
   CASE_ID="1 1"
   LANGUAGE="de fr ja zh"
-  python analysis/llm_translate_validate.py \
+  logging-tee --level INFO python analysis/llm_translate_validate.py \
     --dataset-path $DATASET_PATH \
     --model $MODEL \
     --endpoint $ENDPOINT \
