@@ -6,7 +6,7 @@ from matplotlib.lines import Line2D
 
 # %%
 
-wide = pd.read_csv("./output/glue_eval.csv", delimiter=";")
+wide = pd.read_csv("../output/glue_eval.csv", delimiter=";")
 id_cols = ["model", "dataset", "method"]
 edit_cols = [c for c in wide.columns if c not in id_cols]
 

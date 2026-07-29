@@ -103,6 +103,32 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
   LANGUAGE="zh"
   python analysis/llm_translate.py --dataset_path $DATA_PATH --model $MODEL --endpoint $ENDPOINT --api_key $API_KEY --case_id ${=CASE_ID} --language ${=LANGUAGE}
   ```
+  - Run `analysis/llm_translate_validate.py` to validate translation
+  ```bash
+  DATASET_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
+  MODEL="Kimi-K2.6"
+  ENDPOINT=<YOUR_ENDPOINT>
+  API_KEY=<YOUR_API_KEY>
+  : 'CASE_ID=<START> <STOP>"'
+  CASE_ID="1 1"
+  LANGUAGE="de fr ja zh"
+  python analysis/llm_translate_validate.py \
+    --dataset-path $DATASET_PATH \
+    --model $MODEL \
+    --endpoint $ENDPOINT \
+    --api-key $API_KEY \
+    --case-id ${=CASE_ID} \
+    --languages ${=LANGUAGE} \
+    --max-workers 64
+  ```
+  - Run `analysis/llm_translate_statistics.py` to get translation validation statistics
+  ```bash
+  DATASET_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
+  CASE_ID="1 1"
+  python analysis/llm_translate_statistics.py \
+    --dataset-path $DATASET_PATH \
+    --case-id ${=CASE_ID}
+  ```
 
 - Ours:
   - Run `analysis/evaluate_dataset.py` to evaluate a model on the `datasets/two_hop_cf_e2.csv` dataset. It will generate `datasets/{model_name}/two_hop_cf_e2.csv` file. Use it for the subsequent experiments.
