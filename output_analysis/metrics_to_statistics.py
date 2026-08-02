@@ -113,6 +113,19 @@ def percentile_interval(values: np.ndarray) -> List[float]:
     return [float(value) for value in np.quantile(values, [0.025, 0.975])]
 
 
+def percent_difference_from_interval(estimate: float, interval: Sequence[float]) -> List[float]:
+    """Return [lower, upper] distances from an estimate in percentage points.
+
+    The calculation deliberately uses unrounded values.  For an estimate of
+    1.625% and CI [0.975%, 2.350%], the result is [0.650, 0.725], suitable for
+    rendering as ``1.6_{-0.7}^{+0.7}`` only after final display rounding.
+    """
+    return [
+        float((estimate - interval[0]) * 100),
+        float((interval[1] - estimate) * 100),
+    ]
+
+
 def bootstrap_means(
     metrics: np.ndarray,
     bootstrap_samples: int,
@@ -136,13 +149,18 @@ def metric_summary(
     rng: np.random.Generator,
 ) -> Dict[str, Any]:
     bootstrap_values = bootstrap_means(values, bootstrap_samples, rng)
+    estimate = float(values.mean())
+    interval = percentile_interval(bootstrap_values)
     return {
-        "estimate": float(values.mean()),
-        "estimate_percent": float(values.mean() * 100),
-        "ci_95_percentile_bootstrap": percentile_interval(bootstrap_values),
+        "estimate": estimate,
+        "estimate_percent": float(estimate * 100),
+        "ci_95_percentile_bootstrap": interval,
         "ci_95_percentile_bootstrap_percent": [
-            float(value * 100) for value in percentile_interval(bootstrap_values)
+            float(value * 100) for value in interval
         ],
+        "ci_95_percentile_bootstrap_percent_difference": percent_difference_from_interval(
+            estimate, interval
+        ),
         "case_count": int(len(values)),
     }
 
@@ -157,13 +175,18 @@ def paired_difference_summary(
     case_count = len(target)
     differences = target - comparison
     bootstrap_differences = bootstrap_means(differences, bootstrap_samples, rng)
+    estimate = float(differences.mean())
+    interval = percentile_interval(bootstrap_differences)
     return {
-        "target_minus_comparison": float(differences.mean()),
-        "target_minus_comparison_percentage_points": float(differences.mean() * 100),
-        "ci_95_percentile_paired_bootstrap": percentile_interval(bootstrap_differences),
+        "target_minus_comparison": estimate,
+        "target_minus_comparison_percentage_points": float(estimate * 100),
+        "ci_95_percentile_paired_bootstrap": interval,
         "ci_95_percentile_paired_bootstrap_percentage_points": [
-            float(value * 100) for value in percentile_interval(bootstrap_differences)
+            float(value * 100) for value in interval
         ],
+        "ci_95_percentile_bootstrap_percent_difference": percent_difference_from_interval(
+            estimate, interval
+        ),
         "case_count": int(case_count),
     }
 

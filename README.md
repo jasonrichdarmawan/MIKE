@@ -437,11 +437,24 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
 [1] E. Biran et al., "Hopping Too Late: Exploring Limitations of Large Language models on Multi-Hop Queries," in EMNLP 2024
 [2] Y. Yao et al., "CaKe: Circuit-aware Editing Enables Generalizable Knowledge Learners," in EMNLP 2025
 
-## 🧐Editing
+## Confidence interval
 
-Just run the following commond:
+After you run `run_two_hop.py` or `test_cake.py`, you can use the following code to compute the confidence interval
+
+```bash
+METRICS_FOLDER_PATH=<METRICS_FOLDER_PATH>
+
+./metrics_to_statistics.sh $METRICS_FOLDER_PATH
 ```
-run.sh
+
+Use `--comparison-metrics-path` to compute the paired CI.
+
+```bash
+METRICS_FOLDER_PATH=<METRICS_FOLDER_PATH>
+COMPARISON_METRICS_FOLDER_PATH=<COMPARISON_METRICS_FOLDER_PATH>
+RES_FILE=<RES_FILE>
+
+./metrics_to_statistics.sh $METRICS_FOLDER_PATH --comparison-metrics-path $COMPARISON_METRICS_FOLDER_PATH --res-path $RES_FILE
 ```
 
 ### Covariance
