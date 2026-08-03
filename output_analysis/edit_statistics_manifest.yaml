@@ -1,0 +1,102 @@
+# Manifest for target-loss and parameter-update-norm trajectories.
+# Each model column compares matched fixed-layer methods on MQuAKE-CF-3k-v2-clke.
+# Add/remove methods or model entries as new experiment artifacts become available.
+
+output:
+  directory: output/edit_statistics_figures
+  formats: [pdf]
+  dpi: 300
+  confidence_level: 0.95
+  bootstrap_samples: 1000
+  bootstrap_seed: 20260803
+  rolling_window: 25
+
+metrics:
+  - key: delta_vector_loss
+    label: Target-optimization loss
+    filename: target_optimization_loss
+    yscale: log
+    # Fixed-target AlphaEdit optimizes a target only once (layer 4); Revised-
+    # AlphaEdit optimizes it after every layer. Do not treat copied fixed-target
+    # records at layers 5--8 as independent layer-wise loss observations.
+    optimized_layers_only: true
+    trajectory: final_optimized_layer
+  - key: weight_update_norm
+    label: Parameter-update norm
+    filename: parameter_update_norm
+    yscale: log
+  - key: z_error
+    label: Target-activation residual norm
+    filename: target_activation_residual_norm
+    yscale: log
+  - key: optimization_steps
+    label: Realized optimization steps
+    filename: realized_optimization_steps
+    # Show zero steps at unoptimized fixed-target layers; total work per edit is
+    # the sum across the five edited layers, not their mean.
+    trajectory: sum
+
+models:
+  - label: Qwen3-4B-Instruct-2507
+    methods:
+      - label: AlphaEdit
+        color: '#d62728'
+        path: output/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_20260723_152957/edit_statistics.json
+      - label: AlphaEdit (request)
+        color: '#ff7f0e'
+        linestyle: '--'
+        path: output/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_1-rank_20260723_150845/edit_statistics.json
+      - label: AlphaEdit (request, 125)
+        color: '#9467bd'
+        linestyle: ':'
+        path: output/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_1-rank_compute-matched_20260723_152241/edit_statistics.json
+      - label: Revised-AlphaEdit
+        color: '#1f77b4'
+        linewidth: 2.2
+        path: output/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260723_184403/edit_statistics.json
+
+  - label: tiny-aya-global
+    methods:
+      - label: AlphaEdit
+        color: '#d62728'
+        path: output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_20260723_183328/edit_statistics.json
+      - label: AlphaEdit (request)
+        color: '#ff7f0e'
+        linestyle: '--'
+        path: output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_1-rank_20260723_150949/edit_statistics.json
+      - label: AlphaEdit (request, 125)
+        color: '#9467bd'
+        linestyle: ':'
+        path: output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_1-rank_compute-matched_20260723_152313/edit_statistics.json
+      - label: Revised-AlphaEdit
+        color: '#1f77b4'
+        linewidth: 2.2
+        path: output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260723_184655/edit_statistics.json
+
+  - label: Qwen2.5-7B-Instruct
+    methods:
+      - label: AlphaEdit
+        color: '#d62728'
+        path: output/Qwen/Qwen2.5-7B-Instruct/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_20260726_161916/edit_statistics.json
+      - label: AlphaEdit (request, 125)
+        color: '#9467bd'
+        linestyle: ':'
+        path: output/Qwen/Qwen2.5-7B-Instruct/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_1-rank_compute-matched_20260725_192504/edit_statistics.json
+      - label: Revised-AlphaEdit
+        color: '#1f77b4'
+        linewidth: 2.2
+        path: output/Qwen/Qwen2.5-7B-Instruct/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260726_093055/edit_statistics.json
+
+  - label: aya-expanse-8b
+    methods:
+      - label: AlphaEdit
+        color: '#d62728'
+        path: output/CohereLabs/aya-expanse-8b/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_20260726_151737/edit_statistics.json
+      - label: AlphaEdit (request, 125)
+        color: '#9467bd'
+        linestyle: ':'
+        path: output/CohereLabs/aya-expanse-8b/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/AlphaEdit_1-rank_compute-matched_20260725_193934/edit_statistics.json
+      - label: Revised-AlphaEdit
+        color: '#1f77b4'
+        linewidth: 2.2
+        path: output/CohereLabs/aya-expanse-8b/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260726_093849/edit_statistics.json
