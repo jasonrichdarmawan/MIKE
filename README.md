@@ -587,7 +587,8 @@ python test_cake.py \
   --generation_batch_size 128 \
   --main_eval_steps 0 \
   --data_name MQuAKE-CF-3k-v2-clke \
-  --save_edited_model
+  --save_edited_model \
+  --max_memory 0:6GiB,1:10GiB
 ```
 
 `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit`, `AlphaEdit 1-rank`

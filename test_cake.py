@@ -157,14 +157,16 @@ def assign_edit_ids(data):
 # %%
 
 # if __name__ == "__main__":
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #     sys.argv = ["", 
 #         "--editing_method", "ENCORE",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "llama3-8b",
 #         # "--model_type", "qwen3-4b-instruct",
-#         "--model_type", "tiny-aya-global",
+#         # "--model_type", "tiny-aya-global",
+#         # "--model_type", "qwen2.5-7b-instruct",
+#         "--model_type", "aya-expanse-8b",
 #         "--dtype", "bfloat16",
 #         "--eval_with_chat_template",
 #         "--batch_size", "2",
@@ -183,6 +185,7 @@ def assign_edit_ids(data):
 #         # "--load_edited_model",
 #         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010805",
 #         # "--load_eval_path", "output/CohereLabs/tiny-aya-global/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010715",
+#         # "--max_memory", "0:6GiB,1:10GiB"
 #     ]
 
 if __name__ == "__main__":
