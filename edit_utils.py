@@ -1092,11 +1092,12 @@ def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
     requests = []
     for item in items:
         requested_rewrite = item['requested_rewrite']
-        for i in requested_rewrite:
-            if isinstance(i["target_true"], dict):
-                i['target_true'] = i['target_true']['str']
-            if isinstance(i["target_new"], dict):
-                i['target_new'] = i['target_new']['str']
+        if hparams.alg_name in ["LoRA", "AlphaEdit_Circuit", "Revised_AlphaEdit"]:
+            for i in requested_rewrite:
+                if isinstance(i["target_true"], dict):
+                    i['target_true'] = i['target_true']['str']
+                if isinstance(i["target_new"], dict):
+                    i['target_new'] = i['target_new']['str']
         requests.extend(requested_rewrite)
     
     tokenizer.padding_side = "right"
@@ -1115,6 +1116,7 @@ def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
         "MEMIT", 
         "AlphaEdit",
         "AlphaEdit_Circuit", "Revised_AlphaEdit",
+        "ENCORE",
     ]:
         requests_groups = [[request] for request in requests] if hparams.alg_name in ["AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched"] else [requests]
         statistics = []
@@ -1136,7 +1138,7 @@ def edit(model, tokenizer, items, hparams, apply_algo, **kwargs):
                 model, _, temp_statistics = result
                 statistics.extend(temp_statistics)
             else:
-                model, _ = result
+                model, *rest = result
     else:
         raise ValueError(f"Unknown alg_name: {hparams.alg_name}")
     
@@ -1269,6 +1271,7 @@ def evaluate(
         "CaKE",
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
         "Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute",
+        "ENCORE",
     ]:
         raise ValueError(f"Unknown alg_name: {alg_name}")
     all_metrics, eval_requests = _prepare_mquake_clke(items=items, alg_name=alg_name, languages=kwargs["languages"])

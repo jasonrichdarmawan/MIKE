@@ -9,6 +9,7 @@ from EasyEdit.easyeditor import (
     WISEHyperParams,
     WISE,
     AlphaEditCircuitHyperParams,
+    ENCOREHyperParams,
 )
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 import argparse
@@ -51,7 +52,8 @@ def load_checkpoint(model_name, device_map, dtype, editing_method, load_path, **
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
         "Revised_AlphaEdit",
         "IFMET", 
-        "CaKE"
+        "CaKE",
+        "ENCORE",
     ]:
         model = AutoModelForCausalLM.from_pretrained(load_path, device_map=device_map, dtype=getattr(torch, dtype))
         tokenizer = AutoTokenizer.from_pretrained(load_path)
@@ -79,11 +81,12 @@ def save_checkpoint(model, tokenizer, editing_method, checkpoint_root, edit_num,
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
         "Revised_AlphaEdit", "Revised_AlphaEdit-lower_compute",
         "CaKE",
+        "ENCORE",
     ]:
         model.save_pretrained(
             checkpoint_path,
             safe_serialization=True,
-            max_shard_size="10GB",
+            max_shard_size="4GB",
         )
         tokenizer.save_pretrained(checkpoint_path)
     elif editing_method in ["WISE"]:
@@ -156,7 +159,7 @@ def assign_edit_ids(data):
 # if __name__ == "__main__":
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 #     sys.argv = ["", 
-#         "--editing_method", "AlphaEdit_Circuit-no_layer",
+#         "--editing_method", "ENCORE",
 #         # "--model_type", "Qwen/Qwen3-4B-Instruct-2507",
 #         # "--model_type", "CohereLabs/tiny-aya-global",
 #         # "--model_type", "llama3-8b",
@@ -164,9 +167,9 @@ def assign_edit_ids(data):
 #         "--model_type", "tiny-aya-global",
 #         "--dtype", "bfloat16",
 #         "--eval_with_chat_template",
-#         "--batch_size", "4",
+#         "--batch_size", "2",
 #         "--generation_batch_size", "128",
-#         "--sample_size", "2", # uncomment this for run testing
+#         "--sample_size", "4", # uncomment this for run testing
 #         "--data_name", "MQuAKE-CF-3k-v2-clke",
         
 #         "--do_edit",
@@ -174,8 +177,8 @@ def assign_edit_ids(data):
 #         "--glue_eval_size", "2", # uncomment this for run testing
 #         "--main_eval_steps", "0",
         
-#         "--save_edit_statistics",
-#         # "--save_edited_model",
+#         # "--save_edit_statistics",
+#         "--save_edited_model",
 #         "--load_model",
 #         # "--load_edited_model",
 #         # "--load_model_path", "checkpoints/Qwen/Qwen3-4B-Instruct-2507/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260426_010805",
@@ -249,6 +252,9 @@ if __name__ == "__main__":
             hparams.no_target_recompute = True
     elif args.editing_method == "Revised_AlphaEdit":
         hparams = Revised_AlphaEditHyperParams.from_hparams(f'./EasyEdit/hparams/Revised_AlphaEdit/{args.model_type}.yaml')
+    elif args.editing_method == "ENCORE":
+        hparams = ENCOREHyperParams.from_json(f'./EasyEdit/hparams/ENCORE/{args.model_type}.json')
+        hparams.sequential = True
     else:
         raise ValueError(f"Unsupported editing method: {args.editing_method}")
     
@@ -261,6 +267,7 @@ if __name__ == "__main__":
         "WISE", 
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
         "Revised_AlphaEdit",
+        "ENCORE",
     ]:
         apply_algo = ALG_DICT[hparams.alg_name]
     elif args.editing_method == "IFMET":
@@ -416,6 +423,7 @@ def do_evaluation(
         "CaKE", 
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
         "Revised_AlphaEdit",
+        "ENCORE",
     ]:
         metrics = evaluate(
             model=model,
@@ -518,7 +526,8 @@ def do_edit(
         "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
         "Revised_AlphaEdit", 
         "WISE", 
-        "CaKE"
+        "CaKE",
+        "ENCORE",
     ]:
         all_metrics = {}
         
@@ -533,6 +542,7 @@ def do_edit(
                 "AlphaEdit", "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
                 "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
                 "Revised_AlphaEdit",
+                "ENCORE",
             ]:
                 batch_statistics = []
 
@@ -653,7 +663,8 @@ if __name__ == "__main__":
             "AlphaEdit",
             "AlphaEdit_1-rank", "AlphaEdit_1-rank_compute-matched",
             "AlphaEdit_Circuit", "AlphaEdit_Circuit-no_layer",
-            "Revised_AlphaEdit"
+            "Revised_AlphaEdit",
+            "ENCORE",
         ]:
             kwargs["hparams"] = hparams
             kwargs["apply_algo"] = apply_algo

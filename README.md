@@ -567,9 +567,14 @@ EDITING_METHOD=R-ROME
 EDITING_METHOD=MEMIT
 EDITING_METHOD=IFMET
 EDITING_METHOD=WISE
+EDITING_METHOD=ENCORE
 
 MODEL_TYPE=qwen3-4b-instruct
 MODEL_TYPE=tiny-aya-global
+
+MODEL_TYPE=qwen2.5-7b-instruct
+MODEL_TYPE=aya-expanse-8b
+
 python test_cake.py \
   --editing_method $EDITING_METHOD \
   --model_type $MODEL_TYPE \
