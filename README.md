@@ -457,6 +457,29 @@ RES_FILE=<RES_FILE>
 ./metrics_to_statistics.sh $METRICS_FOLDER_PATH --comparison-metrics-path $COMPARISON_METRICS_FOLDER_PATH --res-path $RES_FILE
 ```
 
+## String-based evaluator error rate
+
+```bash
+MODEL_NAME="Qwen/Qwen2.5-7B-Instruct"
+# DATASET_NAME="Two-Hop"
+# RESULTS_PATH="./output/Qwen/Qwen2.5-7B-Instruct/two_hop_cf_e2/sequential_s1000_s32/Revised_AlphaEdit_20260724-161909"
+DATASET_NAME="MQuAKE-CF-3k-v2"
+RESULTS_PATH="./output/Qwen/Qwen2.5-7B-Instruct/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260726_093055"
+LANG="en"
+python analysis/human_annotate/annotate.py \
+  --model-name $MODEL_NAME \
+  --dataset-name $DATASET_NAME \
+  --results-path $RESULTS_PATH \
+  --lang $LANG
+```
+
+```bash
+RESULTS_PATH="./output/Qwen/Qwen2.5-7B-Instruct/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260726_093055"
+LANG="zh"
+python analysis/human_annotate/metrics.py \
+  --results-path $RESULTS_PATH
+```
+
 ### Covariance
 
 `ROME`, `R-ROME`, `MEMIT`, `IFMET`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit` needs a pre-computed covariance
