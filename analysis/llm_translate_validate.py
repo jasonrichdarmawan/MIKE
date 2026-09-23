@@ -1,14 +1,19 @@
 """Embed resumable LLM translation-audit judgments in an MQuAKE dataset.
 
 This is an automated audit, not bilingual human validation. Each audited text
-unit receives ``*_translation_judgement`` and ``*_translation_judgement_reason``
-fields in the dataset itself. Re-running the script skips a case-language pair
-only when every expected judgment has already been stored.
+unit stores judgments in a ``*_translation_judgements`` mapping keyed by a
+stable judge ID. Re-running the script skips only units already judged by the
+selected judge, so another model can audit the same units without replacing
+earlier judgments.
 """
+
+# %%
 
 import argparse
 import json
+import random
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -16,8 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
+from openai import APIStatusError, OpenAI, RateLimitError
 from tqdm import tqdm
+import sys
 
 import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -26,6 +32,8 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 
 TARGET_LANGUAGES = {"zh": "Chinese", "de": "German", "fr": "French", "ja": "Japanese"}
 VALID_LABELS = {"accepted", "minor_issue", "major_issue"}
+
+# %%
 
 
 @dataclass
@@ -37,6 +45,7 @@ class AuditResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    rate_limit_events: int = 0
 
     def record_response_usage(self, response: Any) -> None:
         """Add usage reported by one OpenAI-compatible response, if available."""
@@ -49,10 +58,76 @@ class AuditResult:
         self.total_tokens += total_tokens or prompt_tokens + completion_tokens
 
 
+class RequestCoordinator:
+    """Coordinate request pacing and endpoint-wide rate-limit cooldowns."""
+
+    def __init__(self, requests_per_minute: float, default_cooldown: float) -> None:
+        self.minimum_interval = 60.0 / requests_per_minute if requests_per_minute > 0 else 0.0
+        self.default_cooldown = default_cooldown
+        self.next_request_at = 0.0
+        self.cooldown_until = 0.0
+        self.condition = threading.Condition()
+
+    def wait_before_request(self) -> None:
+        """Wait until both the pacing slot and any shared cooldown have elapsed."""
+        with self.condition:
+            while True:
+                now = time.monotonic()
+                ready_at = max(self.next_request_at, self.cooldown_until)
+                if now >= ready_at:
+                    self.next_request_at = max(now, self.next_request_at) + self.minimum_interval
+                    return
+                self.condition.wait(timeout=ready_at - now)
+
+    def record_rate_limit(self, retry_after: Optional[float], attempt: int) -> float:
+        """Pause all workers and return the coordinated cooldown in seconds."""
+        exponential = self.default_cooldown * (2 ** (attempt - 1))
+        delay = max(retry_after or 0.0, exponential) + random.uniform(0.0, 1.0)
+        with self.condition:
+            now = time.monotonic()
+            self.cooldown_until = max(self.cooldown_until, now + delay)
+            self.condition.notify_all()
+            return max(0.0, self.cooldown_until - now)
+
+
+def retry_after_seconds(error: Exception) -> Optional[float]:
+    """Read numeric Retry-After headers exposed by OpenAI-compatible APIs."""
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", {}) or {}
+    milliseconds = headers.get("retry-after-ms")
+    if milliseconds is not None:
+        try:
+            return max(0.0, float(milliseconds) / 1000.0)
+        except (TypeError, ValueError):
+            pass
+    seconds = headers.get("retry-after")
+    if seconds is not None:
+        try:
+            return max(0.0, float(seconds))
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def is_rate_limit_error(error: Exception) -> bool:
+    return isinstance(error, RateLimitError) or (
+        isinstance(error, APIStatusError) and error.status_code == 429
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Embed resumable LLM translation audits in a dataset.")
     parser.add_argument("--dataset-path", required=True, type=Path)
     parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--judge-id",
+        default=None,
+        help=(
+            "Stable identifier used as the key in each unit's judgment map. "
+            "Defaults to --model. Use an explicit value when model aliases or "
+            "versions could otherwise collide."
+        ),
+    )
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--api-key", required=True)
     parser.add_argument(
@@ -73,6 +148,30 @@ def parse_args() -> argparse.Namespace:
             "endpoint rate-limits requests."
         ),
     )
+    parser.add_argument(
+        "--requests-per-minute",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional process-wide request-start limit. Zero disables proactive "
+            "pacing; use this when the deployment's RPM quota is known."
+        ),
+    )
+    parser.add_argument(
+        "--rate-limit-cooldown",
+        type=float,
+        default=15.0,
+        help=(
+            "Process-wide cooldown in seconds after a 429 when Retry-After is "
+            "unavailable. Consecutive attempts use exponential backoff."
+        ),
+    )
+    parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=180.0,
+        help="Timeout in seconds for one API attempt (default: 180).",
+    )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument(
         "--write-batch-size",
@@ -90,6 +189,7 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
+# %%
 
 def parse_model_json(content: str) -> Optional[Dict[str, Any]]:
     if not content:
@@ -160,38 +260,37 @@ def build_units(case: Dict[str, Any], language: str) -> List[Dict[str, Any]]:
     return units
 
 
-def validation_key(unit: Dict[str, Any]) -> str:
-    """Field that stores this unit's label; questions are represented as a list."""
+def judgments_key(unit: Dict[str, Any]) -> str:
+    """Field containing the judge-ID-to-judgment mapping for one text unit."""
     if unit["id"].startswith("multi_hop_question_"):
-        return "translation_judgement"
-    return f"{unit['key']}_translation_judgement"
+        return "translation_judgements"
+    return f"{unit['key']}_translation_judgements"
 
 
-def reason_key(unit: Dict[str, Any]) -> str:
-    if unit["id"].startswith("multi_hop_question_"):
-        return "translation_judgement_reason"
-    return f"{unit['key']}_translation_judgement_reason"
-
-
-def is_complete(units: List[Dict[str, Any]]) -> bool:
-    return not incomplete_units(units)
-
-
-def incomplete_units(units: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Return only units without a valid stored judgment.
+def incomplete_units(units: List[Dict[str, Any]], judge_id: str) -> List[Dict[str, Any]]:
+    """Return only units without a valid judgment from `judge_id`.
 
     This permits a rerun after a partial API response to audit only the missing
-    text units instead of overwriting completed judgments for the whole case.
+    text units. Judgments from other judges do not make a unit complete for the
+    selected judge and are never overwritten.
     """
     missing: List[Dict[str, Any]] = []
     for unit in units:
         if unit["id"].startswith("multi_hop_question_"):
             entries = unit["container"].get(unit["key"], [])
             index = int(unit["id"].rsplit("_", 1)[1])
-            if not isinstance(entries, list) or len(entries) <= index or entries[index].get("label") not in VALID_LABELS:
+            if not isinstance(entries, list) or len(entries) <= index:
                 missing.append(unit)
-        elif unit["container"].get(validation_key(unit)) not in VALID_LABELS:
-            missing.append(unit)
+                continue
+            judge_map = entries[index]
+            judgment = judge_map.get(judge_id, {}) if isinstance(judge_map, dict) else {}
+            if not isinstance(judgment, dict) or judgment.get("label") not in VALID_LABELS:
+                missing.append(unit)
+        else:
+            judge_map = unit["container"].get(judgments_key(unit), {})
+            judgment = judge_map.get(judge_id, {}) if isinstance(judge_map, dict) else {}
+            if not isinstance(judgment, dict) or judgment.get("label") not in VALID_LABELS:
+                missing.append(unit)
     return missing
 
 
@@ -261,18 +360,36 @@ def response_validation_error(payload: Optional[Dict[str, Any]], expected_ids: s
     return None
 
 
-def request_audit(endpoint: str, api_key: str, model: str, language: str, units: List[Dict[str, Any]], max_retries: int, temperature: float) -> AuditResult:
+def request_audit(
+    endpoint: str,
+    api_key: str,
+    model: str,
+    language: str,
+    units: List[Dict[str, Any]],
+    max_retries: int,
+    temperature: float,
+    request_timeout: float,
+    coordinator: RequestCoordinator,
+) -> AuditResult:
     """Submit one audit request.
 
     Each worker creates its own client to avoid assuming that a third-party
     OpenAI-compatible client is thread-safe. Dataset writes occur only in the
     main thread after a completed future is collected.
     """
-    client = OpenAI(base_url=endpoint, api_key=api_key)
+    # Application-level retries are coordinated across workers. Disable the
+    # SDK's per-client retries so hidden retries cannot create a request storm.
+    client = OpenAI(
+        base_url=endpoint,
+        api_key=api_key,
+        max_retries=0,
+        timeout=request_timeout,
+    )
     prompt = audit_prompt(TARGET_LANGUAGES[language], units)
     expected_ids = {unit["id"] for unit in units}
     audit_result = AuditResult()
     for attempt in range(1, max_retries + 1):
+        coordinator.wait_before_request()
         try:
             audit_result.api_calls += 1
             response = client.chat.completions.create(
@@ -294,13 +411,31 @@ def request_audit(endpoint: str, api_key: str, model: str, language: str, units:
                 f"{diagnostic}. Completion preview: {preview!r}"
             )
         except Exception as error:
+            if is_rate_limit_error(error):
+                audit_result.rate_limit_events += 1
+                cooldown = coordinator.record_rate_limit(
+                    retry_after_seconds(error),
+                    attempt,
+                )
+                tqdm.write(
+                    f"Rate limit ({attempt}/{max_retries}) for {language}; "
+                    f"pausing all workers for approximately {cooldown:.1f}s."
+                )
+                continue
             tqdm.write(f"API error ({attempt}/{max_retries}) for {language}: {error}")
         if attempt < max_retries:
-            time.sleep(2 ** attempt)
+            time.sleep((2 ** attempt) + random.uniform(0.0, 1.0))
     return audit_result
 
 
-def save_judgments(case: Dict[str, Any], language: str, units: List[Dict[str, Any]], judgments: Dict[str, Dict[str, str]], model: str) -> None:
+def save_judgments(
+    case: Dict[str, Any],
+    language: str,
+    units: List[Dict[str, Any]],
+    judgments: Dict[str, Dict[str, str]],
+    model: str,
+    judge_id: str,
+) -> None:
     suffix = f"_{language}"
     question_key = f"questions{suffix}_translation_judgements"
     question_judgments = case.get(question_key, [])
@@ -313,24 +448,51 @@ def save_judgments(case: Dict[str, Any], language: str, units: List[Dict[str, An
         judgment = judgments[unit["id"]]
         if unit["id"].startswith("multi_hop_question_"):
             index = int(unit["id"].rsplit("_", 1)[1])
-            question_judgments[index] = judgment
+            judge_map = question_judgments[index]
+            if not isinstance(judge_map, dict):
+                judge_map = {}
+            judge_map[judge_id] = judgment
+            question_judgments[index] = judge_map
             continue
-        unit["container"][validation_key(unit)] = judgment["label"]
-        unit["container"][reason_key(unit)] = judgment["reason"]
+        key = judgments_key(unit)
+        judge_map = unit["container"].get(key, {})
+        if not isinstance(judge_map, dict):
+            judge_map = {}
+        judge_map[judge_id] = judgment
+        unit["container"][key] = judge_map
     case[question_key] = question_judgments
 
-    case[f"translation_validation_{language}"] = {
+    metadata_key = f"translation_validation_{language}"
+    metadata = case.get(metadata_key, {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    judges = metadata.get("judges", {})
+    if not isinstance(judges, dict):
+        judges = {}
+    judges[judge_id] = {
         "audited_at_utc": datetime.now(timezone.utc).isoformat(),
         "auditor_model": model,
         "scope": "automated_llm_audit_not_bilingual_human_validation",
         "labels": sorted(VALID_LABELS),
+        "prompt_version": "translation_audit_v1",
     }
+    metadata["judges"] = judges
+    case[metadata_key] = metadata
 
 
 def main() -> None:
     args = parse_args()
+    judge_id = args.judge_id or args.model
+    if not judge_id.strip():
+        raise ValueError("--judge-id must not be empty.")
     if args.max_workers <= 0:
         raise ValueError("--max-workers must be positive.")
+    if args.requests_per_minute < 0:
+        raise ValueError("--requests-per-minute must be non-negative.")
+    if args.rate_limit_cooldown <= 0:
+        raise ValueError("--rate-limit-cooldown must be positive.")
+    if args.request_timeout <= 0:
+        raise ValueError("--request-timeout must be positive.")
     if args.write_batch_size <= 0:
         raise ValueError("--write-batch-size must be positive.")
     with args.dataset_path.open("r", encoding="utf-8") as handle:
@@ -348,7 +510,7 @@ def main() -> None:
             except (KeyError, TypeError, IndexError) as error:
                 tqdm.write(f"Skipping case_id={case.get('case_id')} language={language}: {error}")
                 continue
-            units_to_audit = units if args.overwrite else incomplete_units(units)
+            units_to_audit = units if args.overwrite else incomplete_units(units, judge_id)
             if units_to_audit:
                 jobs.append((case, language, units_to_audit))
 
@@ -356,6 +518,10 @@ def main() -> None:
     if skipped:
         print(f"Skipping {skipped} completed or structurally incomplete case-language pair(s).")
 
+    coordinator = RequestCoordinator(
+        requests_per_minute=args.requests_per_minute,
+        default_cooldown=args.rate_limit_cooldown,
+    )
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         futures = {
             executor.submit(
@@ -367,6 +533,8 @@ def main() -> None:
                 units_to_audit,
                 args.max_retries,
                 args.temperature,
+                args.request_timeout,
+                coordinator,
             ): (case, language, units_to_audit)
             for case, language, units_to_audit in jobs
         }
@@ -387,7 +555,14 @@ def main() -> None:
                     tqdm.write(f"No judgments saved for case_id={case['case_id']} language={language}; rerun to retry.")
                     failed_jobs += 1
                 else:
-                    save_judgments(case, language, units_to_audit, audit_result.judgments, args.model)
+                    save_judgments(
+                        case,
+                        language,
+                        units_to_audit,
+                        audit_result.judgments,
+                        args.model,
+                        judge_id,
+                    )
                     unsaved_successes += 1
                     if unsaved_successes >= args.write_batch_size:
                         atomic_write_json(args.dataset_path, data)
@@ -397,12 +572,14 @@ def main() -> None:
                     totals.prompt_tokens += audit_result.prompt_tokens
                     totals.completion_tokens += audit_result.completion_tokens
                     totals.total_tokens += audit_result.total_tokens
+                    totals.rate_limit_events += audit_result.rate_limit_events
                 completed_jobs += 1
                 progress.update(1)
                 if totals.api_calls:
                     progress.set_postfix({
                         "api_calls": totals.api_calls,
                         "failed_jobs": failed_jobs,
+                        "rate_limits": totals.rate_limit_events,
                         "avg_calls/job": f"{totals.api_calls / completed_jobs:.2f}",
                         "avg_total_tok/call": f"{totals.total_tokens / totals.api_calls:.0f}",
                         "avg_prompt_tok/call": f"{totals.prompt_tokens / totals.api_calls:.0f}",

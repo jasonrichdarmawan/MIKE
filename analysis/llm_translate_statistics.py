@@ -25,6 +25,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Calculate translation-audit counts and Wilson confidence intervals.")
     parser.add_argument("--dataset-path", required=True, type=Path)
     parser.add_argument(
+        "--judge-id",
+        required=True,
+        help="Judge ID whose label distribution should be summarized.",
+    )
+    parser.add_argument(
         "--output-path", type=Path, default=None,
         help="Defaults to <dataset>.translation_validation_statistics.json.",
     )
@@ -65,29 +70,35 @@ def record(records: List[Tuple[str, str]], language: str, prompt_type: str, labe
         records.append((language, prompt_type, label))
 
 
-def collect_records(case: Dict[str, Any], language: str) -> List[Tuple[str, str, str]]:
+def judgment_label(judge_map: Any, judge_id: str) -> Any:
+    if not isinstance(judge_map, dict):
+        return None
+    judgment = judge_map.get(judge_id, {})
+    return judgment.get("label") if isinstance(judgment, dict) else None
+
+
+def collect_records(case: Dict[str, Any], language: str, judge_id: str) -> List[Tuple[str, str, str]]:
     """Read every stored validation label from one case-language pair."""
     suffix = f"_{language}"
     records: List[Tuple[str, str, str]] = []
 
-    for judgment in case.get(f"questions{suffix}_translation_judgements", []):
-        if isinstance(judgment, dict):
-            record(records, language, "multi_hop_question", judgment.get("label"))
-    record(records, language, "multi_hop_cloze", case.get(f"cloze_question{suffix}_translation_judgement"))
+    for judge_map in case.get(f"questions{suffix}_translation_judgements", []):
+        record(records, language, "multi_hop_question", judgment_label(judge_map, judge_id))
+    record(records, language, "multi_hop_cloze", judgment_label(case.get(f"cloze_question{suffix}_translation_judgements"), judge_id))
 
     for field_name in ("answer", "new_answer"):
-        record(records, language, "answer", case.get(f"{field_name}{suffix}_translation_judgement"))
+        record(records, language, "answer", judgment_label(case.get(f"{field_name}{suffix}_translation_judgements"), judge_id))
     for field_name in ("answer_alias", "new_answer_alias"):
-        record(records, language, "answer_alias", case.get(f"{field_name}{suffix}_translation_judgement"))
+        record(records, language, "answer_alias", judgment_label(case.get(f"{field_name}{suffix}_translation_judgements"), judge_id))
 
     for hop_group in (f"single_hops{suffix}", f"new_single_hops{suffix}"):
         for hop in case.get(hop_group, []):
             if not isinstance(hop, dict):
                 continue
-            record(records, language, "single_hop_question", hop.get("question_translation_judgement"))
-            record(records, language, "single_hop_cloze", hop.get("cloze_translation_judgement"))
-            record(records, language, "answer", hop.get("answer_translation_judgement"))
-            record(records, language, "answer_alias", hop.get("answer_alias_translation_judgement"))
+            record(records, language, "single_hop_question", judgment_label(hop.get("question_translation_judgements"), judge_id))
+            record(records, language, "single_hop_cloze", judgment_label(hop.get("cloze_translation_judgements"), judge_id))
+            record(records, language, "answer", judgment_label(hop.get("answer_translation_judgements"), judge_id))
+            record(records, language, "answer_alias", judgment_label(hop.get("answer_alias_translation_judgements"), judge_id))
     return records
 
 
@@ -126,6 +137,7 @@ def main() -> None:
         data = [case for case in data if start <= case.get("case_id", -1) <= stop]
 
     grouped: Dict[Tuple[str, str], Counter] = defaultdict(Counter)
+    by_language: Dict[str, Counter] = defaultdict(Counter)
     overall_by_type: Dict[str, Counter] = defaultdict(Counter)
     overall = Counter()
     cases_audited = Counter()
@@ -133,7 +145,7 @@ def main() -> None:
 
     for case in data:
         for language in args.languages:
-            records = collect_records(case, language)
+            records = collect_records(case, language, args.judge_id)
             if records:
                 cases_audited[language] += 1
                 label = case_level_label(records)
@@ -141,6 +153,7 @@ def main() -> None:
                     case_level[language][label] += 1
             for _, prompt_type, label in records:
                 grouped[(language, prompt_type)][label] += 1
+                by_language[language][label] += 1
                 overall_by_type[prompt_type][label] += 1
                 overall[label] += 1
 
@@ -155,10 +168,15 @@ def main() -> None:
             "Wilson intervals quantify sampling uncertainty conditional on the audited units."
         ),
         "dataset_path": str(args.dataset_path.resolve()),
+        "judge_id": args.judge_id,
         "case_id_range": args.case_id,
         "confidence_interval": "two-sided 95% Wilson binomial interval",
         "by_language_and_prompt_type": {
             language: {prompt_type: rate_summary(grouped[(language, prompt_type)]) for prompt_type in prompt_types}
+            for language in args.languages
+        },
+        "by_language": {
+            language: rate_summary(by_language[language])
             for language in args.languages
         },
         "overall_by_prompt_type": {prompt_type: rate_summary(overall_by_type[prompt_type]) for prompt_type in prompt_types},
@@ -179,11 +197,14 @@ def main() -> None:
         "",
         f"Generated: {report['generated_at_utc']}",
         "",
+        f"Judge: `{args.judge_id}`",
+        "",
         "**Scope:** Automated LLM audit only; not bilingual human validation. The 95% Wilson intervals quantify sampling uncertainty conditional on the audited units.",
         "",
     ]
     lines += markdown_table("Overall unit-level results", report["overall_unit_level"])
     for language in args.languages:
+        lines += markdown_table(f"{language}: unit-level results", report["by_language"][language])
         lines += markdown_table(f"{language}: case-level any-issue result", report["case_level_any_issue"][language])
         for prompt_type in prompt_types:
             lines += markdown_table(f"{language}: {prompt_type}", report["by_language_and_prompt_type"][language][prompt_type])

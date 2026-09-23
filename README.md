@@ -107,6 +107,8 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
   ```bash
   DATASET_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
   MODEL="DeepSeek-V4-Pro"
+  : 'stable identifier of MODEL'
+  JUDGE_ID="deepseek-v4-pro"
   ENDPOINT=<YOUR_ENDPOINT>
   API_KEY=<YOUR_API_KEY>
   : 'CASE_ID=<START> <STOP>"'
@@ -119,14 +121,30 @@ Download the wikidata for analysis from [HoppingTooLate](https://github.com/eden
     --api-key $API_KEY \
     --case-id ${=CASE_ID} \
     --languages ${=LANGUAGE} \
-    --max-workers 64
+    --max-workers 64 \
+    --requests-per-minute 100
   ```
   - Run `analysis/llm_translate_statistics.py` to get translation validation statistics
   ```bash
   DATASET_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
+  JUDGE_ID="deepseek-v4-pro"
   CASE_ID="1 1"
   python analysis/llm_translate_statistics.py \
     --dataset-path $DATASET_PATH \
+    --case-id ${=CASE_ID} \
+    --judge-id $JUDGE_ID
+  ```
+- Run `analysis/llm_translate_agreement.py` to get agreement score between two judges
+  ```
+  DATASET_PATH="datasets/MQuAKE-CF-3k-v2-clke.json"
+  JUDGE_ID_A="deepseek-v4-pro"
+  JUDGE_ID_B="kimi-k2.5"
+  LANGUAGES="de fr ja zh"
+  CASE_ID="1 1"
+  python analysis/llm_translate_agreement.py \
+    --dataset-path $DATASET_PATH \
+    --judge-a $JUDGE_ID_A \
+    --judge-b $JUDGE_ID_B \
     --case-id ${=CASE_ID}
   ```
 
