@@ -498,6 +498,14 @@ python analysis/human_annotate/metrics.py \
   --results-path $RESULTS_PATH
 ```
 
+## Compute metrics separately
+
+```bash
+EXPERIMENT_ROOT=output/CohereLabs/aya-expanse-8b/MQuAKE-CF-3k-v2-clke/sequential0_s1000_b32/Revised_AlphaEdit_20260726_093849
+python output_analysis/metrics_question_cloze.py \
+  --experiment-root $EXPERIMENT_ROOT
+```
+
 ### Covariance
 
 `ROME`, `R-ROME`, `MEMIT`, `IFMET`, `AlphaEdit`, `AlphaEdit_Circuit`, `Revised_AlphaEdit` needs a pre-computed covariance
